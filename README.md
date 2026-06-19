@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.png" alt="minipit" width="120" />
+<img src="logo.png" alt="minipit" width="200" />
 
 # minipit
 
