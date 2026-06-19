@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>minipit — Your AI Sandboxes, Beautifully Managed</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=Figtree:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --sand-0:      #FEFCF6;
+      --sand-1:      #FFF8EC;
+      --sand-2:      #F5E5BF;
+      --sand-3:      #E6CF9A;
+      --ocean-deep:  #0D2B3E;
+      --ocean-mid:   #1B5E7B;
+      --ocean-bright:#2E9EC5;
+      --ocean-sky:   #A8D8EA;
+      --coral:       #E8784A;
+      --coral-light: #F4A07A;
+      --coral-pale:  #FFF0E8;
+      --navy:        #0A1F2E;
+      --text-dark:   #1A2B3C;
+      --text-mid:    #3D5A6E;
+      --text-light:  #7A9BAD;
+      --white:       #FFFFFF;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Figtree', sans-serif;
+      background: var(--sand-0);
+      color: var(--text-dark);
+      overflow-x: hidden;
+    }
+
+    /* ─── NAV ─── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      padding: 18px 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(
+        135deg,
+        rgba(255, 251, 242, 0.78) 0%,
+        rgba(254, 248, 236, 0.68) 50%,
+        rgba(255, 251, 242, 0.78) 100%
+      );
+      backdrop-filter: blur(24px) saturate(180%) brightness(1.04);
+      -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.04);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.55);
+      box-shadow:
+        0 1px 0 rgba(232, 213, 160, 0.3),
+        0 4px 24px rgba(13, 43, 62, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+    nav.scrolled {
+      background: linear-gradient(
+        135deg,
+        rgba(255, 251, 242, 0.85) 0%,
+        rgba(254, 248, 236, 0.75) 50%,
+        rgba(255, 251, 242, 0.85) 100%
+      );
+      box-shadow:
+        0 1px 0 rgba(232, 213, 160, 0.4),
+        0 8px 32px rgba(13, 43, 62, 0.09),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 11px;
+      text-decoration: none;
+    }
+    .nav-logo img { width: 34px; height: 34px; object-fit: contain; }
+    .nav-logo-text {
+      font-family: 'Fraunces', serif;
+      font-size: 21px; font-weight: 600;
+      color: var(--text-dark); letter-spacing: -0.3px;
+    }
+    .nav-links {
+      display: flex; align-items: center;
+      gap: 34px; list-style: none;
+    }
+    .nav-links a {
+      text-decoration: none;
+      color: var(--text-mid);
+      font-size: 14px; font-weight: 500;
+      letter-spacing: 0.01em;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text-dark); }
+    .nav-cta {
+      background: var(--coral) !important;
+      color: white !important;
+      padding: 9px 20px;
+      border-radius: 100px;
+      font-weight: 600 !important;
+      box-shadow: 0 2px 12px rgba(232,120,74,0.3);
+      transition: background 0.2s, transform 0.2s, box-shadow 0.2s !important;
+    }
+    .nav-cta:hover {
+      background: #d4663a !important;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(232,120,74,0.4) !important;
+    }
+
+    /* ─── HERO ─── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 130px 24px 90px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-bg {
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 40% at 18% 90%, rgba(232,120,74,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 35% at 85% 80%, rgba(46,158,197,0.05) 0%, transparent 60%);
+    }
+    /* subtle grain */
+    .hero-bg::after {
+      content: '';
+      position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      opacity: 0.5; pointer-events: none;
+    }
+
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--coral-pale);
+      border: 1px solid rgba(232,120,74,0.22);
+      color: var(--coral);
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 6px 16px; border-radius: 100px;
+      margin-bottom: 40px;
+      opacity: 0;
+      animation: fadeUp 0.6s ease forwards 0.15s;
+      position: relative;
+    }
+
+    .hero-logo {
+      width: 420px; height: 420px;
+      object-fit: contain;
+      margin-bottom: 36px;
+      opacity: 1;
+      filter: drop-shadow(0 24px 48px rgba(13,43,62,0.14));
+      position: relative;
+    }
+    .hero-logo.floating {
+      animation: floatLoop 5s ease-in-out infinite;
+    }
+
+    .hero-title {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(50px, 8vw, 92px);
+      font-weight: 700;
+      line-height: 1.01;
+      letter-spacing: -0.035em;
+      color: var(--text-dark);
+      margin-bottom: 26px;
+      max-width: 880px;
+      opacity: 0;
+      animation: fadeUp 0.8s ease forwards 0.5s;
+      position: relative;
+    }
+    .hero-title em { font-style: italic; color: var(--ocean-mid); }
+
+    .hero-sub {
+      font-size: 18px; font-weight: 400;
+      color: var(--text-mid);
+      max-width: 520px; line-height: 1.7;
+      margin-bottom: 48px;
+      opacity: 0;
+      animation: fadeUp 0.8s ease forwards 0.65s;
+      position: relative;
+    }
+
+    .hero-actions {
+      display: flex; gap: 14px; align-items: center;
+      opacity: 0;
+      animation: fadeUp 0.8s ease forwards 0.8s;
+      position: relative;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--coral); color: white;
+      font-family: 'Figtree', sans-serif;
+      font-size: 15px; font-weight: 600;
+      padding: 14px 30px; border-radius: 100px;
+      text-decoration: none;
+      box-shadow: 0 4px 22px rgba(232,120,74,0.32);
+      transition: all 0.25s;
+    }
+    .btn-primary:hover {
+      background: #d4663a;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 32px rgba(232,120,74,0.42);
+    }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      color: var(--text-mid);
+      font-family: 'Figtree', sans-serif;
+      font-size: 15px; font-weight: 500;
+      padding: 14px 24px; border-radius: 100px;
+      text-decoration: none;
+      border: 1.5px solid rgba(0,0,0,0.1);
+      transition: all 0.25s;
+    }
+    .btn-secondary:hover {
+      border-color: var(--ocean-bright);
+      color: var(--ocean-mid);
+      transform: translateY(-2px);
+    }
+
+    .hero-trust {
+      margin-top: 60px;
+      display: flex; align-items: center; gap: 8px;
+      opacity: 0;
+      animation: fadeUp 0.8s ease forwards 0.95s;
+      position: relative;
+    }
+    .hero-trust-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12.5px; color: var(--text-light);
+    }
+    .hero-trust-item b { color: var(--ocean-bright); font-weight: 600; }
+    .hero-trust-sep {
+      width: 3px; height: 3px; border-radius: 50%;
+      background: var(--sand-3); margin: 0 4px;
+    }
+
+    /* ─── WAVE ─── */
+    .wave { width: 100%; overflow: hidden; line-height: 0; margin-top: -2px; }
+    .wave svg { display: block; width: 100%; }
+
+    /* ─── FEATURES ─── */
+    .features {
+      background: var(--sand-1);
+      padding: 100px 52px;
+    }
+    .section-eyebrow {
+      text-align: center;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--ocean-bright); margin-bottom: 14px;
+    }
+    .section-title {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(34px, 5vw, 52px);
+      font-weight: 600; text-align: center;
+      line-height: 1.12; letter-spacing: -0.025em;
+      color: var(--text-dark); margin-bottom: 14px;
+    }
+    .section-sub {
+      text-align: center; font-size: 16.5px;
+      color: var(--text-mid); max-width: 500px;
+      margin: 0 auto 72px; line-height: 1.65;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 22px; max-width: 1080px; margin: 0 auto;
+    }
+    .feature-card {
+      background: var(--white);
+      border-radius: 22px;
+      padding: 36px 30px;
+      border: 1px solid rgba(0,0,0,0.05);
+      opacity: 0; transform: translateY(32px);
+      transition: opacity 0.6s ease, transform 0.6s ease, box-shadow 0.28s;
+    }
+    .feature-card.visible { opacity: 1; transform: translateY(0); }
+    .feature-card:hover {
+      transform: translateY(-6px) !important;
+      box-shadow: 0 24px 64px rgba(13,43,62,0.09);
+    }
+    .feat-icon {
+      width: 52px; height: 52px; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; margin-bottom: 22px; flex-shrink: 0;
+    }
+    .feat-icon.a { background: var(--sand-2); }
+    .feat-icon.b { background: rgba(46,158,197,0.1); }
+    .feat-icon.c { background: rgba(232,120,74,0.1); }
+    .feat-title {
+      font-family: 'Fraunces', serif;
+      font-size: 19px; font-weight: 600;
+      color: var(--text-dark); margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }
+    .feat-desc { font-size: 13.5px; line-height: 1.68; color: var(--text-mid); }
+
+    /* ─── HOW IT WORKS ─── */
+    .how {
+      background: var(--white);
+      padding: 100px 52px;
+    }
+    .steps {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 48px; max-width: 1080px; margin: 0 auto;
+      position: relative;
+    }
+    .steps::before {
+      content: '';
+      position: absolute;
+      top: 27px;
+      left: calc(12.5% + 20px);
+      right: calc(12.5% + 20px);
+      height: 1px;
+      background: linear-gradient(90deg,
+        var(--sand-2), var(--ocean-sky) 50%, var(--sand-2));
+    }
+    .step {
+      display: flex; flex-direction: column;
+      align-items: center; text-align: center;
+      opacity: 0; transform: translateY(22px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    .step.visible { opacity: 1; transform: translateY(0); }
+    .step-num {
+      width: 54px; height: 54px; border-radius: 50%;
+      background: var(--ocean-deep); color: white;
+      font-family: 'Fraunces', serif;
+      font-size: 20px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 24px; position: relative; z-index: 1;
+      flex-shrink: 0;
+      box-shadow: 0 4px 16px rgba(13,43,62,0.2);
+    }
+    .step-title {
+      font-family: 'Fraunces', serif;
+      font-size: 17px; font-weight: 600;
+      color: var(--text-dark); margin-bottom: 9px;
+    }
+    .step-desc { font-size: 13px; color: var(--text-mid); line-height: 1.62; }
+
+    /* ─── MOCKUP ─── */
+    .mockup-section {
+      background: var(--ocean-deep);
+      padding: 100px 52px;
+      position: relative; overflow: hidden;
+    }
+    .mockup-section::before {
+      content: '';
+      position: absolute; top: -220px; left: 50%;
+      transform: translateX(-50%);
+      width: 900px; height: 900px;
+      background: radial-gradient(ellipse, rgba(46,158,197,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .mockup-section .section-eyebrow { color: var(--ocean-sky); }
+    .mockup-section .section-title { color: var(--white); }
+    .mockup-section .section-sub { color: rgba(255,255,255,0.48); }
+
+    .browser-window {
+      max-width: 1020px; margin: 0 auto;
+      border-radius: 16px; overflow: hidden;
+      box-shadow: 0 48px 140px rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.07);
+      opacity: 0; transform: translateY(44px);
+      transition: opacity 0.9s ease, transform 0.9s ease;
+    }
+    .browser-window.visible { opacity: 1; transform: translateY(0); }
+
+    .browser-bar {
+      background: #1C2E40;
+      padding: 13px 20px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .browser-dots { display: flex; gap: 7px; }
+    .browser-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .browser-dot:nth-child(1) { background: #FF5F57; }
+    .browser-dot:nth-child(2) { background: #FEBC2E; }
+    .browser-dot:nth-child(3) { background: #28C840; }
+    .browser-url {
+      flex: 1;
+      background: rgba(255,255,255,0.05);
+      border-radius: 6px; padding: 5px 14px;
+      font-size: 12px; color: rgba(255,255,255,0.32);
+    }
+
+    .browser-content {
+      display: grid; grid-template-columns: 230px 1fr;
+      height: 480px; background: #0F1D2B;
+    }
+
+    /* sidebar */
+    .ui-sidebar {
+      background: #0C1926;
+      border-right: 1px solid rgba(255,255,255,0.06);
+      padding: 18px 0;
+      display: flex; flex-direction: column; gap: 0;
+    }
+    .ui-sb-header {
+      padding: 2px 18px 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .ui-sb-header img { width: 22px; height: 22px; object-fit: contain; }
+    .ui-sb-name {
+      font-family: 'Fraunces', serif;
+      font-size: 15px; font-weight: 600;
+      color: rgba(255,255,255,0.88);
+    }
+    .ui-nav-section { padding: 0 10px; margin-bottom: 22px; }
+    .ui-nav-section-label {
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: rgba(255,255,255,0.2);
+      padding: 0 8px; margin-bottom: 5px;
+    }
+    .ui-nav-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 8px 10px; border-radius: 8px;
+      font-size: 12.5px; color: rgba(255,255,255,0.42);
+      margin-bottom: 2px; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .ui-nav-item.active {
+      background: rgba(46,158,197,0.14);
+      color: var(--ocean-sky);
+    }
+    .ui-nav-dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: currentColor; flex-shrink: 0;
+    }
+
+    /* main content */
+    .ui-main { padding: 22px; overflow: hidden; }
+    .ui-main-hdr {
+      display: flex; align-items: center;
+      justify-content: space-between; margin-bottom: 18px;
+    }
+    .ui-main-title {
+      font-family: 'Fraunces', serif;
+      font-size: 17px; font-weight: 600;
+      color: rgba(255,255,255,0.88);
+    }
+    .ui-new-btn {
+      background: var(--coral); color: white;
+      border: none; padding: 7px 14px;
+      border-radius: 8px; font-size: 12px;
+      font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; gap: 5px;
+      font-family: 'Figtree', sans-serif;
+    }
+
+    .ui-sandbox-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr);
+      gap: 10px; margin-bottom: 18px;
+    }
+    .ui-sandbox-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px; padding: 14px;
+    }
+    .ui-sc-top {
+      display: flex; align-items: center;
+      justify-content: space-between; margin-bottom: 10px;
+    }
+    .ui-sc-name {
+      font-size: 12.5px; font-weight: 600;
+      color: rgba(255,255,255,0.82);
+    }
+    .ui-status {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10.5px; font-weight: 600;
+    }
+    .ui-status-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .status-running { color: #4ADE80; }
+    .status-running .ui-status-dot { background: #4ADE80; animation: pulse 2s infinite; }
+    .status-idle { color: rgba(255,255,255,0.28); }
+    .status-idle .ui-status-dot { background: rgba(255,255,255,0.18); }
+    .ui-sc-meta {
+      display: flex; gap: 10px;
+      font-size: 11px; color: rgba(255,255,255,0.28);
+    }
+
+    .ui-logs {
+      background: rgba(0,0,0,0.28);
+      border-radius: 8px; padding: 12px 14px;
+      font-family: 'Courier New', monospace;
+      font-size: 11px; line-height: 1.85;
+      height: 132px; overflow: hidden;
+    }
+    .log-row { display: flex; gap: 12px; }
+    .log-t { color: rgba(168,216,234,0.38); flex-shrink: 0; }
+    .log-m { }
+    .log-m.green { color: #4ADE80; }
+    .log-m.blue  { color: var(--ocean-sky); }
+    .log-m.dim   { color: rgba(255,255,255,0.4); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    /* ─── STATS ─── */
+    .stats-bar {
+      background: var(--sand-2);
+      padding: 52px;
+      display: flex; justify-content: center;
+      gap: 80px; flex-wrap: wrap;
+    }
+    .stat-item { text-align: center; }
+    .stat-num {
+      font-family: 'Fraunces', serif;
+      font-size: 44px; font-weight: 700;
+      color: var(--ocean-deep);
+      letter-spacing: -0.03em; line-height: 1;
+      margin-bottom: 7px;
+    }
+    .stat-label { font-size: 13px; color: var(--text-mid); font-weight: 500; }
+
+    /* ─── CTA ─── */
+    .cta-section {
+      background: linear-gradient(155deg, var(--ocean-mid) 0%, var(--ocean-deep) 100%);
+      padding: 130px 52px;
+      text-align: center;
+      position: relative; overflow: hidden;
+    }
+    .cta-section::before {
+      content: '';
+      position: absolute; bottom: -80px; left: 50%;
+      transform: translateX(-50%);
+      width: 700px; height: 350px;
+      background: radial-gradient(ellipse, rgba(232,120,74,0.14) 0%, transparent 70%);
+    }
+    .cta-section::after {
+      content: '';
+      position: absolute; top: -100px; right: -100px;
+      width: 400px; height: 400px;
+      background: radial-gradient(ellipse, rgba(46,158,197,0.1) 0%, transparent 70%);
+    }
+    .cta-title {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(40px, 6vw, 66px);
+      font-weight: 600; color: var(--white);
+      line-height: 1.08; letter-spacing: -0.032em;
+      margin-bottom: 20px; position: relative; z-index: 1;
+    }
+    .cta-title em { font-style: italic; color: var(--ocean-sky); }
+    .cta-sub {
+      font-size: 17px; color: rgba(255,255,255,0.5);
+      margin-bottom: 52px; max-width: 440px;
+      margin-left: auto; margin-right: auto;
+      line-height: 1.65; position: relative; z-index: 1;
+    }
+    .cta-actions {
+      display: flex; gap: 14px; justify-content: center;
+      position: relative; z-index: 1;
+    }
+    .btn-white {
+      background: white; color: var(--ocean-deep);
+      font-family: 'Figtree', sans-serif;
+      font-size: 15px; font-weight: 700;
+      padding: 15px 34px; border-radius: 100px;
+      text-decoration: none;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.22);
+      transition: all 0.25s;
+    }
+    .btn-white:hover { transform: translateY(-2px); box-shadow: 0 10px 36px rgba(0,0,0,0.3); }
+    .btn-ghost-w {
+      background: rgba(255,255,255,0.09);
+      color: rgba(255,255,255,0.75);
+      font-family: 'Figtree', sans-serif;
+      font-size: 15px; font-weight: 500;
+      padding: 15px 28px; border-radius: 100px;
+      text-decoration: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      transition: all 0.25s;
+    }
+    .btn-ghost-w:hover { background: rgba(255,255,255,0.16); transform: translateY(-2px); }
+
+    /* ─── FOOTER ─── */
+    footer {
+      background: var(--navy);
+      padding: 44px 52px;
+      display: flex; align-items: center;
+      justify-content: space-between; flex-wrap: wrap; gap: 22px;
+    }
+    .footer-logo {
+      display: flex; align-items: center; gap: 10px; text-decoration: none;
+    }
+    .footer-logo img { width: 26px; height: 26px; object-fit: contain; opacity: 0.75; }
+    .footer-logo-text {
+      font-family: 'Fraunces', serif;
+      font-size: 18px; font-weight: 600;
+      color: rgba(255,255,255,0.65);
+    }
+    .footer-links { display: flex; gap: 26px; list-style: none; }
+    .footer-links a {
+      color: rgba(255,255,255,0.3);
+      text-decoration: none; font-size: 13px;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: rgba(255,255,255,0.65); }
+    .footer-copy { font-size: 12px; color: rgba(255,255,255,0.18); }
+
+    /* ─── ANIMATIONS ─── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(22px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes logoReveal {
+      from { opacity: 0; transform: translateY(14px) scale(0.9); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes floatLoop {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-14px); }
+    }
+
+    /* ─── RESPONSIVE ─── */
+    @media (max-width: 960px) {
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .steps { grid-template-columns: repeat(2, 1fr); }
+      .steps::before { display: none; }
+      nav { padding: 16px 24px; }
+      .nav-links { display: none; }
+      .stats-bar { gap: 44px; }
+    }
+    @media (max-width: 580px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; }
+      .hero-actions { flex-direction: column; width: 100%; }
+      .btn-primary, .btn-secondary { justify-content: center; }
+      footer { flex-direction: column; text-align: center; }
+      .footer-links { flex-wrap: wrap; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav id="nav">
+  <a href="#" class="nav-logo">
+    <img src="logo.png" alt="minipit">
+    <span class="nav-logo-text">minipit</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#how">How it works</a></li>
+    <li><a href="#demo">Preview</a></li>
+    <li><a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener">sbx docs</a></li>
+    <li><a href="#cta" class="nav-cta">Download</a></li>
+  </ul>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="hero-bg"></div>
+
+  <div class="hero-eyebrow">Built on Docker Sandboxes</div>
+
+  <img id="heroLogo" src="logo.png" alt="minipit" class="hero-logo">
+
+  <h1 class="hero-title">
+    Your AI sandboxes,<br><em>beautifully</em> managed.
+  </h1>
+
+  <p class="hero-sub">
+    minipit is a clean, visual interface for Docker Sandboxes — spin up isolated microVM environments, launch AI agents, and watch them work. No terminal required.
+  </p>
+
+  <div class="hero-actions">
+    <a href="#cta" class="btn-primary">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M7.5 1v9m0 0L4.5 7m3 3 3-3M1.5 13h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Download for Mac
+    </a>
+    <a href="#demo" class="btn-secondary">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><circle cx="7.5" cy="7.5" r="5.75" stroke="currentColor" stroke-width="1.5"/><path d="M6 5l4 2.5L6 10V5z" fill="currentColor"/></svg>
+      See it in action
+    </a>
+  </div>
+
+  <div class="hero-trust">
+    <div class="hero-trust-item"><b>✦</b>&nbsp;microVM isolation</div>
+    <div class="hero-trust-sep"></div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;No CLI needed</div>
+    <div class="hero-trust-sep"></div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;Claude-ready</div>
+    <div class="hero-trust-sep"></div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;macOS &amp; Windows</div>
+  </div>
+</section>
+
+<!-- wave to sand -->
+<div class="wave">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 72" preserveAspectRatio="none" style="height:56px">
+    <path d="M0,36 C240,72 480,0 720,36 C960,72 1200,0 1440,36 L1440,72 L0,72 Z" fill="#FFF8EC"/>
+  </svg>
+</div>
+
+<!-- ── FEATURES ── -->
+<section class="features" id="features">
+  <div class="section-eyebrow">Everything you need</div>
+  <h2 class="section-title">The GUI sbx deserved</h2>
+  <p class="section-sub">From your first sandbox to a fleet of AI agents — minipit makes every step feel effortless.</p>
+
+  <div class="features-grid" id="featGrid">
+    <div class="feature-card">
+      <div class="feat-icon a">🏖️</div>
+      <h3 class="feat-title">Visual Dashboard</h3>
+      <p class="feat-desc">See every sandbox at a glance. Status, resource usage, agent activity — one clean view, nothing buried in logs.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon b">⚡</div>
+      <h3 class="feat-title">One-Click Launch</h3>
+      <p class="feat-desc">Spin up an isolated microVM in seconds. Pick your environment, configure resources, and hit go.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon c">👁️</div>
+      <h3 class="feat-title">Live Agent Monitor</h3>
+      <p class="feat-desc">Watch your AI agents work in real time. Streaming logs, file events, and container activity — all surfaced clearly.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon b">📂</div>
+      <h3 class="feat-title">File Explorer</h3>
+      <p class="feat-desc">Browse the sandbox filesystem from your desktop. Open, inspect, and copy files without manual volume mounts.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon a">🏗️</div>
+      <h3 class="feat-title">Environment Builder</h3>
+      <p class="feat-desc">Craft reusable sandbox templates visually. Layer tools, packages, and config — then save for next time.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon c">🔒</div>
+      <h3 class="feat-title">Secure by Default</h3>
+      <p class="feat-desc">Every sandbox gets its own Docker daemon, filesystem, and network. Your host stays completely untouched.</p>
+    </div>
+  </div>
+</section>
+
+<!-- wave to white -->
+<div class="wave" style="background: #FFF8EC;">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 72" preserveAspectRatio="none" style="height:56px">
+    <path d="M0,36 C360,0 720,72 1080,36 C1260,18 1380,54 1440,36 L1440,72 L0,72 Z" fill="#FFFFFF"/>
+  </svg>
+</div>
+
+<!-- ── HOW IT WORKS ── -->
+<section class="how" id="how">
+  <div class="section-eyebrow">Simple as sand</div>
+  <h2 class="section-title">Up and running in minutes</h2>
+  <p class="section-sub">minipit sits on top of your existing sbx setup. If you've used Docker Sandboxes, you're already halfway there.</p>
+
+  <div class="steps" id="stepsGrid">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h3 class="step-title">Install minipit</h3>
+      <p class="step-desc">Download the app, drop it in Applications. No Homebrew, no npm install, no setup wizard.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h3 class="step-title">Connect to sbx</h3>
+      <p class="step-desc">Sign in with your Docker account. minipit picks up your sbx credentials automatically.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h3 class="step-title">Create a sandbox</h3>
+      <p class="step-desc">Pick a base image, tweak resources if you like, and launch. Your isolated microVM is ready in seconds.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <h3 class="step-title">Run your agents</h3>
+      <p class="step-desc">Launch Claude or any AI agent into the sandbox. Watch it build, explore, and ship from the dashboard.</p>
+    </div>
+  </div>
+</section>
+
+<!-- wave to ocean -->
+<div class="wave">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 72" preserveAspectRatio="none" style="height:56px">
+    <path d="M0,0 C480,72 960,0 1440,56 L1440,72 L0,72 Z" fill="#0D2B3E"/>
+  </svg>
+</div>
+
+<!-- ── MOCKUP ── -->
+<section class="mockup-section" id="demo">
+  <div class="section-eyebrow">Preview</div>
+  <h2 class="section-title">A workspace that feels like home</h2>
+  <p class="section-sub" style="margin-bottom: 60px;">Designed for clarity. Built for the way AI engineers actually work.</p>
+
+  <div class="browser-window" id="browserWin">
+    <div class="browser-bar">
+      <div class="browser-dots">
+        <div class="browser-dot"></div>
+        <div class="browser-dot"></div>
+        <div class="browser-dot"></div>
+      </div>
+      <div class="browser-url">minipit — Sandboxes</div>
+    </div>
+    <div class="browser-content">
+      <!-- Sidebar -->
+      <div class="ui-sidebar">
+        <div class="ui-sb-header">
+          <img src="logo.png" alt="">
+          <span class="ui-sb-name">minipit</span>
+        </div>
+        <div class="ui-nav-section">
+          <div class="ui-nav-section-label">Workspaces</div>
+          <div class="ui-nav-item active">
+            <div class="ui-nav-dot"></div>All Sandboxes
+          </div>
+          <div class="ui-nav-item">
+            <div class="ui-nav-dot"></div>Running
+          </div>
+          <div class="ui-nav-item">
+            <div class="ui-nav-dot"></div>Stopped
+          </div>
+        </div>
+        <div class="ui-nav-section">
+          <div class="ui-nav-section-label">Templates</div>
+          <div class="ui-nav-item">
+            <div class="ui-nav-dot"></div>Node + Claude
+          </div>
+          <div class="ui-nav-item">
+            <div class="ui-nav-dot"></div>Python ML
+          </div>
+          <div class="ui-nav-item">
+            <div class="ui-nav-dot"></div>Custom&hellip;
+          </div>
+        </div>
+      </div>
+
+      <!-- Main -->
+      <div class="ui-main">
+        <div class="ui-main-hdr">
+          <div class="ui-main-title">Sandboxes</div>
+          <button class="ui-new-btn">+ New Sandbox</button>
+        </div>
+        <div class="ui-sandbox-grid">
+          <div class="ui-sandbox-card">
+            <div class="ui-sc-top">
+              <div class="ui-sc-name">agent-run-042</div>
+              <div class="ui-status status-running">
+                <div class="ui-status-dot"></div>Running
+              </div>
+            </div>
+            <div class="ui-sc-meta">
+              <span>🐳 Docker 24</span>
+              <span>🤖 Claude Sonnet</span>
+              <span>⏱ 4m 12s</span>
+            </div>
+          </div>
+          <div class="ui-sandbox-card">
+            <div class="ui-sc-top">
+              <div class="ui-sc-name">python-scraper</div>
+              <div class="ui-status status-idle">
+                <div class="ui-status-dot"></div>Idle
+              </div>
+            </div>
+            <div class="ui-sc-meta">
+              <span>🐍 Python 3.12</span>
+              <span>🤖 Claude Opus</span>
+              <span>⏱ 0m 00s</span>
+            </div>
+          </div>
+          <div class="ui-sandbox-card">
+            <div class="ui-sc-top">
+              <div class="ui-sc-name">web-builder-01</div>
+              <div class="ui-status status-running">
+                <div class="ui-status-dot"></div>Running
+              </div>
+            </div>
+            <div class="ui-sc-meta">
+              <span>⚡ Node 20</span>
+              <span>🤖 Claude Sonnet</span>
+              <span>⏱ 11m 38s</span>
+            </div>
+          </div>
+          <div class="ui-sandbox-card">
+            <div class="ui-sc-top">
+              <div class="ui-sc-name">data-pipeline-v2</div>
+              <div class="ui-status status-idle">
+                <div class="ui-status-dot"></div>Idle
+              </div>
+            </div>
+            <div class="ui-sc-meta">
+              <span>🐳 Docker 24</span>
+              <span>🤖 Claude Haiku</span>
+              <span>⏱ 0m 00s</span>
+            </div>
+          </div>
+        </div>
+        <div class="ui-logs" id="uiLogs">
+          <div class="log-row"><span class="log-t">14:32:01</span><span class="log-m green">✓ Sandbox agent-run-042 started</span></div>
+          <div class="log-row"><span class="log-t">14:32:03</span><span class="log-m blue">→ Claude: Reading project structure...</span></div>
+          <div class="log-row"><span class="log-t">14:32:07</span><span class="log-m dim">&nbsp; Installing dependencies: npm install</span></div>
+          <div class="log-row"><span class="log-t">14:32:19</span><span class="log-m green">✓ Dependencies installed (47 packages)</span></div>
+          <div class="log-row"><span class="log-t">14:32:20</span><span class="log-m blue">→ Claude: Running tests to understand failures...</span></div>
+          <div class="log-row"><span class="log-t">14:32:31</span><span class="log-m dim">&nbsp; 3 tests failed — analyzing root cause</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── STATS ── -->
+<div class="stats-bar">
+  <div class="stat-item">
+    <div class="stat-num">&lt;&nbsp;2s</div>
+    <div class="stat-label">Sandbox spin-up</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-num">100%</div>
+    <div class="stat-label">Host isolation</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-num">0</div>
+    <div class="stat-label">CLI commands needed</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-num">∞</div>
+    <div class="stat-label">Sandboxes, one dashboard</div>
+  </div>
+</div>
+
+<!-- ── CTA ── -->
+<section class="cta-section" id="cta">
+  <h2 class="cta-title">Ready to <em>dig in</em>?</h2>
+  <p class="cta-sub">minipit is free to try. Bring your sbx account and start building in minutes.</p>
+  <div class="cta-actions">
+    <a href="#" class="btn-white">Download minipit</a>
+    <a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener" class="btn-ghost-w">Read sbx docs →</a>
+  </div>
+</section>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <a href="#" class="footer-logo">
+    <img src="logo.png" alt="">
+    <span class="footer-logo-text">minipit</span>
+  </a>
+  <ul class="footer-links">
+    <li><a href="#">Docs</a></li>
+    <li><a href="#">GitHub</a></li>
+    <li><a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener">Docker Sandboxes</a></li>
+    <li><a href="#">Privacy</a></li>
+  </ul>
+  <span class="footer-copy">© 2025 minipit — Built on Docker Sandboxes</span>
+</footer>
+
+<script>
+  // Nav scroll behaviour
+  const nav = document.getElementById('nav');
+  addEventListener('scroll', () => {
+    nav.classList.toggle('scrolled', scrollY > 24);
+  }, { passive: true });
+
+  // No logo animation
+  const logo = document.getElementById('heroLogo');
+  logo.style.animation = 'none';
+  logo.style.opacity = '1';
+
+  // Intersection Observer — feature cards
+  const cardObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const cards = entry.target.querySelectorAll('.feature-card');
+      cards.forEach((c, i) => {
+        setTimeout(() => c.classList.add('visible'), i * 90);
+      });
+      cardObserver.unobserve(entry.target);
+    });
+  }, { threshold: 0.12 });
+
+  const featGrid = document.getElementById('featGrid');
+  if (featGrid) cardObserver.observe(featGrid);
+
+  // Step observer
+  const stepObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const steps = entry.target.querySelectorAll('.step');
+      steps.forEach((s, i) => {
+        setTimeout(() => s.classList.add('visible'), i * 110);
+      });
+      stepObserver.unobserve(entry.target);
+    });
+  }, { threshold: 0.15 });
+
+  const stepsGrid = document.getElementById('stepsGrid');
+  if (stepsGrid) stepObserver.observe(stepsGrid);
+
+  // Browser mockup
+  const browserObs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        browserObs.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+
+  const bw = document.getElementById('browserWin');
+  if (bw) browserObs.observe(bw);
+
+  // Animate log lines
+  const logRows = document.querySelectorAll('.log-row');
+  logRows.forEach(r => { r.style.opacity = '0'; r.style.transition = 'opacity 0.35s ease'; });
+
+  const logsObs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      logRows.forEach((r, i) => {
+        setTimeout(() => { r.style.opacity = '1'; }, i * 260);
+      });
+      logsObs.unobserve(entry.target);
+    });
+  }, { threshold: 0.5 });
+
+  const logsEl = document.getElementById('uiLogs');
+  if (logsEl) logsObs.observe(logsEl);
+
+  // Smooth scroll for all hash links
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      const id = a.getAttribute('href');
+      if (id === '#') return;
+      const target = document.querySelector(id);
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+</script>
+</body>
+</html>

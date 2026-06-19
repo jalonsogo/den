@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>minipit</title>
+  <style>
+    /* shadcn / zinc palette */
+    :root {
+      --bg:        #ffffff;
+      --bg-muted:  #fafafa;
+      --bg-subtle: #f4f4f5;
+      --border:    #e4e4e7;
+      --border-hi: #d4d4d8;
+      --t1:        #09090b;
+      --t2:        #52525b;
+      --t3:        #a1a1aa;
+      --t4:        #d4d4d8;
+      --primary:   #18181b;
+      --prim-fg:   #ffffff;
+      --destruct:  #ef4444;
+      --green:     #22c55e;
+      --green-dim: rgba(34,197,94,0.12);
+      --blue:      #3b82f6;
+      --yellow:    #f59e0b;
+      --radius:    6px;
+      /* sidebar – light */
+      --sb:        #f5f5f5;
+      --sb-border: #e4e4e7;
+      --sb-fg:     #18181b;
+      --sb-muted:  #71717a;
+      --sb-hover:  rgba(0,0,0,0.05);
+      --sb-active: rgba(0,0,0,0.07);
+      --sb-active-fg: #09090b;
+    }
+
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      font-family: -apple-system, 'Helvetica Neue', sans-serif;
+      font-size: 13px;
+      background: #e4e4e7;
+      height: 100vh; width: 100vw;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── macOS menu bar ── */
+    .menubar {
+      height: 27px; flex-shrink: 0;
+      background: rgba(30,30,30,0.88);
+      backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid rgba(0,0,0,0.45);
+      display: flex; align-items: center; padding: 0 10px;
+      color: rgba(255,255,255,0.92); font-size: 13px;
+      position: relative; z-index: 200;
+    }
+
+    .mb-left { display: flex; }
+    .mb-item { padding: 0 8px; line-height: 27px; border-radius: 4px; cursor: pointer; }
+    .mb-item:hover { background: rgba(255,255,255,0.1); }
+    .mb-item.bold { font-weight: 600; }
+    .mb-right { margin-left: auto; display: flex; align-items: center; }
+    .mb-clock { font-size: 12px; padding: 0 8px; }
+    .tray-btn {
+      width: 27px; height: 27px; display: flex;
+      align-items: center; justify-content: center;
+      border-radius: 4px; cursor: pointer; position: relative;
+      transition: background 0.1s;
+    }
+    .tray-btn:hover { background: rgba(255,255,255,0.1); }
+    .tray-btn.open  { background: rgba(255,255,255,0.15); }
+    .tray-btn img   { width: 15px; height: 15px; object-fit: contain; }
+    .tray-dot {
+      position: absolute; top: 4px; right: 3px;
+      width: 6px; height: 6px; background: var(--green);
+      border-radius: 50%; border: 1.5px solid rgba(28,28,30,0.88);
+    }
+
+    /* ── Desktop ── */
+    .desktop { flex: 1; position: relative; overflow: hidden; }
+
+    /* ── Popover (stays dark – macOS native) ── */
+    .popover {
+      position: absolute; top: 5px; right: 40px; width: 288px;
+      background: rgba(28,28,30,0.96);
+      backdrop-filter: blur(50px) saturate(200%);
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 0 0 0.5px rgba(0,0,0,0.5), 0 20px 50px rgba(0,0,0,0.7);
+      z-index: 500; overflow: hidden; color: rgba(255,255,255,0.88);
+      transform-origin: top right;
+      transition: transform 0.16s cubic-bezier(0.34,1.4,0.64,1), opacity 0.12s;
+    }
+    .popover.hidden { transform: scale(0.88) translateY(-6px); opacity: 0; pointer-events: none; }
+    .pop-hdr { padding: 12px 14px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; gap: 9px; }
+    .pop-hdr img { width: 22px; height: 22px; object-fit: contain; }
+    .pop-hdr-name { font-size: 13.5px; font-weight: 600; flex: 1; }
+    .pop-pill { font-size: 11px; font-weight: 600; color: var(--green); background: var(--green-dim); border: 1px solid rgba(34,197,94,0.2); padding: 2px 8px; border-radius: 100px; display: flex; align-items: center; gap: 5px; }
+    .pop-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pg 2s infinite; }
+    @keyframes pg { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5)} 50%{box-shadow:0 0 0 4px rgba(34,197,94,0)} }
+    .pop-list { padding: 4px 0; }
+    .pop-row { display: flex; align-items: center; gap: 9px; padding: 8px 14px; cursor: pointer; transition: background 0.1s; }
+    .pop-row:hover { background: rgba(255,255,255,0.05); }
+    .pop-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .pop-info { flex: 1; min-width: 0; }
+    .pop-name { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pop-sub { font-size: 11px; color: rgba(255,255,255,0.38); margin-top: 1px; }
+    .pop-time { font-size: 11px; color: var(--green); flex-shrink: 0; }
+    .pop-time.stopped { color: rgba(255,255,255,0.25); }
+    .pop-sep { height: 1px; background: rgba(255,255,255,0.07); margin: 3px 0; }
+    .pop-action { padding: 7px 12px; }
+    .pop-new-btn { width: 100%; padding: 7px; background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.88); border: none; border-radius: 7px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.15s; }
+    .pop-new-btn:hover { background: rgba(255,255,255,0.15); }
+    .pop-ftr { padding: 8px 14px 10px; display: flex; justify-content: space-between; }
+    .pop-open { font-size: 12.5px; font-weight: 500; color: rgba(255,255,255,0.6); background: none; border: none; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 5px; transition: color 0.1s; }
+    .pop-open:hover { color: rgba(255,255,255,0.9); }
+    .pop-quit { font-size: 12px; color: rgba(255,255,255,0.25); background: none; border: none; cursor: pointer; font-family: inherit; transition: color 0.1s; }
+    .pop-quit:hover { color: #f87171; }
+
+    /* ── Window ── */
+    .window {
+      position: absolute; top: 36px; left: 50%; transform: translateX(-50%);
+      width: 1160px; height: 716px; border-radius: 10px; overflow: hidden;
+      display: flex; flex-direction: column;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.5), 0 32px 64px rgba(0,0,0,0.5);
+      background: var(--bg);
+      transition: opacity 0.2s, transform 0.2s cubic-bezier(0.34,1.2,0.64,1);
+    }
+    .window.hidden { opacity: 0; transform: translateX(-50%) scale(0.97) translateY(10px); pointer-events: none; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      height: 52px; flex-shrink: 0;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center;
+      padding: 0 14px 0 80px; gap: 8px; position: relative;
+    }
+    .tl-row { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); display: flex; gap: 8px; }
+    .tl { width: 12px; height: 12px; border-radius: 50%; cursor: pointer; }
+    .tl.r { background: #ff5f57; } .tl.y { background: #febc2e; } .tl.g { background: #28c840; }
+    .tb-center {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      text-align: center; pointer-events: none;
+    }
+    .tb-title { font-size: 13px; font-weight: 600; color: var(--t1); letter-spacing: -0.01em; }
+    .tb-sub   { font-size: 11px; color: var(--t3); margin-top: 1px; }
+    .tb-search {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--bg-subtle); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 5px 9px; width: 196px;
+    }
+    .tb-search-ph { font-size: 12px; color: var(--t3); flex: 1; }
+    .tb-search-kbd { font-size: 10px; color: var(--t4); background: var(--bg-muted); border: 1px solid var(--border); padding: 0 4px; border-radius: 3px; }
+    .tb-btn { height: 28px; padding: 0 10px; border-radius: var(--radius); background: var(--primary); color: var(--prim-fg); border: none; font-family: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: opacity 0.15s; }
+    .tb-btn:hover { opacity: 0.85; }
+    .tb-icon-btn { width: 28px; height: 28px; border-radius: var(--radius); background: transparent; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--t3); transition: background 0.1s, color 0.1s; }
+    .tb-icon-btn:hover { background: var(--bg-subtle); color: var(--t1); }
+
+    /* ── Layout ── */
+    .body { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 216px; flex-shrink: 0;
+      background: var(--sb); border-right: 1px solid var(--sb-border);
+      display: flex; flex-direction: column;
+    }
+    .sb-logo { display: flex; align-items: center; gap: 9px; padding: 13px 14px 12px; border-bottom: 1px solid var(--sb-border); }
+    .sb-logo img { width: 20px; height: 20px; object-fit: contain; }
+    .sb-logo-name { font-size: 14px; font-weight: 600; color: var(--sb-fg); letter-spacing: -0.02em; }
+    .sb-section { padding: 12px 8px 0; }
+    .sb-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--sb-muted); padding: 0 8px 5px; display: block; }
+    .sb-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; min-width: 0; margin-bottom: 1px; transition: background 0.1s; }
+    .sb-item:hover { background: var(--sb-hover); }
+    .sb-item.active { background: var(--sb-active); }
+    .sb-item-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .sb-item-dot.r { background: var(--green); animation: pg 2s infinite; }
+    .sb-item-dot.s { background: #d4d4d8; }
+    .sb-item-body { flex: 1; min-width: 0; }
+    .sb-item-name { font-size: 13px; font-weight: 400; color: var(--sb-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+    .sb-item.active .sb-item-name { font-weight: 500; }
+    .sb-item-sub { font-size: 11px; color: var(--sb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; display: flex; align-items: center; gap: 4px; }
+    .sb-agent-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .sb-item-time { font-size: 10.5px; color: var(--sb-muted); flex-shrink: 0; }
+    .sb-new { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: var(--sb-muted); margin-top: 2px; transition: all 0.1s; }
+    .sb-new:hover { background: var(--sb-hover); color: var(--sb-fg); }
+    .sb-div { height: 1px; background: var(--sb-border); margin: 10px 8px; }
+    .sb-nav { padding: 0 8px; }
+    .sb-nav-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 400; color: var(--sb-muted); margin-bottom: 1px; transition: all 0.1s; }
+    .sb-nav-item:hover { background: var(--sb-hover); color: var(--sb-fg); }
+    .sb-nav-item.active { background: var(--sb-active); color: var(--sb-active-fg); }
+    .sb-foot { margin-top: auto; padding: 10px 14px; border-top: 1px solid var(--sb-border); display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--sb-muted); }
+    .sb-foot-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+    /* ── Content ── */
+    .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+
+    /* ── Detail view ── */
+    .detail { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .detail-header {
+      height: 45px; flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 16px; gap: 9px;
+    }
+    .d-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .d-dot.r { background: var(--green); animation: pg 2s infinite; }
+    .d-dot.s { background: var(--border-hi); }
+    .d-name { font-size: 13.5px; font-weight: 600; color: var(--t1); letter-spacing: -0.015em; }
+    .d-chip { font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 100px; border: 1px solid var(--border); color: var(--t2); background: var(--bg-subtle); }
+    .d-uptime { font-size: 12px; color: var(--t3); }
+    .d-actions { margin-left: auto; display: flex; gap: 6px; }
+
+    /* shadcn-style tab strip */
+    .tabs { border-bottom: 1px solid var(--border); display: flex; padding: 0 16px; flex-shrink: 0; }
+    .tab { padding: 10px 14px; font-size: 13px; font-weight: 400; color: var(--t2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.12s; display: flex; align-items: center; gap: 5px; }
+    .tab:hover { color: var(--t1); }
+    .tab.active { color: var(--t1); font-weight: 500; border-bottom-color: var(--t1); }
+
+    .tab-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+    .tab-panel.active { display: flex; }
+
+    /* ── Terminal ── */
+    .term { flex: 1; display: flex; flex-direction: column; background: #0a0a0a; }
+    .term-bar { height: 36px; background: #111; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; padding: 0 12px; gap: 8px; flex-shrink: 0; }
+    .term-seg { display: flex; gap: 1px; background: rgba(255,255,255,0.06); border-radius: 5px; padding: 2px; }
+    .term-seg-item { padding: 3px 10px; border-radius: 4px; font-size: 11.5px; font-weight: 500; color: rgba(255,255,255,0.35); cursor: pointer; transition: all 0.12s; }
+    .term-seg-item.active { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.88); }
+    .term-actions { margin-left: auto; display: flex; gap: 5px; }
+    .t-btn { padding: 4px 10px; border-radius: 5px; font-size: 11.5px; font-weight: 500; border: none; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 4px; transition: all 0.12s; }
+    .t-btn-ghost { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.45); }
+    .t-btn-ghost:hover { background: rgba(255,255,255,0.11); color: rgba(255,255,255,0.75); }
+    .t-btn-stop { background: rgba(239,68,68,0.12); color: rgba(239,68,68,0.8); }
+    .t-btn-stop:hover { background: rgba(239,68,68,0.2); }
+    .term-body { flex: 1; padding: 12px 16px; font-family: 'SF Mono','Fira Code','Menlo',monospace; font-size: 12.5px; line-height: 1.8; overflow-y: auto; color: rgba(255,255,255,0.78); }
+    .tr { display: flex; gap: 14px; }
+    .tt { color: rgba(255,255,255,0.2); flex-shrink: 0; user-select: none; }
+    .tg { color: #4ade80; } .tb { color: #60a5fa; }
+    .td { color: rgba(255,255,255,0.38); } .te { color: #f87171; }
+    .tp { color: rgba(96,165,250,0.5); }
+    .cur { display: inline-block; width: 7px; height: 13px; background: rgba(255,255,255,0.7); animation: blink 1.1s infinite; vertical-align: text-bottom; }
+    @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+
+    /* ── Info panel ── */
+    .info-panel { flex: 1; overflow-y: auto; padding: 20px; }
+    .info-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 20px; }
+    .info-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+    .ic-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--t3); margin-bottom: 8px; }
+    .ic-val { font-size: 20px; font-weight: 600; color: var(--t1); letter-spacing: -0.025em; line-height: 1.1; }
+    .ic-sub { font-size: 11.5px; color: var(--t3); margin-top: 5px; }
+    .info-block { margin-bottom: 18px; }
+    .info-block-title { font-size: 12.5px; font-weight: 600; color: var(--t1); margin-bottom: 8px; }
+    .info-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 5px; background: var(--bg); }
+    .ir-label { font-size: 13px; color: var(--t1); }
+    .ir-val { font-size: 12px; color: var(--t2); font-family: 'SF Mono','Menlo',monospace; }
+    .info-actions { display: flex; gap: 7px; padding-top: 16px; border-top: 1px solid var(--border); margin-top: 4px; }
+
+    /* ── Ports ── */
+    .ports-panel { flex: 1; overflow-y: auto; padding: 18px; }
+    .ports-notice { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 14px; font-size: 12.5px; color: var(--t2); background: var(--bg-subtle); }
+    .ports-tbl { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .ptbl-hdr { display: grid; grid-template-columns: 80px 100px 70px 1fr 100px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); }
+    .pth { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--t3); }
+    .ptbl-row { display: grid; grid-template-columns: 80px 100px 70px 1fr 100px; padding: 10px 14px; border-bottom: 1px solid var(--border); align-items: center; }
+    .ptbl-row:last-child { border-bottom: none; }
+    .ptbl-row:hover { background: var(--bg-subtle); }
+    .pval { font-size: 13px; font-weight: 600; color: var(--t1); font-family: 'SF Mono','Menlo',monospace; }
+    .pval2 { font-size: 13px; color: var(--t2); font-family: 'SF Mono','Menlo',monospace; }
+    .pproto { font-size: 12px; color: var(--t3); }
+    .p-status { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--green); }
+    .p-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+    /* ── File tree ── */
+    .files-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .files-bar { height: 36px; flex-shrink: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 10px; gap: 8px; background: var(--bg); }
+    .files-path { font-size: 12px; color: var(--t2); font-family: 'SF Mono','Menlo',monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .files-body { flex: 1; overflow-y: auto; background: var(--bg); }
+
+    .frow { display: flex; align-items: center; height: 22px; cursor: pointer; transition: background 0.08s; position: relative; padding-right: 8px; }
+    .frow:hover { background: var(--bg-subtle); }
+    .frow.sel { background: var(--bg-subtle); }
+    .frow-pad { flex-shrink: 0; }
+    .frow-chev { width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--t4); transition: transform 0.12s; }
+    .frow-chev.open { transform: rotate(90deg); }
+    .frow-chev.leaf { opacity: 0; pointer-events: none; }
+    .frow-icon { width: 16px; text-align: center; flex-shrink: 0; font-size: 11px; }
+    .fname { font-size: 12.5px; color: var(--t1); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 3px; letter-spacing: -0.01em; }
+    .fname.dir { color: var(--t1); }
+    .fbadge { font-size: 9.5px; font-weight: 600; padding: 1px 5px; border-radius: 3px; margin-left: 5px; flex-shrink: 0; }
+    .fbadge.m { background: rgba(234,179,8,0.12); color: #a16207; border: 1px solid rgba(234,179,8,0.2); }
+    .fbadge.n { background: rgba(34,197,94,0.1); color: #15803d; border: 1px solid rgba(34,197,94,0.2); }
+    .fsize { font-size: 10.5px; color: var(--t4); font-family: 'SF Mono','Menlo',monospace; flex-shrink: 0; min-width: 44px; text-align: right; }
+    .frow-act { display: none; position: absolute; right: 6px; gap: 3px; align-items: center; }
+    .frow:hover .frow-act { display: flex; }
+    .frow-act-btn { width: 18px; height: 18px; border: none; border-radius: 4px; background: var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--t2); transition: background 0.1s; }
+    .frow-act-btn:hover { background: var(--border-hi); }
+
+    /* ── Page views (blueprints, secrets, settings) ── */
+    .page { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .page.active { display: flex; }
+    .page-hdr { height: 45px; flex-shrink: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 12px; }
+    .page-title { font-size: 13.5px; font-weight: 600; color: var(--t1); letter-spacing: -0.015em; }
+    .page-body { flex: 1; overflow-y: auto; padding: 18px; }
+
+    /* ── Blueprints ── */
+    .bp-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+    .bp-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; cursor: pointer; transition: all 0.15s; background: var(--bg); }
+    .bp-card:hover { border-color: var(--border-hi); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .bp-card.new { border-style: dashed; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 142px; color: var(--t3); text-align: center; }
+    .bp-card.new:hover { border-color: var(--t1); color: var(--t1); background: var(--bg-subtle); }
+    .bp-hdr { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 10px; }
+    .bp-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; background: var(--bg-subtle); }
+    .bp-name { font-size: 13px; font-weight: 600; color: var(--t1); letter-spacing: -0.01em; margin-bottom: 3px; }
+    .bp-ws { font-size: 11px; color: var(--t2); font-family: 'SF Mono','Menlo',monospace; background: var(--bg-subtle); padding: 3px 7px; border-radius: 4px; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-flags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+    .bp-flag { font-size: 10.5px; font-weight: 500; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--t2); background: var(--bg-muted); }
+    .bp-actions { display: flex; gap: 6px; padding-top: 9px; border-top: 1px solid var(--border); }
+
+    /* ── Secrets ── */
+    .sec-tbl { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .sec-hdr { display: grid; grid-template-columns: 1fr 80px 110px 80px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); }
+    .sec-th { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--t3); }
+    .sec-row { display: grid; grid-template-columns: 1fr 80px 110px 80px; padding: 10px 14px; border-bottom: 1px solid var(--border); align-items: center; transition: background 0.1s; }
+    .sec-row:last-child { border-bottom: none; }
+    .sec-row:hover { background: var(--bg-subtle); }
+    .sec-svc { display: flex; align-items: center; gap: 9px; }
+    .sec-ico { width: 24px; height: 24px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 12px; background: var(--bg-subtle); }
+    .sec-name { font-size: 13px; font-weight: 500; color: var(--t1); }
+    .sec-scope { font-size: 12px; color: var(--t2); }
+    .sec-st { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; }
+    .sec-sd { width: 6px; height: 6px; border-radius: 50%; }
+    .sec-st.ok { color: #16a34a; } .sec-st.ok .sec-sd { background: var(--green); }
+    .sec-st.no { color: var(--t3); } .sec-st.no .sec-sd { background: var(--border-hi); }
+
+    /* ── Settings ── */
+    .ss { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+    .ss-hdr { padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); font-size: 12px; font-weight: 600; color: var(--t2); }
+    .ss-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--border); gap: 16px; }
+    .ss-row:last-child { border-bottom: none; }
+    .ss-lbl { font-size: 13px; font-weight: 500; color: var(--t1); }
+    .ss-sub { font-size: 11.5px; color: var(--t3); margin-top: 2px; }
+    .s-input { font-family: 'SF Mono','Menlo',monospace; font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 9px; color: var(--t1); outline: none; }
+    .s-input:focus { border-color: var(--t1); box-shadow: 0 0 0 2px rgba(0,0,0,0.06); }
+    .s-toggle { width: 36px; height: 20px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 100px; position: relative; cursor: pointer; transition: all 0.18s; flex-shrink: 0; }
+    .s-toggle.on { background: var(--primary); border-color: var(--primary); }
+    .s-toggle::after { content: ''; position: absolute; width: 14px; height: 14px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: left 0.18s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    .s-toggle.on::after { left: 18px; }
+
+    /* ── Buttons ── */
+    .btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: var(--radius); font-family: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; border: none; transition: all 0.12s; white-space: nowrap; }
+    .btn-default { background: var(--bg); color: var(--t1); border: 1px solid var(--border); }
+    .btn-default:hover { background: var(--bg-subtle); }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { opacity: 0.88; }
+    .btn-ghost { background: transparent; color: var(--t2); }
+    .btn-ghost:hover { background: var(--bg-subtle); color: var(--t1); }
+    .btn-destructive { background: transparent; color: var(--destruct); }
+    .btn-destructive:hover { background: rgba(239,68,68,0.06); }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+    /* ── Modal ── */
+    .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 300; backdrop-filter: blur(2px); }
+    .overlay.hidden { display: none; }
+    .modal { background: var(--bg); border-radius: 10px; width: 548px; max-height: 86%; display: flex; flex-direction: column; box-shadow: 0 0 0 1px var(--border), 0 20px 60px rgba(0,0,0,0.18); overflow: hidden; }
+    .m-hdr { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); text-align: center; }
+    .m-title { font-size: 15px; font-weight: 600; color: var(--t1); letter-spacing: -0.015em; }
+    .m-sub { font-size: 12px; color: var(--t3); margin-top: 3px; }
+    .m-steps {
+      display: flex; align-items: center;
+      padding: 12px 22px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-subtle);
+    }
+    .m-step { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+    .m-sep { flex: 1; height: 1px; background: var(--border); margin: 0 8px; }
+    .m-sep.done { background: var(--primary); }
+    .m-step-n {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: var(--bg); border: 1.5px solid var(--border-hi);
+      color: var(--t3); font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .m-step.cur .m-step-n  { background: var(--primary); border-color: var(--primary); color: white; }
+    .m-step.done .m-step-n { background: var(--bg); border-color: var(--primary); color: var(--primary); }
+    .m-step-lbl { font-size: 12.5px; font-weight: 500; color: var(--t3); }
+    .m-step.cur .m-step-lbl  { color: var(--t1); font-weight: 600; }
+    .m-step.done .m-step-lbl { color: var(--primary); }
+    .m-body { padding: 18px 20px; flex: 1; overflow-y: auto; }
+    .m-ftr { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--bg-subtle); }
+    .fg { margin-bottom: 14px; }
+    .flabel { display: block; font-size: 12.5px; font-weight: 500; color: var(--t1); margin-bottom: 5px; }
+    .finput { width: 100%; font-family: inherit; font-size: 13px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; color: var(--t1); outline: none; }
+    .finput:focus { border-color: var(--t1); }
+    .fhint { font-size: 11px; color: var(--t3); margin-top: 4px; }
+    .frow-2 { display: flex; gap: 7px; }
+    .frow-2 .finput { flex: 1; }
+    .fdiv { height: 1px; background: var(--border); margin: 14px 0; }
+    /* memory slider */
+    .mem-slider-wrap { display: flex; flex-direction: column; gap: 8px; }
+    .mem-slider-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--t3); padding: 0 1px; }
+    .mem-slider-value { font-size: 13px; font-weight: 600; color: var(--t1); text-align: right; }
+    .mem-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 4px; border-radius: 2px;
+      background: linear-gradient(to right, var(--primary) var(--pct,50%), var(--border) var(--pct,50%));
+      outline: none; cursor: pointer;
+    }
+    .mem-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: white; border: 1px solid var(--border-hi);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      cursor: pointer; transition: box-shadow 0.15s;
+    }
+    .mem-slider::-webkit-slider-thumb:hover { box-shadow: 0 1px 6px rgba(0,0,0,0.3); }
+    .mem-slider::-webkit-slider-thumb:active { box-shadow: 0 0 0 3px rgba(0,0,0,0.08); }
+
+    /* macOS menu bar dropdowns */
+    .mb-dropdown {
+      position: fixed; top: 27px;
+      background: rgba(40,40,40,0.96);
+      backdrop-filter: blur(30px) saturate(180%);
+      border-radius: 6px; overflow: hidden; z-index: 1000;
+      box-shadow: 0 0 0 0.5px rgba(255,255,255,0.1), 0 8px 28px rgba(0,0,0,0.7);
+      min-width: 200px; padding: 4px 0;
+      color: rgba(255,255,255,0.88); font-size: 13px;
+    }
+    .mb-dropdown.hidden { display: none; }
+    .mb-dd-item { padding: 5px 16px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 24px; white-space: nowrap; }
+    .mb-dd-item:hover { background: rgba(255,255,255,0.1); }
+    .mb-dd-item.disabled { color: rgba(255,255,255,0.3); cursor: default; }
+    .mb-dd-item.disabled:hover { background: none; }
+    .mb-dd-kbd { font-size: 12px; color: rgba(255,255,255,0.35); }
+    .mb-dd-sep { height: 1px; background: rgba(255,255,255,0.1); margin: 4px 0; }
+    .agent-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 7px; }
+    .ag-opt { border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 8px; text-align: center; cursor: pointer; transition: all 0.12s; }
+    .ag-opt:hover { border-color: var(--border-hi); }
+    .ag-opt.on { border-color: var(--primary); background: var(--bg-subtle); }
+    .ag-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; margin: 0 auto 6px; background: var(--bg-subtle); }
+    .ag-name { font-size: 11.5px; font-weight: 600; color: var(--t1); }
+    .cmd-blk { background: #111; border-radius: var(--radius); padding: 10px 13px; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; color: rgba(255,255,255,0.6); margin-top: 12px; overflow-x: auto; }
+    .cm-b { color: #4ade80; } .cm-a { color: #f59e0b; } .cm-f { color: #60a5fa; } .cm-v { color: rgba(255,255,255,0.55); }
+    .tog-row { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--t1); margin-bottom: 11px; }
+
+    /* ── Right-click context menu ── */
+    .ctx-menu {
+      position: fixed; z-index: 2000;
+      background: rgba(30,30,32,0.97);
+      backdrop-filter: blur(24px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      box-shadow: 0 0 0 0.5px rgba(0,0,0,0.5), 0 8px 28px rgba(0,0,0,0.65);
+      padding: 4px;
+      min-width: 200px;
+      color: rgba(255,255,255,0.88);
+      font-size: 13px;
+      pointer-events: all;
+    }
+    .ctx-menu.hidden { display: none; }
+    .ctx-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 12px; border-radius: 5px; cursor: pointer; gap: 24px;
+      white-space: nowrap;
+    }
+    .ctx-item:hover { background: rgba(255,255,255,0.1); }
+    .ctx-item.destructive { color: #f87171; }
+    .ctx-item.destructive:hover { background: rgba(239,68,68,0.15); }
+    .ctx-item.disabled { color: rgba(255,255,255,0.25); pointer-events: none; }
+    .ctx-kbd { font-size: 11.5px; color: rgba(255,255,255,0.3); }
+    .ctx-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 3px 0; }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- menu bar -->
+<div class="menubar">
+  <div class="mb-left">
+    <div class="mb-item" onclick="toggleMenu('apple',this)">&#63743;</div>
+    <div class="mb-item bold" onclick="toggleMenu('app',this)">minipit</div>
+    <div class="mb-item" onclick="toggleMenu('file',this)">File</div>
+    <div class="mb-item" onclick="toggleMenu('view',this)">View</div>
+    <div class="mb-item" onclick="toggleMenu('sandbox',this)">Sandbox</div>
+  </div>
+  <div class="mb-right">
+    <div class="mb-clock">Tue Apr 15 &nbsp; 2:32 PM</div>
+    <div class="tray-btn" id="trayBtn" onclick="togglePop()">
+      <img src="logo.png" alt="">
+      <div class="tray-dot"></div>
+    </div>
+  </div>
+</div>
+
+<!-- menu bar dropdowns -->
+<div class="mb-dropdown hidden" id="dd-apple">
+  <div class="mb-dd-item">About minipit</div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Preferences… <span class="mb-dd-kbd">⌘,</span></div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Hide minipit <span class="mb-dd-kbd">⌘H</span></div>
+  <div class="mb-dd-item">Hide Others <span class="mb-dd-kbd">⌥⌘H</span></div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Quit minipit <span class="mb-dd-kbd">⌘Q</span></div>
+</div>
+
+<div class="mb-dropdown hidden" id="dd-app">
+  <div class="mb-dd-item disabled">Version 0.1.0</div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Preferences… <span class="mb-dd-kbd">⌘,</span></div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Check for Updates…</div>
+</div>
+
+<div class="mb-dropdown hidden" id="dd-file">
+  <div class="mb-dd-item" onclick="closeAllMenus();showModal('new-sandbox')">New Sandbox… <span class="mb-dd-kbd">⌘N</span></div>
+  <div class="mb-dd-item" onclick="closeAllMenus();showModal('new-blueprint')">New Blueprint… <span class="mb-dd-kbd">⇧⌘N</span></div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item disabled">Import Snapshot…</div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Close Window <span class="mb-dd-kbd">⌘W</span></div>
+</div>
+
+<div class="mb-dropdown hidden" id="dd-view">
+  <div class="mb-dd-item">Show Sidebar <span class="mb-dd-kbd">⌘⌥S</span></div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item" onclick="closeAllMenus();pickTab('terminal',document.querySelector('.tab'))">Terminal <span class="mb-dd-kbd">⌘1</span></div>
+  <div class="mb-dd-item" onclick="closeAllMenus();pickTab('info',document.querySelectorAll('.tab')[1])">Info <span class="mb-dd-kbd">⌘2</span></div>
+  <div class="mb-dd-item" onclick="closeAllMenus();pickTab('ports',document.querySelectorAll('.tab')[2])">Ports <span class="mb-dd-kbd">⌘3</span></div>
+  <div class="mb-dd-item" onclick="closeAllMenus();pickTab('files',document.querySelectorAll('.tab')[3])">Files <span class="mb-dd-kbd">⌘4</span></div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item" onclick="closeAllMenus();pickPage('blueprints')">Blueprints</div>
+  <div class="mb-dd-item" onclick="closeAllMenus();pickPage('secrets')">Secrets</div>
+  <div class="mb-dd-item" onclick="closeAllMenus();pickPage('settings')">Settings <span class="mb-dd-kbd">⌘,</span></div>
+</div>
+
+<div class="mb-dropdown hidden" id="dd-sandbox">
+  <div class="mb-dd-item" id="dd-sb-toggle">Stop Sandbox <span class="mb-dd-kbd">⌘.</span></div>
+  <div class="mb-dd-item">Save Snapshot… <span class="mb-dd-kbd">⇧⌘S</span></div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Open Workspace in Finder <span class="mb-dd-kbd">⇧⌘F</span></div>
+  <div class="mb-dd-item">Copy Workspace Path</div>
+  <div class="mb-dd-sep"></div>
+  <div class="mb-dd-item">Reset Sandbox…</div>
+  <div class="mb-dd-item" style="color:#f87171">Delete Sandbox…</div>
+</div>
+
+<div class="desktop">
+
+  <!-- popover -->
+  <div class="popover hidden" id="popover">
+    <div class="pop-hdr">
+      <img src="logo.png" alt="">
+      <span class="pop-hdr-name">minipit</span>
+      <div class="pop-pill"><div class="pop-pill-dot"></div>2 running</div>
+    </div>
+    <div class="pop-list">
+      <div class="pop-row" onclick="openWin()"><div class="pop-dot" style="background:#22c55e"></div><div class="pop-info"><div class="pop-name">agent-run-042</div><div class="pop-sub">claude · ~/Code/my-api</div></div><span class="pop-time">4m 23s</span></div>
+      <div class="pop-row" onclick="openWin()"><div class="pop-dot" style="background:#22c55e"></div><div class="pop-info"><div class="pop-name">web-builder-01</div><div class="pop-sub">opencode · ~/Code/landing</div></div><span class="pop-time">11m</span></div>
+      <div class="pop-row" onclick="openWin()"><div class="pop-dot" style="background:rgba(255,255,255,.15)"></div><div class="pop-info"><div class="pop-name">python-scraper</div><div class="pop-sub">claude · ~/Code/scraper</div></div><span class="pop-time stopped">Stopped</span></div>
+    </div>
+    <div class="pop-sep"></div>
+    <div class="pop-action"><button class="pop-new-btn" onclick="openWin();showModal('new-sandbox')"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> New Sandbox</button></div>
+    <div class="pop-ftr">
+      <button class="pop-open" onclick="openWin()">Open minipit <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5h7M6 2.5l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="pop-quit">Quit</button>
+    </div>
+  </div>
+
+  <!-- window -->
+  <div class="window" id="window">
+
+    <!-- toolbar -->
+    <div class="toolbar">
+      <div class="tl-row">
+        <span class="tl r" onclick="closeWin()"></span>
+        <span class="tl y"></span>
+        <span class="tl g"></span>
+      </div>
+      <div class="tb-center">
+        <div class="tb-title" id="tbTitle">agent-run-042</div>
+        <div class="tb-sub" id="tbSub">Running · 4m 23s</div>
+      </div>
+      <div class="tb-search">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="rgba(0,0,0,.3)" stroke-width="1.3"/><path d="M8 8l2.5 2.5" stroke="rgba(0,0,0,.3)" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span class="tb-search-ph">Search…</span>
+        <span class="tb-search-kbd">⌘K</span>
+      </div>
+      <div class="tb-icon-btn" title="More">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg>
+      </div>
+      <button class="tb-btn" onclick="showModal('new-sandbox')">
+        <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        New Sandbox
+      </button>
+    </div>
+
+    <div class="body">
+
+      <!-- sidebar -->
+      <aside class="sidebar">
+        <div class="sb-logo">
+          <img src="logo.png" alt="">
+          <span class="sb-logo-name">minipit</span>
+        </div>
+
+        <div class="sb-section">
+          <span class="sb-label">Sandboxes</span>
+          <div class="sb-item active" id="si-0" onclick="pickSandbox(0)" oncontextmenu="showCtx(event,0)">
+            <div class="sb-item-dot r"></div>
+            <div class="sb-item-body">
+              <div class="sb-item-name">agent-run-042</div>
+              <div class="sb-item-sub"><div class="sb-agent-dot" style="background:#e87c5c"></div>claude · my-api</div>
+            </div>
+            <div class="sb-item-time">4m</div>
+          </div>
+          <div class="sb-item" id="si-1" onclick="pickSandbox(1)" oncontextmenu="showCtx(event,1)">
+            <div class="sb-item-dot r"></div>
+            <div class="sb-item-body">
+              <div class="sb-item-name">web-builder-01</div>
+              <div class="sb-item-sub"><div class="sb-agent-dot" style="background:#22c55e"></div>opencode · landing</div>
+            </div>
+            <div class="sb-item-time">11m</div>
+          </div>
+          <div class="sb-item" id="si-2" onclick="pickSandbox(2)" oncontextmenu="showCtx(event,2)">
+            <div class="sb-item-dot s"></div>
+            <div class="sb-item-body">
+              <div class="sb-item-name">python-scraper</div>
+              <div class="sb-item-sub"><div class="sb-agent-dot" style="background:#e87c5c"></div>claude · scraper</div>
+            </div>
+          </div>
+          <div class="sb-item" id="si-3" onclick="pickSandbox(3)" oncontextmenu="showCtx(event,3)">
+            <div class="sb-item-dot s"></div>
+            <div class="sb-item-body">
+              <div class="sb-item-name">data-pipeline-v2</div>
+              <div class="sb-item-sub"><div class="sb-agent-dot" style="background:#3b82f6"></div>docker-agent · pipeline</div>
+            </div>
+          </div>
+          <div class="sb-new" onclick="showModal('new-sandbox')">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            New Sandbox
+          </div>
+        </div>
+
+        <div class="sb-div"></div>
+
+        <div class="sb-nav">
+          <span class="sb-label">Library</span>
+          <div class="sb-nav-item" id="ni-blueprints" onclick="pickPage('blueprints')">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 4.5h9M2 7h9M2 9.5h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.5" cy="9.5" r="1.8" stroke="currentColor" stroke-width="1.3"/></svg>
+            Blueprints
+          </div>
+          <div class="sb-nav-item" id="ni-secrets" onclick="pickPage('secrets')">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="5" cy="5.5" r="3.2" stroke="currentColor" stroke-width="1.3"/><path d="M7.8 8.8L11 12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M3.5 5.5h3M5 4v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Secrets
+          </div>
+          <div class="sb-nav-item" id="ni-settings" onclick="pickPage('settings')">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 1.5v1.2M6.5 10.3v1.2M1.5 6.5h1.2M9.8 6.5H11M3.4 3.4l.85.85M8.75 8.75l.85.85M3.4 9.6l.85-.85M8.75 4.25l.85-.85" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Settings
+          </div>
+        </div>
+
+        <div class="sb-foot">
+          <div class="sb-foot-dot"></div>
+          sbx v0.25.0 · connected
+        </div>
+      </aside>
+
+      <!-- content -->
+      <div class="content">
+
+        <!-- sandbox detail -->
+        <div class="detail" id="detail">
+          <div class="detail-header">
+            <div class="d-dot r" id="d-dot"></div>
+            <div class="d-name" id="d-name">agent-run-042</div>
+            <span class="d-chip" id="d-chip">claude</span>
+            <span class="d-uptime" id="d-uptime">Running · 4m 23s</span>
+            <div class="d-actions">
+              <button class="btn btn-default btn-sm">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1 9.5V4a1 1 0 011-1h2.5L6 2h3a1 1 0 011 1v6.5a1 1 0 01-1 1H2a1 1 0 01-1-1z" stroke="currentColor" stroke-width="1.3"/></svg>
+                Open in Finder
+              </button>
+              <button class="btn btn-default btn-sm" id="d-toggle">Stop</button>
+              <button class="btn btn-ghost btn-sm">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="3" r="1.2" fill="currentColor"/><circle cx="6.5" cy="6.5" r="1.2" fill="currentColor"/><circle cx="6.5" cy="10" r="1.2" fill="currentColor"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="tabs">
+            <div class="tab active" onclick="pickTab('terminal',this)">Terminal</div>
+            <div class="tab" onclick="pickTab('info',this)">Info</div>
+            <div class="tab" onclick="pickTab('ports',this)">Ports</div>
+            <div class="tab" onclick="pickTab('files',this)">Files</div>
+          </div>
+
+          <!-- terminal -->
+          <div class="tab-panel active" id="tp-terminal">
+            <div class="term">
+              <div class="term-bar">
+                <div class="term-seg">
+                  <div class="term-seg-item active">Agent</div>
+                  <div class="term-seg-item">Shell</div>
+                </div>
+                <div class="term-actions">
+                  <button class="t-btn t-btn-ghost">Export</button>
+                  <button class="t-btn t-btn-ghost">Clear</button>
+                  <button class="t-btn t-btn-stop">
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><rect width="8" height="8" rx="1.5"/></svg>
+                    Stop
+                  </button>
+                </div>
+              </div>
+              <div class="term-body" id="tb-0">
+                <div class="tr"><span class="tt">14:32:01</span><span class="tg">✓ Sandbox agent-run-042 started</span></div>
+                <div class="tr"><span class="tt">14:32:02</span><span class="tb">→ Claude: Reading project structure...</span></div>
+                <div class="tr"><span class="tt">14:32:04</span><span class="td">&nbsp;&nbsp;src/ tests/ package.json tsconfig.json</span></div>
+                <div class="tr"><span class="tt">14:32:05</span><span class="tb">→ Claude: Express + TypeScript. Running tests first.</span></div>
+                <div class="tr"><span class="tt">14:32:06</span><span class="td">&nbsp;&nbsp;$ npm install</span></div>
+                <div class="tr"><span class="tt">14:32:16</span><span class="tg">✓ 247 packages installed in 10.2s</span></div>
+                <div class="tr"><span class="tt">14:32:17</span><span class="td">&nbsp;&nbsp;$ npm test</span></div>
+                <div class="tr"><span class="tt">14:32:21</span><span class="te">✗ 3 failing — JWT_SECRET not resolved</span></div>
+                <div class="tr"><span class="tt">14:32:22</span><span class="tb">→ Claude: Fixing src/auth/auth.service.ts:24...</span></div>
+                <div class="tr"><span class="tt">14:32:23</span><span class="tg">✓ Fixed JWT_SECRET env var lookup</span></div>
+                <div class="tr"><span class="tt">14:32:24</span><span class="td">&nbsp;&nbsp;$ npm test</span></div>
+                <div class="tr"><span class="tt">14:32:29</span><span class="tg">✓ All 47 tests passing</span></div>
+                <div class="tr"><span class="tt">14:32:30</span><span class="tb">→ Claude: All green. Shall I commit?</span></div>
+                <div class="tr"><span class="tt">14:32:30</span><span class="tp">❯ <span class="cur"></span></span></div>
+              </div>
+              <div class="term-body" id="tb-1" style="display:none">
+                <div class="tr"><span class="tt">11:15:03</span><span class="tg">✓ Sandbox web-builder-01 started</span></div>
+                <div class="tr"><span class="tt">11:15:04</span><span class="tb">→ OpenCode: Scaffolding Next.js 14...</span></div>
+                <div class="tr"><span class="tt">11:15:28</span><span class="tg">✓ Project created + shadcn initialized</span></div>
+                <div class="tr"><span class="tt">11:15:29</span><span class="tb">→ OpenCode: Building hero, features, CTA...</span></div>
+                <div class="tr"><span class="tt">11:15:45</span><span class="tg">✓ Landing page complete · dev server at :3000</span></div>
+                <div class="tr"><span class="tt">11:15:45</span><span class="tp">❯ <span class="cur"></span></span></div>
+              </div>
+              <div class="term-body" id="tb-2" style="display:none">
+                <div class="tr"><span class="tt">10:02:41</span><span class="tg">✓ Sandbox python-scraper started</span></div>
+                <div class="tr"><span class="tt">10:03:14</span><span class="te">Session ended</span></div>
+              </div>
+              <div class="term-body" id="tb-3" style="display:none">
+                <div class="tr"><span class="tt">09:45:10</span><span class="tg">✓ Sandbox data-pipeline-v2 started</span></div>
+                <div class="tr"><span class="tt">09:46:02</span><span class="tg">✓ All containers healthy</span></div>
+                <div class="tr"><span class="tt">09:46:03</span><span class="te">Session stopped</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- info -->
+          <div class="tab-panel" id="tp-info">
+            <div class="info-panel">
+              <div class="info-grid">
+                <div class="info-card"><div class="ic-label">Status</div><div class="ic-val" id="i-status">Running</div><div class="ic-sub" id="i-uptime">4m 23s</div></div>
+                <div class="info-card"><div class="ic-label">Agent</div><div class="ic-val" id="i-agent">claude</div><div class="ic-sub">Anthropic Claude Code</div></div>
+                <div class="info-card"><div class="ic-label">Memory</div><div class="ic-val" id="i-mem">8g</div><div class="ic-sub">max 32g · default 50%</div></div>
+                <div class="info-card"><div class="ic-label">Branch</div><div class="ic-val" style="font-size:14px;margin-top:4px" id="i-branch">feature/auth</div><div class="ic-sub">worktree in .sbx/</div></div>
+              </div>
+              <div class="info-block">
+                <div class="info-block-title">Workspaces</div>
+                <div class="info-row"><span class="ir-label">Primary (read-write)</span><span class="ir-val">~/Code/my-api</span></div>
+                <div class="info-row"><span class="ir-label">Read-only</span><span class="ir-val">~/Docs</span></div>
+              </div>
+              <div class="info-actions">
+                <button class="btn btn-default btn-sm">Save snapshot</button>
+                <button class="btn btn-ghost btn-sm">Reset</button>
+                <button class="btn btn-destructive btn-sm" style="margin-left:auto">Delete sandbox</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ports -->
+          <div class="tab-panel" id="tp-ports">
+            <div class="ports-panel">
+              <div class="ports-notice">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 4.5v3M6.5 9h.01" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                Port forwards are removed when the sandbox stops.
+                <button class="btn btn-ghost btn-sm" style="margin-left:auto">+ Add forward</button>
+              </div>
+              <div class="ports-tbl">
+                <div class="ptbl-hdr"><div class="pth">Host</div><div class="pth">Container</div><div class="pth">Protocol</div><div class="pth">Status</div><div class="pth"></div></div>
+                <div class="ptbl-row">
+                  <div class="pval">8080</div>
+                  <div class="pval2">3000</div>
+                  <div class="pproto">TCP</div>
+                  <div class="p-status"><div class="p-status-dot"></div>Active</div>
+                  <div><button class="btn btn-ghost btn-sm">Open ↗</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- files -->
+          <div class="tab-panel" id="tp-files">
+            <div class="files-panel">
+              <div class="files-bar">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 9.5V4a1 1 0 011-1h2.5L6 2h4a1 1 0 011 1v6.5a1 1 0 01-1 1H2a1 1 0 01-1-1z" stroke="rgba(0,0,0,.4)" stroke-width="1.3"/></svg>
+                <span class="files-path" id="fpath">~/Code/my-api</span>
+                <button class="btn btn-ghost btn-sm" onclick="alert('shell.openPath(path) → opens in Finder')">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M1 5h10" stroke="currentColor" stroke-width="1.3"/><circle cx="3" cy="3.5" r=".7" fill="currentColor"/><circle cx="5" cy="3.5" r=".7" fill="currentColor"/></svg>
+                  Open in Finder
+                </button>
+                <button class="btn btn-ghost btn-sm" style="padding:4px 6px" title="Refresh">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 112 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10 3v3H7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+              <div class="files-body" id="ftbody"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- blueprints page -->
+        <div class="page" id="page-blueprints">
+          <div class="page-hdr">
+            <span class="page-title">Blueprints</span>
+            <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showModal('new-blueprint')">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              New Blueprint
+            </button>
+          </div>
+          <div class="page-body">
+            <p style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Reusable launch configurations — one click to spin up a preconfigured sandbox.</p>
+            <div class="bp-grid">
+              <div class="bp-card new" onclick="showModal('new-blueprint')">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <div style="font-size:13px;font-weight:600">New Blueprint</div>
+                <div style="font-size:11.5px">Save a reusable config</div>
+              </div>
+              <div class="bp-card">
+                <div class="bp-hdr"><div class="bp-icon">🤖</div><div><div class="bp-name">Claude — my-api</div><span class="d-chip" style="font-size:10px;padding:1px 6px">claude</span></div></div>
+                <div class="bp-ws">~/Code/my-api</div>
+                <div class="bp-flags"><span class="bp-flag">8g</span><span class="bp-flag">--branch auto</span><span class="bp-flag">docs:ro</span></div>
+                <div class="bp-actions"><button class="btn btn-primary btn-sm" style="flex:1">Launch</button><button class="btn btn-ghost btn-sm">Edit</button></div>
+              </div>
+              <div class="bp-card">
+                <div class="bp-hdr"><div class="bp-icon">📝</div><div><div class="bp-name">OpenCode — landing</div><span class="d-chip" style="font-size:10px;padding:1px 6px">opencode</span></div></div>
+                <div class="bp-ws">~/Code/landing</div>
+                <div class="bp-flags"><span class="bp-flag">4g</span><span class="bp-flag">Node 20</span></div>
+                <div class="bp-actions"><button class="btn btn-primary btn-sm" style="flex:1">Launch</button><button class="btn btn-ghost btn-sm">Edit</button></div>
+              </div>
+              <div class="bp-card">
+                <div class="bp-hdr"><div class="bp-icon">🐳</div><div><div class="bp-name">Docker — pipeline</div><span class="d-chip" style="font-size:10px;padding:1px 6px">docker-agent</span></div></div>
+                <div class="bp-ws">~/Code/pipeline</div>
+                <div class="bp-flags"><span class="bp-flag">16g</span><span class="bp-flag">--cpus 4</span></div>
+                <div class="bp-actions"><button class="btn btn-primary btn-sm" style="flex:1">Launch</button><button class="btn btn-ghost btn-sm">Edit</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- secrets page -->
+        <div class="page" id="page-secrets">
+          <div class="page-hdr">
+            <span class="page-title">Secrets</span>
+            <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showModal('new-secret')">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              Add Secret
+            </button>
+          </div>
+          <div class="page-body">
+            <p style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Stored in your OS keychain by sbx. Agents receive credentials via proxy — tokens are never exposed.</p>
+            <div class="sec-tbl">
+              <div class="sec-hdr"><div class="sec-th">Provider</div><div class="sec-th">Scope</div><div class="sec-th">Status</div><div class="sec-th"></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">🤖</div><div class="sec-name">Anthropic</div></div><div class="sec-scope">Global</div><div class="sec-st ok"><div class="sec-sd"></div>Configured</div><div><button class="btn btn-ghost btn-sm">Edit</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">⚡</div><div class="sec-name">OpenAI</div></div><div class="sec-scope">Global</div><div class="sec-st ok"><div class="sec-sd"></div>Configured</div><div><button class="btn btn-ghost btn-sm">Edit</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">☁️</div><div class="sec-name">AWS</div></div><div class="sec-scope">Global</div><div class="sec-st no"><div class="sec-sd"></div>Not set</div><div><button class="btn btn-ghost btn-sm">Set</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">🐙</div><div class="sec-name">GitHub</div></div><div class="sec-scope">Global</div><div class="sec-st ok"><div class="sec-sd"></div>Configured</div><div><button class="btn btn-ghost btn-sm">Edit</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">♊</div><div class="sec-name">Google</div></div><div class="sec-scope">Global</div><div class="sec-st no"><div class="sec-sd"></div>Not set</div><div><button class="btn btn-ghost btn-sm">Set</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">⚡</div><div class="sec-name">Groq</div></div><div class="sec-scope">Global</div><div class="sec-st no"><div class="sec-sd"></div>Not set</div><div><button class="btn btn-ghost btn-sm">Set</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">🌊</div><div class="sec-name">Mistral</div></div><div class="sec-scope">Global</div><div class="sec-st no"><div class="sec-sd"></div>Not set</div><div><button class="btn btn-ghost btn-sm">Set</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">🚀</div><div class="sec-name">Nebius</div></div><div class="sec-scope">Global</div><div class="sec-st no"><div class="sec-sd"></div>Not set</div><div><button class="btn btn-ghost btn-sm">Set</button></div></div>
+              <div class="sec-row"><div class="sec-svc"><div class="sec-ico">✕</div><div class="sec-name">xAI</div></div><div class="sec-scope">Global</div><div class="sec-st no"><div class="sec-sd"></div>Not set</div><div><button class="btn btn-ghost btn-sm">Set</button></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- settings page -->
+        <div class="page" id="page-settings">
+          <div class="page-hdr"><span class="page-title">Settings</span></div>
+          <div class="page-body" style="max-width:560px">
+            <div class="ss">
+              <div class="ss-hdr">Docker Sandboxes</div>
+              <div class="ss-row"><div><div class="ss-lbl">sbx binary path</div><div class="ss-sub">Auto-detected via Homebrew.</div></div><div style="display:flex;gap:7px"><input class="s-input" value="/opt/homebrew/bin/sbx" style="width:192px"><button class="btn btn-default btn-sm">Verify</button></div></div>
+              <div class="ss-row"><div><div class="ss-lbl">Account</div><div class="ss-sub">javier.alonso@docker.com</div></div><button class="btn btn-ghost btn-sm" style="color:var(--destruct)">Sign out</button></div>
+            </div>
+            <div class="ss">
+              <div class="ss-hdr">Polling</div>
+              <div class="ss-row"><div><div class="ss-lbl">Interval (focused)</div><div class="ss-sub">While minipit is the active window.</div></div><input class="s-input" value="5s" style="width:52px;text-align:center"></div>
+              <div class="ss-row"><div><div class="ss-lbl">Interval (background)</div><div class="ss-sub">When minimised or behind other windows.</div></div><input class="s-input" value="30s" style="width:52px;text-align:center"></div>
+            </div>
+            <div class="ss">
+              <div class="ss-hdr">App</div>
+              <div class="ss-row"><div><div class="ss-lbl">Launch at login</div></div><button class="s-toggle on" onclick="this.classList.toggle('on')"></button></div>
+              <div class="ss-row"><div><div class="ss-lbl">Menu bar only</div><div class="ss-sub">Hide from Dock.</div></div><button class="s-toggle on" onclick="this.classList.toggle('on')"></button></div>
+              <div class="ss-row"><div><div class="ss-lbl">Notify on agent exit</div></div><button class="s-toggle on" onclick="this.classList.toggle('on')"></button></div>
+              <div class="ss-row"><div><div class="ss-lbl">Notify on errors</div></div><button class="s-toggle on" onclick="this.classList.toggle('on')"></button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- modals -->
+        <div class="overlay hidden" id="m-new-sandbox" onclick="hideM('new-sandbox',event)">
+          <div class="modal" onclick="event.stopPropagation()">
+            <div class="m-hdr"><div class="m-title">New Sandbox</div><div class="m-sub">Configure and launch an isolated microVM.</div></div>
+            <div class="m-steps">
+              <div class="m-step done"><div class="m-step-n">✓</div><span class="m-step-lbl">Agent</span></div>
+              <div class="m-sep done"></div>
+              <div class="m-step cur"><div class="m-step-n">2</div><span class="m-step-lbl">Workspace</span></div>
+              <div class="m-sep"></div>
+              <div class="m-step"><div class="m-step-n">3</div><span class="m-step-lbl">Options</span></div>
+            </div>
+            <div class="m-body">
+              <div class="fg"><label class="flabel">Workspace</label><div class="frow-2"><input class="finput" value="~/Code/my-api"><button class="btn btn-default btn-sm">Browse…</button></div></div>
+              <div class="fg"><label class="flabel">Additional workspaces <span style="font-weight:400;color:var(--t3)">(optional)</span></label><div class="frow-2" style="margin-bottom:8px"><input class="finput" value="~/Docs"><div style="display:flex;align-items:center;gap:6px"><button class="s-toggle" onclick="this.classList.toggle('on')" style="flex-shrink:0"></button><span style="font-size:12px;color:var(--t3);white-space:nowrap">read-only</span></div></div><button class="btn btn-ghost btn-sm">+ Add workspace</button></div>
+              <div class="fdiv"></div>
+              <div class="fg"><label class="flabel" style="display:flex;justify-content:space-between">Memory <span class="mem-slider-value" id="mem-val-sb">8g</span></label><div class="mem-slider-wrap"><input type="range" class="mem-slider" min="0" max="5" value="3" id="mem-sb" oninput="updateMem('sb',this.value)"><div class="mem-slider-labels"><span>Default</span><span>2g</span><span>4g</span><span>8g</span><span>16g</span><span>32g</span></div></div></div>
+              <div class="tog-row"><button class="s-toggle on" onclick="this.classList.toggle('on')"></button>Git branch isolation <code style="font-size:11px;background:var(--bg-subtle);padding:1px 6px;border-radius:4px">--branch auto</code></div>
+              <div class="tog-row"><button class="s-toggle" onclick="this.classList.toggle('on')"></button><span style="flex:1">Save as blueprint</span><input class="finput" placeholder="Blueprint name…" style="flex:2;height:28px;padding:4px 9px;font-size:12px"></div>
+              <div class="cmd-blk"><span class="cm-b">sbx</span> <span class="cm-a">run</span> <span class="cm-a">claude</span> <span class="cm-v">~/Code/my-api ~/Docs:ro</span> <span class="cm-f">-m</span> <span class="cm-v">8g</span> <span class="cm-f">--branch</span> <span class="cm-v">auto</span></div>
+            </div>
+            <div class="m-ftr"><button class="btn btn-ghost" onclick="hideM('new-sandbox')">Cancel</button><div style="display:flex;gap:7px"><button class="btn btn-default">← Agent</button><button class="btn btn-primary" onclick="hideM('new-sandbox')">Launch &amp; Attach →</button></div></div>
+          </div>
+        </div>
+
+        <div class="overlay hidden" id="m-new-secret" onclick="hideM('new-secret',event)">
+          <div class="modal" style="width:420px" onclick="event.stopPropagation()">
+            <div class="m-hdr"><div class="m-title">Add Secret</div><div class="m-sub">Stored in OS keychain · never exposed to agents.</div></div>
+            <div class="m-body">
+              <div class="fg"><label class="flabel">Provider</label><select class="finput" style="cursor:pointer"><option>Anthropic</option><option>OpenAI</option><option>AWS</option><option>GitHub</option><option>Google</option><option>Groq</option><option>Mistral</option><option>Nebius</option><option>xAI</option></select></div>
+              <div class="fg"><label class="flabel">API Key</label><input class="finput" type="password" placeholder="sk-ant-api03-…"><div class="fhint">Passed via <code style="font-family:SF Mono,Menlo,monospace;font-size:10.5px;background:var(--bg-subtle);padding:1px 5px;border-radius:4px">sbx secret set -g anthropic --token</code></div></div>
+            </div>
+            <div class="m-ftr"><button class="btn btn-ghost" onclick="hideM('new-secret')">Cancel</button><button class="btn btn-primary" onclick="hideM('new-secret')">Save</button></div>
+          </div>
+        </div>
+
+        <div class="overlay hidden" id="m-new-blueprint" onclick="hideM('new-blueprint',event)">
+          <div class="modal" onclick="event.stopPropagation()">
+            <div class="m-hdr"><div class="m-title">New Blueprint</div><div class="m-sub">Save a reusable sandbox launch configuration.</div></div>
+            <div class="m-body">
+              <div class="fg"><label class="flabel">Name</label><input class="finput" placeholder="e.g. Claude — my-api"></div>
+              <div class="fg"><label class="flabel">Agent</label><div class="agent-grid"><div class="ag-opt on"><div class="ag-icon">🤖</div><div class="ag-name">claude</div></div><div class="ag-opt"><div class="ag-icon">📝</div><div class="ag-name">opencode</div></div><div class="ag-opt"><div class="ag-icon">🐳</div><div class="ag-name">docker-agent</div></div><div class="ag-opt"><div class="ag-icon">💻</div><div class="ag-name">shell</div></div></div></div>
+              <div class="fg"><label class="flabel">Workspace</label><div class="frow-2"><input class="finput" value="~/Code/my-api"><button class="btn btn-default btn-sm">Browse…</button></div></div>
+              <div class="fg"><label class="flabel" style="display:flex;justify-content:space-between">Memory <span class="mem-slider-value" id="mem-val-bp">8g</span></label><div class="mem-slider-wrap"><input type="range" class="mem-slider" min="0" max="5" value="3" id="mem-bp" oninput="updateMem('bp',this.value)"><div class="mem-slider-labels"><span>Default</span><span>2g</span><span>4g</span><span>8g</span><span>16g</span><span>32g</span></div></div></div>
+              <div class="tog-row"><button class="s-toggle on" onclick="this.classList.toggle('on')"></button>Git branch isolation</div>
+              <div class="cmd-blk"><span class="cm-b">sbx</span> <span class="cm-a">run</span> <span class="cm-a">claude</span> <span class="cm-v">~/Code/my-api</span> <span class="cm-f">-m</span> <span class="cm-v">8g</span> <span class="cm-f">--branch</span> <span class="cm-v">auto</span></div>
+            </div>
+            <div class="m-ftr"><button class="btn btn-ghost" onclick="hideM('new-blueprint')">Cancel</button><button class="btn btn-primary" onclick="hideM('new-blueprint')">Save Blueprint</button></div>
+          </div>
+        </div>
+
+      </div><!-- /content -->
+    </div><!-- /body -->
+  </div><!-- /window -->
+</div><!-- /desktop -->
+
+<!-- right-click context menu -->
+<div class="ctx-menu hidden" id="ctx-menu">
+  <div class="ctx-item" id="ctx-attach">Open Terminal <span class="ctx-kbd">↵</span></div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-toggle">Stop <span class="ctx-kbd">⌘.</span></div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-finder">Open in Finder <span class="ctx-kbd">⇧⌘F</span></div>
+  <div class="ctx-item" id="ctx-copy-path">Copy Path</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-snapshot">Save Snapshot…</div>
+  <div class="ctx-item" id="ctx-reset">Reset…</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item destructive" id="ctx-delete">Delete Sandbox…</div>
+</div>
+
+<script>
+// ── File trees ──
+const TREES = [
+  { path:'~/Code/my-api', nodes:[
+    {name:'.sbx',type:'dir',open:false,kids:[{name:'feature-auth',type:'dir',open:false,kids:[]}]},
+    {name:'src',type:'dir',open:true,kids:[
+      {name:'auth',type:'dir',open:true,kids:[
+        {name:'auth.controller.ts',type:'file',ext:'ts',size:'3.1 KB',badge:'m'},
+        {name:'auth.service.ts',type:'file',ext:'ts',size:'2.4 KB',badge:'m'},
+        {name:'auth.module.ts',type:'file',ext:'ts',size:'0.8 KB'},
+      ]},
+      {name:'users',type:'dir',open:false,kids:[
+        {name:'users.controller.ts',type:'file',ext:'ts',size:'4.2 KB'},
+        {name:'users.service.ts',type:'file',ext:'ts',size:'3.8 KB'},
+      ]},
+      {name:'main.ts',type:'file',ext:'ts',size:'0.4 KB'},
+      {name:'app.module.ts',type:'file',ext:'ts',size:'1.1 KB'},
+    ]},
+    {name:'tests',type:'dir',open:false,kids:[
+      {name:'auth.test.ts',type:'file',ext:'ts',size:'5.2 KB',badge:'m'},
+      {name:'users.test.ts',type:'file',ext:'ts',size:'3.9 KB'},
+    ]},
+    {name:'node_modules',type:'dir',open:false,kids:[]},
+    {name:'.env.example',type:'file',ext:'env',size:'0.4 KB'},
+    {name:'.gitignore',type:'file',ext:'git',size:'0.3 KB'},
+    {name:'package.json',type:'file',ext:'json',size:'1.8 KB'},
+    {name:'tsconfig.json',type:'file',ext:'json',size:'0.6 KB'},
+    {name:'README.md',type:'file',ext:'md',size:'2.1 KB'},
+  ]},
+  { path:'~/Code/landing', nodes:[
+    {name:'app',type:'dir',open:true,kids:[
+      {name:'page.tsx',type:'file',ext:'tsx',size:'4.8 KB',badge:'n'},
+      {name:'layout.tsx',type:'file',ext:'tsx',size:'1.2 KB',badge:'n'},
+      {name:'globals.css',type:'file',ext:'css',size:'2.3 KB',badge:'n'},
+    ]},
+    {name:'components',type:'dir',open:true,kids:[
+      {name:'Hero.tsx',type:'file',ext:'tsx',size:'3.1 KB',badge:'n'},
+      {name:'Features.tsx',type:'file',ext:'tsx',size:'2.8 KB',badge:'n'},
+    ]},
+    {name:'node_modules',type:'dir',open:false,kids:[]},
+    {name:'package.json',type:'file',ext:'json',size:'2.1 KB'},
+    {name:'next.config.ts',type:'file',ext:'ts',size:'0.4 KB'},
+  ]},
+  { path:'~/Code/scraper', nodes:[
+    {name:'src',type:'dir',open:true,kids:[
+      {name:'scraper.py',type:'file',ext:'py',size:'8.2 KB'},
+      {name:'parser.py',type:'file',ext:'py',size:'4.1 KB'},
+    ]},
+    {name:'requirements.txt',type:'file',ext:'txt',size:'0.3 KB'},
+  ]},
+  { path:'~/Code/pipeline', nodes:[
+    {name:'services',type:'dir',open:true,kids:[
+      {name:'ingester',type:'dir',open:false,kids:[]},
+      {name:'transformer',type:'dir',open:false,kids:[]},
+    ]},
+    {name:'docker-compose.yml',type:'file',ext:'yml',size:'2.8 KB'},
+    {name:'Makefile',type:'file',ext:'mk',size:'1.2 KB'},
+  ]},
+]
+
+const EXT = {ts:'🔷',tsx:'🔷',js:'🟡',jsx:'🟡',json:'🟤',md:'📄',
+             py:'🐍',css:'🎨',yml:'⚙️',env:'🔒',git:'📋',txt:'📄',mk:'⚙️'}
+
+function fileIcon(n) {
+  if(n.type==='dir') return '📁'
+  return EXT[n.ext] || '📄'
+}
+
+function renderNodes(nodes, depth, container) {
+  nodes.forEach(n => {
+    const row = document.createElement('div')
+    row.className = 'frow'
+    const pad = depth * 14 + 6
+    row.innerHTML = `
+      <div class="frow-pad" style="width:${pad}px"></div>
+      <div class="frow-chev ${n.type==='dir'?(n.open?'open':''):'leaf'}">
+        <svg width="7" height="7" viewBox="0 0 7 7" fill="none"><path d="M1.5 1l3.5 2.5L1.5 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="frow-icon">${fileIcon(n)}</div>
+      <div class="fname${n.type==='dir'?' dir':''}">${n.name}</div>
+      ${n.badge?`<div class="fbadge ${n.badge}">${n.badge==='m'?'M':'N'}</div>`:''}
+      ${n.size?`<div class="fsize">${n.size}</div>`:'<div class="fsize"></div>'}
+      <div class="frow-act">
+        <button class="frow-act-btn" title="Reveal in Finder" onclick="event.stopPropagation()">
+          <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><rect x=".5" y="1.5" width="8" height="6.5" rx="1" stroke="currentColor" stroke-width="1.1"/><path d=".5 3.5h8" stroke="currentColor" stroke-width="1.1"/></svg>
+        </button>
+      </div>
+    `
+    container.appendChild(row)
+
+    if(n.type==='dir') {
+      const kids = document.createElement('div')
+      kids.style.display = n.open ? 'block' : 'none'
+      container.appendChild(kids)
+      if(n.open && n.kids.length) renderNodes(n.kids, depth+1, kids)
+      row.addEventListener('click', () => {
+        n.open = !n.open
+        row.querySelector('.frow-chev').classList.toggle('open', n.open)
+        kids.style.display = n.open ? 'block' : 'none'
+        if(n.open && !kids.children.length && n.kids.length) renderNodes(n.kids, depth+1, kids)
+      })
+    } else {
+      row.addEventListener('click', () => {
+        document.querySelectorAll('.frow.sel').forEach(r=>r.classList.remove('sel'))
+        row.classList.add('sel')
+      })
+    }
+  })
+}
+
+function buildTree(i) {
+  const t = TREES[i] || TREES[0]
+  document.getElementById('fpath').textContent = t.path
+  const body = document.getElementById('ftbody')
+  body.innerHTML = ''
+  renderNodes(t.nodes, 0, body)
+}
+
+buildTree(0)
+
+// ── Right-click context menu ──
+let ctxTarget = -1
+
+function showCtx(e, i) {
+  e.preventDefault()
+  e.stopPropagation()
+  ctxTarget = i
+  closeAllMenus()
+
+  const s = SB[i]
+  const isRunning = s.st === 'r'
+
+  document.getElementById('ctx-attach').textContent = 'Open Terminal'
+  document.getElementById('ctx-toggle').textContent = isRunning ? 'Stop' : 'Start'
+  document.getElementById('ctx-finder').textContent = 'Open in Finder'
+
+  const menu = document.getElementById('ctx-menu')
+  menu.classList.remove('hidden')
+
+  // Position near cursor, keep inside viewport
+  const mw = 210, mh = menu.offsetHeight || 220
+  let x = e.clientX, y = e.clientY
+  if (x + mw > window.innerWidth)  x = e.clientX - mw
+  if (y + mh > window.innerHeight) y = e.clientY - mh
+  menu.style.left = x + 'px'
+  menu.style.top  = y + 'px'
+}
+
+function hideCtx() {
+  document.getElementById('ctx-menu').classList.add('hidden')
+  ctxTarget = -1
+}
+
+// Wire context menu actions
+document.getElementById('ctx-attach').onclick = () => {
+  if (ctxTarget < 0) return
+  pickSandbox(ctxTarget)
+  pickTab('terminal', document.querySelector('.tab'))
+  hideCtx()
+}
+document.getElementById('ctx-toggle').onclick = () => {
+  if (ctxTarget < 0) return
+  pickSandbox(ctxTarget)
+  hideCtx()
+}
+document.getElementById('ctx-finder').onclick = () => {
+  alert(`shell.openPath('${SB[ctxTarget]?.ws}') → opens in Finder`)
+  hideCtx()
+}
+document.getElementById('ctx-copy-path').onclick = () => {
+  if (ctxTarget >= 0) navigator.clipboard?.writeText(SB[ctxTarget].ws)
+  hideCtx()
+}
+document.getElementById('ctx-snapshot').onclick = () => { hideCtx() }
+document.getElementById('ctx-reset').onclick = () => { hideCtx() }
+document.getElementById('ctx-delete').onclick = () => {
+  if (ctxTarget >= 0) alert(`Confirm delete "${SB[ctxTarget].name}"?`)
+  hideCtx()
+}
+
+// Dismiss on click outside
+document.addEventListener('click', e => {
+  if (!document.getElementById('ctx-menu').contains(e.target)) hideCtx()
+})
+
+// ── Sandbox data ──
+const SB = [
+  {name:'agent-run-042',agent:'claude',st:'r',uptime:'Running · 4m 23s',mem:'8g',branch:'feature/auth',ws:'~/Code/my-api',ws2:'~/Docs (ro)'},
+  {name:'web-builder-01',agent:'opencode',st:'r',uptime:'Running · 11m 38s',mem:'4g',branch:'—',ws:'~/Code/landing',ws2:''},
+  {name:'python-scraper',agent:'claude',st:'s',uptime:'Stopped',mem:'16g',branch:'—',ws:'~/Code/scraper',ws2:''},
+  {name:'data-pipeline-v2',agent:'docker-agent',st:'s',uptime:'Stopped',mem:'8g',branch:'—',ws:'~/Code/pipeline',ws2:''},
+]
+
+let activeSB = 0, popOpen = false
+
+function pickSandbox(i) {
+  activeSB = i
+  document.querySelectorAll('[id^="si-"]').forEach((el,j)=>el.classList.toggle('active',j===i))
+  document.querySelectorAll('[id^="ni-"]').forEach(n=>n.classList.remove('active'))
+  document.getElementById('detail').style.display='flex'
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'))
+  const s = SB[i]
+  document.getElementById('d-dot').className = 'd-dot ' + s.st
+  document.getElementById('d-name').textContent = s.name
+  document.getElementById('d-chip').textContent = s.agent
+  document.getElementById('d-uptime').textContent = s.uptime
+  document.getElementById('d-toggle').textContent = s.st==='r' ? 'Stop' : 'Start'
+  document.getElementById('tbTitle').textContent = s.name
+  document.getElementById('tbSub').textContent = s.uptime
+  document.getElementById('i-status').textContent = s.st==='r' ? 'Running' : 'Stopped'
+  document.getElementById('i-uptime').textContent = s.uptime
+  document.getElementById('i-agent').textContent = s.agent
+  document.getElementById('i-mem').textContent = s.mem
+  document.getElementById('i-branch').textContent = s.branch
+  for(let j=0;j<4;j++) {
+    const el=document.getElementById('tb-'+j)
+    if(el) el.style.display=j===i?'block':'none'
+  }
+  buildTree(i)
+  pickTab('terminal', document.querySelector('.tab'))
+}
+
+function pickPage(pg) {
+  document.querySelectorAll('[id^="si-"]').forEach(e=>e.classList.remove('active'))
+  document.querySelectorAll('[id^="ni-"]').forEach(n=>n.classList.remove('active'))
+  document.getElementById('ni-'+pg).classList.add('active')
+  document.getElementById('detail').style.display='none'
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'))
+  document.getElementById('page-'+pg).classList.add('active')
+  document.getElementById('tbTitle').textContent = pg.charAt(0).toUpperCase()+pg.slice(1)
+  document.getElementById('tbSub').textContent = ''
+}
+
+function pickTab(tab, el) {
+  // If a page is open, switch back to sandbox detail first
+  const detail = document.getElementById('detail')
+  if (detail.style.display === 'none') {
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'))
+    document.querySelectorAll('[id^="ni-"]').forEach(n=>n.classList.remove('active'))
+    document.querySelectorAll('[id^="si-"]').forEach((e,j)=>e.classList.toggle('active',j===activeSB))
+    detail.style.display = 'flex'
+    const s = SB[activeSB]
+    document.getElementById('tbTitle').textContent = s.name
+    document.getElementById('tbSub').textContent = s.uptime
+  }
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'))
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'))
+  if(el) el.classList.add('active')
+  document.getElementById('tp-'+tab).classList.add('active')
+}
+
+function togglePop() {
+  popOpen=!popOpen
+  document.getElementById('popover').classList.toggle('hidden',!popOpen)
+  document.getElementById('trayBtn').classList.toggle('open',popOpen)
+}
+function openWin() {
+  popOpen=false
+  document.getElementById('popover').classList.add('hidden')
+  document.getElementById('trayBtn').classList.remove('open')
+  document.getElementById('window').classList.remove('hidden')
+}
+function closeWin() { document.getElementById('window').classList.add('hidden') }
+function showModal(id) { document.getElementById('m-'+id).classList.remove('hidden') }
+function hideM(id,ev) {
+  if(!ev||ev.target===document.getElementById('m-'+id))
+    document.getElementById('m-'+id).classList.add('hidden')
+}
+document.addEventListener('click',e=>{
+  const pop=document.getElementById('popover'), btn=document.getElementById('trayBtn')
+  if(popOpen&&!pop.contains(e.target)&&!btn.contains(e.target)){
+    popOpen=false; pop.classList.add('hidden'); btn.classList.remove('open')
+  }
+})
+// ── Memory slider ──
+const MEM_LABELS = ['Default','2g','4g','8g','16g','32g']
+
+function updateMem(id, val) {
+  const labels = MEM_LABELS
+  const pct = (val / 5) * 100
+  const el = document.getElementById('mem-' + id)
+  el.style.setProperty('--pct', pct + '%')
+  document.getElementById('mem-val-' + id).textContent = labels[val]
+  // update cmd preview
+  updateCmd()
+}
+
+function updateCmd() {
+  // could update cmd preview here
+}
+
+// init sliders
+;['sb','bp'].forEach(id => {
+  const el = document.getElementById('mem-' + id)
+  if (el) {
+    el.style.setProperty('--pct', (el.value / 5 * 100) + '%')
+  }
+})
+
+// ── Menu bar dropdowns ──
+let openMenu = null
+
+function toggleMenu(id, el) {
+  if (openMenu === id) { closeAllMenus(); return }
+  closeAllMenus()
+  const dd = document.getElementById('dd-' + id)
+  if (!dd) return
+  const rect = el.getBoundingClientRect()
+  dd.style.left = rect.left + 'px'
+  dd.classList.remove('hidden')
+  el.style.background = 'rgba(255,255,255,0.15)'  // highlight active item
+  openMenu = id
+}
+
+function closeAllMenus() {
+  document.querySelectorAll('.mb-dropdown').forEach(d => d.classList.add('hidden'))
+  document.querySelectorAll('.mb-item').forEach(i => i.style.background = '')
+  openMenu = null
+}
+
+document.addEventListener('click', e => {
+  if (openMenu && !e.target.closest('.mb-dropdown') && !e.target.closest('.mb-item')) {
+    closeAllMenus()
+  }
+})
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.overlay').forEach(m => m.classList.add('hidden'))
+    if (popOpen) { popOpen=false; document.getElementById('popover').classList.add('hidden'); document.getElementById('trayBtn').classList.remove('open') }
+    closeAllMenus()
+    hideCtx()
+  }
+  if (e.metaKey && !e.shiftKey) {
+    const tabs = ['terminal','info','ports','files']
+    const idx = parseInt(e.key) - 1
+    if (idx >= 0 && idx < tabs.length) {
+      e.preventDefault()
+      pickTab(tabs[idx], document.querySelectorAll('.tab')[idx])
+    }
+  }
+})
+</script>
+</body>
+</html>

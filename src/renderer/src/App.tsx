@@ -1,0 +1,77 @@
+import { useEffect } from 'react'
+import { useStore } from './store'
+import { Toolbar } from './components/Toolbar'
+import { Sidebar } from './components/Sidebar'
+import { HomePage } from './components/HomePage'
+import { ProjectsPage } from './components/ProjectsPage'
+import { SandboxDetail } from './components/SandboxDetail'
+import { TemplatesPage } from './components/TemplatesPage'
+import { KitsPage } from './components/KitsPage'
+import { SettingsPage } from './components/SettingsPage'
+import { ContextMenu } from './components/ContextMenu'
+import { NewSandboxModal } from './components/modals/NewSandboxModal'
+import { NewSecretModal } from './components/modals/NewSecretModal'
+import { NewKitModal } from './components/modals/NewKitModal'
+import type { Sandbox, LogLine } from './types'
+
+export function App() {
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox } = useStore()
+
+  useEffect(() => {
+    // Initial load
+    window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
+
+    // Live updates from main process
+    const unsub1 = window.minipit?.onSandboxesUpdated((s) => {
+      setSandboxes(s as Sandbox[])
+    })
+
+    // Stream real log lines from sbx processes
+    const unsub2 = window.minipit?.onLogLine((name: string, line: LogLine) => {
+      appendLog(name, line)
+      // If we got a log line, the sandbox must be running
+      updateSandbox(name, { status: 'running' })
+    })
+
+    const unsub3 = window.minipit?.onNavigate((page) =>
+      setActivePage(page as 'sandbox' | 'settings')
+    )
+    const unsub4 = window.minipit?.onOpenModal((m) =>
+      setModal(m as 'new-sandbox' | 'new-secret')
+    )
+    const unsub5 = window.minipit?.onSetTab((tab) =>
+      setActiveTab(tab as 'terminal' | 'info')
+    )
+
+    return () => {
+      unsub1?.()
+      unsub2?.()
+      unsub3?.()
+      unsub4?.()
+      unsub5?.()
+    }
+  }, [])
+
+  return (
+    <div className="app-root" onContextMenu={(e) => e.preventDefault()}>
+      <Toolbar />
+      <div className="body">
+        <Sidebar />
+        <div className="content">
+          {activePage === 'home'      && <HomePage />}
+          {activePage === 'projects'  && <ProjectsPage />}
+          {activePage === 'sandbox'   && <SandboxDetail />}
+          {activePage === 'templates' && <TemplatesPage />}
+          {activePage === 'mixins'    && <KitsPage variant="mixin" />}
+          {activePage === 'kits'      && <KitsPage variant="sandbox" />}
+          {activePage === 'settings'  && <SettingsPage />}
+
+          {modal === 'new-sandbox' && <NewSandboxModal />}
+          {modal === 'new-secret'  && <NewSecretModal />}
+          {modal === 'new-kit'     && <NewKitModal />}
+        </div>
+      </div>
+      <ContextMenu />
+    </div>
+  )
+}
