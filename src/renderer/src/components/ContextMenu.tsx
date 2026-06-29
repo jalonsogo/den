@@ -1,9 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
+import { TERM_THEMES, TERM_THEME_GROUPS } from '../lib/termThemes'
 
 export function ContextMenu() {
   const { contextMenu, setContextMenu, sandboxes, updateSandbox, setDeleting, setSandboxes } = useStore()
+  const termTheme = useStore((s) => s.termTheme)
+  const setTermTheme = useStore((s) => s.setTermTheme)
   const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
 
   const sandbox = sandboxes.find((s) => s.id === contextMenu.sandboxId)
 
@@ -16,6 +20,16 @@ export function ContextMenu() {
       document.removeEventListener('scroll', hide, true)
     }
   }, [])
+
+  // Clamp the menu inside the viewport so it never gets cut off at an edge.
+  useLayoutEffect(() => {
+    if (!contextMenu.visible || !ref.current) return
+    const M = 8
+    const r = ref.current.getBoundingClientRect()
+    const left = Math.max(M, Math.min(contextMenu.x, window.innerWidth - r.width - M))
+    const top = Math.max(M, Math.min(contextMenu.y, window.innerHeight - r.height - M))
+    setPos({ top, left })
+  }, [contextMenu.x, contextMenu.y, contextMenu.visible])
 
   if (!contextMenu.visible || !sandbox) return null
 
@@ -36,6 +50,7 @@ export function ContextMenu() {
     window.minipit?.openInFinder(sandbox.workspace)
   }
 
+
   const handleDelete = async () => {
     setContextMenu({ visible: false })
     if (!confirm(`Delete "${sandbox.name}"?`)) return
@@ -55,13 +70,9 @@ export function ContextMenu() {
     <div
       ref={ref}
       className="ctx-menu"
-      style={{ top: contextMenu.y, left: contextMenu.x }}
+      style={{ top: pos.top, left: pos.left }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="ctx-item">
-        Open Terminal <span className="ctx-kbd">↵</span>
-      </div>
-      <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleStop}>
         {sandbox.status === 'running' ? 'Stop' : 'Start'} <span className="ctx-kbd">⌘.</span>
       </div>
@@ -73,6 +84,23 @@ export function ContextMenu() {
       <div className="ctx-sep" />
       <div className="ctx-item">Save Snapshot…</div>
       <div className="ctx-item">Reset…</div>
+      <div className="ctx-sep" />
+      <div className="ctx-theme">
+        <span className="ctx-theme-lbl">Terminal theme</span>
+        <select
+          className="ctx-theme-select"
+          value={termTheme}
+          onChange={(e) => setTermTheme(e.target.value)}
+        >
+          {TERM_THEME_GROUPS.map((g) => (
+            <optgroup key={g.mode} label={g.label}>
+              {TERM_THEMES.filter((t) => t.mode === g.mode).map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
       <div className="ctx-sep" />
       <div className="ctx-item destructive" onClick={handleDelete}>
         Delete Sandbox…

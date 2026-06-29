@@ -1,11 +1,80 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Sun, Moon, Plus, Search, MoreVertical,
-  Home, Box, FolderGit2, LayoutGrid, Layers, Package, Settings
+  Sun, Moon, Plus, Filter, X, MoreVertical,
+  Home, FolderGit2, LayoutGrid, Layers, Package, Settings
 } from 'lucide-react'
 import { useStore } from '../store'
 import { AgentIcon } from './AgentIcon'
+import { ProjectAvatar } from './ProjectAvatar'
 import type { Sandbox, PageType } from '../types'
+
+// Collapsed-rail project icon with a hover popover: lists the project's
+// sandboxes (click to switch), and a "New sandbox" action.
+function CollapsedProject({
+  project, active, onOpenProject, onNew, onOpenSandbox
+}: {
+  project: { workspace: string; list: Sandbox[] }
+  active: boolean
+  onOpenProject: () => void
+  onNew: () => void
+  onOpenSandbox: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>()
+  const name = project.workspace.split('/').pop() || project.workspace
+
+  const show = (e: React.MouseEvent) => {
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setPos({ top: r.top, left: r.right + 8 })
+    setOpen(true)
+  }
+  const hide = () => { closeTimer.current = setTimeout(() => setOpen(false), 140) }
+
+  return (
+    <div
+      className={`sb-nav-item${active ? ' active' : ''}`}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onClick={onOpenProject}
+    >
+      <ProjectAvatar workspace={project.workspace} size={26} editable={false} />
+      {open && createPortal(
+        <div
+          className="sb-proj-pop"
+          style={{ top: pos.top, left: pos.left }}
+          onMouseEnter={() => { if (closeTimer.current) clearTimeout(closeTimer.current) }}
+          onMouseLeave={hide}
+        >
+          <div className="sb-proj-pop-hd">
+            <ProjectAvatar workspace={project.workspace} size={20} editable={false} />
+            <span className="sb-proj-pop-name">{name}</span>
+            <span className="sb-proj-pop-count">{project.list.length}</span>
+          </div>
+          <button className="sb-proj-pop-new" onClick={() => { onNew(); setOpen(false) }}>
+            <Plus size={13} /> New sandbox
+          </button>
+          <div className="sb-proj-pop-list">
+            {project.list.map((s) => (
+              <button
+                key={s.id}
+                className="sb-proj-pop-item"
+                onClick={() => { onOpenSandbox(s.id); setOpen(false) }}
+              >
+                <span className="sb-proj-pop-dot" data-on={s.status === 'running'} />
+                <span className="sb-proj-pop-name">{s.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
 
 function initials(name: string): string {
   const parts = name.split(/[^a-zA-Z0-9]+/).filter(Boolean)
@@ -66,22 +135,12 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
 
 export function Sidebar() {
   const {
-    sandboxes, activeSandboxId, activePage, setModal, setActivePage,
+    sandboxes, activeSandboxId, activePage, setModal, setActivePage, setActiveSandboxId,
     setNewSandboxWorkspace, setActiveProject, theme, toggleTheme, sidebarCollapsed
   } = useStore()
   const collapsed = sidebarCollapsed
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
-  const filterRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!filterOpen) return
-    const handler = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [filterOpen])
 
   // Filter by name, provider (agent), or status.
   const q = filter.trim().toLowerCase()
@@ -105,18 +164,47 @@ export function Sidebar() {
     setModal('new-sandbox')
   }
 
-  const navItem = (page: PageType, label: string, icon: React.ReactNode) => (
-    <div
-      className={`sb-nav-item${activePage === page ? ' active' : ''}`}
-      onClick={() => setActivePage(page)}
-      title={collapsed ? label : undefined}
-    >
-      {icon}
-      <span className="sb-nav-label">{label}</span>
-    </div>
+  // Show a Radix tooltip only when collapsed (labels are visible when expanded).
+  const tip = (label: string, node: React.ReactElement) =>
+    collapsed ? (
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>{node}</Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content className="sb-tip" side="right" sideOffset={8}>
+            {label}
+            <Tooltip.Arrow className="sb-tip-arrow" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    ) : node
+
+  // Always-on tooltip (e.g. show a project's full path on hover, even expanded).
+  const tipAlways = (label: string, node: React.ReactElement) => (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>{node}</Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="sb-tip" side="right" sideOffset={8}>
+          {label}
+          <Tooltip.Arrow className="sb-tip-arrow" />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   )
 
+  const navItem = (page: PageType, label: string, icon: React.ReactNode) =>
+    tip(
+      label,
+      <div
+        className={`sb-nav-item${activePage === page ? ' active' : ''}`}
+        onClick={() => setActivePage(page)}
+      >
+        {icon}
+        <span className="sb-nav-label">{label}</span>
+      </div>
+    )
+
   return (
+    <Tooltip.Provider delayDuration={250} skipDelayDuration={400}>
     <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
       <div className="sb-nav sb-nav-first">
         {navItem('home', 'Home', <Home size={16} />)}
@@ -127,38 +215,46 @@ export function Sidebar() {
       {/* Sandboxes — icon + title (menu option), inline filter, borderless add */}
       <div className="sb-section sb-section-grow">
         {collapsed ? (
-          <button className="sb-add sb-add-collapsed" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
+          tip('New Sandbox', <button className="sb-add sb-add-collapsed" onClick={() => openNew()}><Plus size={16} /></button>)
         ) : (
-          <div className="sb-sec-head">
-            <button
-              className={`sb-sec-title sb-sec-title-ic${activePage === 'sandbox' ? ' active' : ''}`}
-              onClick={() => setActivePage('sandbox')}
-            >
-              <Box size={16} />
-              Sandboxes
-            </button>
-            <div className="sb-filter-wrap" ref={filterRef}>
+          <>
+            <div className="sb-sec-head">
               <button
-                className={`sb-add${filter ? ' has-filter' : ''}`}
-                onClick={() => setFilterOpen((v) => !v)}
+                className={`sb-sec-title${activePage === 'sandbox' ? ' active' : ''}`}
+                onClick={() => setActivePage('sandbox')}
+              >
+                Sandboxes
+              </button>
+              <button
+                className={`sb-add${filterOpen || filter ? ' has-filter' : ''}`}
+                onClick={() => {
+                  setFilterOpen((v) => {
+                    if (v) setFilter('')
+                    return !v
+                  })
+                }}
                 title="Filter sandboxes"
               >
-                <Search size={15} />
+                <Filter size={15} />
               </button>
-              {filterOpen && (
-                <div className="sb-filter-pop">
-                  <input
-                    autoFocus
-                    value={filter}
-                    placeholder="Name, provider, or status"
-                    onChange={(e) => setFilter(e.target.value)}
-                  />
-                  {filter && <button className="sb-filter-clear" onClick={() => setFilter('')}>Clear</button>}
-                </div>
-              )}
+              <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
             </div>
-            <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
-          </div>
+            {filterOpen && (
+              <div className="sb-filter-row">
+                <Filter size={13} className="sb-filter-row-ic" />
+                <input
+                  autoFocus
+                  value={filter}
+                  placeholder="Name, provider, or status"
+                  onChange={(e) => setFilter(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { setFilter(''); setFilterOpen(false) } }}
+                />
+                {filter && (
+                  <button className="sb-filter-row-x" onClick={() => setFilter('')} title="Clear"><X size={13} /></button>
+                )}
+              </div>
+            )}
+          </>
         )}
         <div className="sb-list">
           {filtered.length === 0
@@ -181,24 +277,40 @@ export function Sidebar() {
             >
               Projects
             </button>
+            <button className="sb-add" onClick={() => openNew()} title="New project"><Plus size={16} /></button>
           </div>
+        ) : projects.length === 0 ? (
+          tip('Projects',
+            <div
+              className={`sb-nav-item${activePage === 'projects' ? ' active' : ''}`}
+              onClick={() => { setActiveProject(null); setActivePage('projects') }}
+            >
+              <FolderGit2 size={16} />
+            </div>
+          )
         ) : (
-          <div
-            className={`sb-nav-item${activePage === 'projects' ? ' active' : ''}`}
-            onClick={() => { setActiveProject(null); setActivePage('projects') }}
-            title="Projects"
-          >
-            <FolderGit2 size={16} />
-          </div>
+          projects.map((p) => (
+            <CollapsedProject
+              key={p.workspace}
+              project={p}
+              active={activePage === 'projects'}
+              onOpenProject={() => { setActiveProject(p.workspace); setActivePage('projects') }}
+              onNew={() => openNew(p.workspace)}
+              onOpenSandbox={(id) => { setActiveSandboxId(id); setActivePage('sandbox') }}
+            />
+          ))
         )}
         {!collapsed && (
           projects.length === 0
             ? <div className="sb-empty">No projects</div>
             : projects.map((p) => (
               <div className="sb-proj" key={p.workspace}>
-                <div className="sb-proj-main" onClick={() => { setActiveProject(p.workspace); setActivePage('projects') }} title={p.workspace}>
-                  <FolderGit2 size={15} style={{ color: 'var(--sb-muted)', flexShrink: 0 }} />
-                  <span className="sb-proj-name">{p.workspace.split('/').pop() || p.workspace}</span>
+                <div className="sb-proj-main" onClick={() => { setActiveProject(p.workspace); setActivePage('projects') }}>
+                  <ProjectAvatar workspace={p.workspace} size={22} />
+                  {tipAlways(
+                    p.workspace,
+                    <span className="sb-proj-name">{p.workspace.split('/').pop() || p.workspace}</span>
+                  )}
                   <span className="sb-proj-count">{p.list.length}</span>
                 </div>
                 <button className="sb-proj-add" title="New sandbox in this project" onClick={() => openNew(p.workspace)}>
@@ -239,5 +351,6 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+    </Tooltip.Provider>
   )
 }

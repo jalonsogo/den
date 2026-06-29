@@ -47,6 +47,72 @@ function getSbxPath(): string {
   )
 }
 
+// GUI apps don't inherit the shell PATH, so resolve brew by its known prefixes.
+function getBrewPath(): string {
+  const candidates = ['/opt/homebrew/bin/brew', '/usr/local/bin/brew']
+  const fs = require('fs')
+  return (
+    candidates.find((p) => {
+      try {
+        fs.accessSync(p)
+        return true
+      } catch {
+        return false
+      }
+    }) ?? 'brew'
+  )
+}
+
+// Parse the column-aligned `sbx policy ls` table into structured rules.
+// Resources span multiple lines (continuation rows have a blank PROVENANCE).
+function parsePolicyLs(out: string) {
+  const lines = out.split('\n')
+  let governance: string | null = null
+  let sync: string | null = null
+  const headerIdx = lines.findIndex((l) => l.includes('PROVENANCE') && l.includes('RESOURCES'))
+
+  for (let i = 0; i < (headerIdx === -1 ? lines.length : headerIdx); i++) {
+    const l = lines[i]
+    if (l.startsWith('Governance')) governance = l.replace('Governance', '').trim()
+    else if (l.startsWith('Sync')) sync = l.replace('Sync', '').trim()
+  }
+
+  const rules: Array<{
+    provenance: string; appliesTo: string; rule: string; type: string; decision: string; resources: string[]
+  }> = []
+  if (headerIdx === -1) return { governance, sync, rules }
+
+  const h = lines[headerIdx]
+  const cProv = h.indexOf('PROVENANCE')
+  const cApplies = h.indexOf('APPLIES_TO')
+  const cRule = h.indexOf('POLICY/RULE')
+  const cType = h.indexOf('TYPE')
+  const cDec = h.indexOf('DECISION')
+  const cRes = h.indexOf('RESOURCES')
+
+  let cur: (typeof rules)[number] | null = null
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (!l.trim()) continue
+    const prov = l.slice(cProv, cApplies).trim()
+    const res = l.slice(cRes).trim()
+    if (prov) {
+      cur = {
+        provenance: prov,
+        appliesTo: l.slice(cApplies, cRule).trim(),
+        rule: l.slice(cRule, cType).trim(),
+        type: l.slice(cType, cDec).trim(),
+        decision: l.slice(cDec, cRes).trim(),
+        resources: res ? [res] : []
+      }
+      rules.push(cur)
+    } else if (cur && res) {
+      cur.resources.push(res)
+    }
+  }
+  return { governance, sync, rules }
+}
+
 function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(getSbxPath(), args, { timeout: opts?.timeout ?? 10000 }, (err, stdout, stderr) => {
@@ -633,8 +699,10 @@ function setupIPC(): void {
     await sbxWithInput(['exec', name, 'sh', '-c', 'cat > "$1"', 'sh', path], content)
   })
 
-  // Open a host path (the workspace is bind-mounted) in the OS default app.
+  // Open a host path (the workspace is bind-mounted) in the OS default app,
+  // or an http(s) URL in the default browser.
   ipcMain.handle('minipit:open-path', (_, path: string) => {
+    if (/^https?:\/\//i.test(path)) return shell.openExternal(path)
     const expanded = path.replace(/^~/, app.getPath('home'))
     return shell.openPath(expanded)
   })
@@ -735,6 +803,91 @@ function setupIPC(): void {
     for (const [k, v] of Object.entries(settings)) store.set(k, v)
     if (typeof settings.launchAtLogin === 'boolean') {
       app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
+    }
+  })
+
+  // ── sbx runtime (version / update / release notes) ──────────────────────────
+
+  ipcMain.handle('minipit:sbx-version', (_, path?: string) =>
+    new Promise((resolve) => {
+      const bin = path || getSbxPath()
+      execFile(bin, ['version'], { timeout: 10000 }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ ok: false, error: (stderr || err.message).trim() })
+        } else {
+          const raw = stdout.trim()
+          const m = raw.match(/v?\d+\.\d+\.\d+[^\s]*/)
+          resolve({ ok: true, raw, version: m ? m[0] : raw })
+        }
+      })
+    })
+  )
+
+  ipcMain.handle('minipit:sbx-releases', async () => {
+    try {
+      const res = await fetch('https://api.github.com/repos/docker/sbx-releases/releases?per_page=8', {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'minipit' }
+      })
+      if (!res.ok) throw new Error(`GitHub ${res.status}`)
+      const data = (await res.json()) as Array<Record<string, unknown>>
+      return data.map((r) => ({
+        version: (r.tag_name as string) ?? '',
+        name: (r.name as string) || (r.tag_name as string) || '',
+        body: (r.body as string) ?? '',
+        url: (r.html_url as string) ?? '',
+        date: (r.published_at as string) ?? '',
+        prerelease: Boolean(r.prerelease)
+      }))
+    } catch (err) {
+      console.error('sbx-releases failed:', err)
+      return []
+    }
+  })
+
+  ipcMain.handle('minipit:sbx-brew', (_, action: 'update' | 'redownload') =>
+    new Promise((resolve) => {
+      const brew = getBrewPath()
+      const args =
+        action === 'redownload'
+          ? ['reinstall', '--cask', 'docker/tap/sbx']
+          : ['upgrade', '--cask', 'docker/tap/sbx']
+      const send = (chunk: string) => mainWindow?.webContents.send('minipit:runtime-output', chunk)
+      send(`$ brew ${args.join(' ')}\n\n`)
+      const proc = spawn(brew, args, { env: { ...process.env } })
+      proc.stdout.on('data', (d) => send(d.toString()))
+      proc.stderr.on('data', (d) => send(d.toString()))
+      proc.on('error', (e) => {
+        send(`\n[error] ${e.message}\n`)
+        resolve({ ok: false, code: -1 })
+      })
+      proc.on('close', (code) => {
+        send(`\n[exit ${code}]\n`)
+        resolve({ ok: code === 0, code: code ?? -1 })
+      })
+    })
+  )
+
+  ipcMain.handle('minipit:network-policy', async (_, name?: string) => {
+    try {
+      const args = ['policy', 'ls']
+      if (name) args.push(name)
+      args.push('--type', 'network')
+      const out = await sbx(args, { timeout: 12000 })
+      return { ok: true, ...parsePolicyLs(out), raw: out }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  ipcMain.handle('minipit:policy-allow', async (_, name: string, resources: string) => {
+    try {
+      const args = ['policy', 'allow', 'network']
+      if (name) args.push('--sandbox', name)
+      args.push(resources)
+      const output = await sbx(args, { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 

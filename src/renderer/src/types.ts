@@ -125,6 +125,33 @@ export interface Template {
   createdAt: string
 }
 
+export interface SbxRelease {
+  version: string
+  name: string
+  body: string
+  url: string
+  date: string
+  prerelease: boolean
+}
+
+export interface PolicyRule {
+  provenance: string
+  appliesTo: string
+  rule: string
+  type: string
+  decision: string
+  resources: string[]
+}
+
+export interface NetworkPolicy {
+  ok: boolean
+  governance?: string | null
+  sync?: string | null
+  rules?: PolicyRule[]
+  raw?: string
+  error?: string
+}
+
 export interface AppSettings {
   sbxPath: string
   pollFocused: string
@@ -171,6 +198,12 @@ declare global {
       onLogTail(cb: (chunk: string) => void): () => void
       getSettings(): Promise<AppSettings>
       saveSettings(settings: Partial<AppSettings>): Promise<void>
+      sbxVersion(path?: string): Promise<{ ok: boolean; raw?: string; version?: string; error?: string }>
+      sbxReleases(): Promise<SbxRelease[]>
+      sbxBrew(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
+      onRuntimeOutput(cb: (chunk: string) => void): () => void
+      networkPolicy(name?: string): Promise<NetworkPolicy>
+      policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>
       defaultWorkspace(): Promise<string>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void

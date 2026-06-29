@@ -1,7 +1,8 @@
-import { ChevronLeft, FolderGit2, Plus } from 'lucide-react'
+import { ChevronLeft, Plus } from 'lucide-react'
 import { useStore } from '../store'
 import { AgentIcon } from './AgentIcon'
 import { FilesPanel } from './FilesPanel'
+import { ProjectAvatar } from './ProjectAvatar'
 
 export function ProjectsPage() {
   const { sandboxes, activeProject, setActiveProject, setActiveSandboxId, setModal, setNewSandboxWorkspace } = useStore()
@@ -14,8 +15,8 @@ export function ProjectsPage() {
   }
   const entries = [...projects.entries()]
 
-  const openNew = (workspace: string) => {
-    setNewSandboxWorkspace(workspace)
+  const openNew = (workspace?: string) => {
+    setNewSandboxWorkspace(workspace ?? null)
     setModal('new-sandbox')
   }
 
@@ -32,6 +33,7 @@ export function ProjectsPage() {
           <button className="fv-back" onClick={() => setActiveProject(null)} title="All projects">
             <ChevronLeft size={16} />
           </button>
+          <ProjectAvatar workspace={activeProject} size={24} />
           <span className="page-title">{name}</span>
           <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => openNew(activeProject)}>
             <Plus size={13} /> New sandbox
@@ -69,36 +71,47 @@ export function ProjectsPage() {
     <div className="page">
       <div className="page-hdr">
         <span className="page-title">Projects</span>
+        <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => openNew()}>
+          <Plus size={13} /> New project
+        </button>
       </div>
 
-      <div className="page-body" style={{ maxWidth: 640 }}>
+      <div className="page-body home-dash">
         <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
           Workspaces you've launched sandboxes from. Each project groups its sandboxes.
         </p>
 
         {entries.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>
-            No projects yet
+          <div className="proj-empty">
+            <p>No projects yet. A project is the workspace folder you launch a sandbox from.</p>
+            <button className="btn btn-primary btn-sm" onClick={() => openNew()}>
+              <Plus size={13} /> New project
+            </button>
           </div>
         ) : (
-          entries.map(([workspace, list]) => (
-            <div className="proj-card" key={workspace}>
-              <div className="proj-hdr" onClick={() => setActiveProject(workspace)} style={{ cursor: 'pointer' }}>
-                <FolderGit2 size={15} style={{ color: 'var(--t3)', flexShrink: 0 }} />
-                <span className="proj-name">{workspace.split('/').pop() || workspace}</span>
-                <span className="proj-path">{workspace}</span>
-              </div>
-              <div className="proj-boxes">
-                {list.map((s) => (
-                  <button key={s.id} className="proj-box" onClick={() => setActiveSandboxId(s.id)}>
-                    <AgentIcon agent={s.agent} size={13} />
-                    <span>{s.name}</span>
-                    <span className={`proj-dot ${s.status === 'running' ? 'running' : 'stopped'}`} />
+          <div className="proj-grid">
+            {entries.map(([workspace, list]) => (
+              <div className="proj-card" key={workspace}>
+                <div className="proj-hdr" onClick={() => setActiveProject(workspace)} style={{ cursor: 'pointer' }}>
+                  <ProjectAvatar workspace={workspace} size={24} />
+                  <span className="proj-name">{workspace.split('/').pop() || workspace}</span>
+                  <span className="proj-path">{workspace}</span>
+                </div>
+                <div className="proj-boxes">
+                  {list.map((s) => (
+                    <button key={s.id} className="proj-box" onClick={() => setActiveSandboxId(s.id)}>
+                      <AgentIcon agent={s.agent} size={13} />
+                      <span>{s.name}</span>
+                      <span className={`proj-dot ${s.status === 'running' ? 'running' : 'stopped'}`} />
+                    </button>
+                  ))}
+                  <button className="proj-box proj-box-new" onClick={() => openNew(workspace)} title="New sandbox in this project">
+                    <Plus size={13} /> New sandbox
                   </button>
-                ))}
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
       </div>
     </div>

@@ -39,6 +39,16 @@ const api = {
   },
   getSettings:   ()                     => ipcRenderer.invoke('minipit:get-settings'),
   saveSettings:  (s: unknown)           => ipcRenderer.invoke('minipit:save-settings', s),
+  sbxVersion:    (path?: string)        => ipcRenderer.invoke('minipit:sbx-version', path),
+  sbxReleases:   ()                     => ipcRenderer.invoke('minipit:sbx-releases'),
+  sbxBrew:       (action: string)       => ipcRenderer.invoke('minipit:sbx-brew', action),
+  networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
+  policyAllow:   (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-allow', name, resources),
+  onRuntimeOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:runtime-output', handler)
+    return () => ipcRenderer.removeListener('minipit:runtime-output', handler)
+  },
   showOpenDialog:()                     => ipcRenderer.invoke('minipit:show-open-dialog'),
   defaultWorkspace: ()                  => ipcRenderer.invoke('minipit:default-workspace'),
 
