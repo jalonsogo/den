@@ -218,7 +218,7 @@ declare global {
       showOpenDialog(): Promise<string | null>
       listProjects(): Promise<string[]>
       addProject(): Promise<string | null>
-      removeProject(dir: string): Promise<void>
+      removeProject(dir: string, deleteFolder?: boolean): Promise<{ ok: boolean; error?: string }>
       defaultWorkspace(): Promise<string>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void

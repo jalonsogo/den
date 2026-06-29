@@ -1044,9 +1044,15 @@ function setupIPC(): void {
     return dir
   })
 
-  ipcMain.handle('minipit:remove-project', (_, dir: string) => {
+  ipcMain.handle('minipit:remove-project', (_, dir: string, deleteFolder?: boolean) => {
     const list = ((store.get('projects') as string[]) ?? []).filter((d) => d !== dir)
     store.set('projects', list)
+    // Only touch disk when the user explicitly opted in.
+    if (deleteFolder && dir) {
+      try { require('fs').rmSync(dir, { recursive: true, force: true }) }
+      catch (err) { console.error('delete project folder failed:', err); return { ok: false, error: String(err) } }
+    }
+    return { ok: true }
   })
 
   // ── Shell PTY ──────────────────────────────────────────────────────────────

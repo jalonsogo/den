@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Sun, Moon, Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown,
+  Sun, Moon, Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
   Home, FolderGit2, LayoutGrid, Layers, Package, Settings
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -25,9 +25,13 @@ function ProjectHover({
 }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
+  const [confirmDel, setConfirmDel] = useState(false)
+  const [delFolder, setDelFolder] = useState(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout>>()
   const pickerOpen = useStore((s) => s.pickerOpen)
+  const removeProject = useStore((s) => s.removeProject)
   const name = project.workspace.split('/').pop() || project.workspace
+  const isEmpty = project.list.length === 0
 
   const show = (e: React.MouseEvent) => {
     if (closeTimer.current) clearTimeout(closeTimer.current)
@@ -35,7 +39,7 @@ function ProjectHover({
     setPos({ top: r.top, left: r.right + 8 })
     setOpen(true)
   }
-  const hide = () => { closeTimer.current = setTimeout(() => setOpen(false), 140) }
+  const hide = () => { closeTimer.current = setTimeout(() => { setOpen(false); setConfirmDel(false) }, 140) }
 
   return (
     <div className={className} onMouseEnter={show} onMouseLeave={hide} onClick={onClick}>
@@ -70,6 +74,33 @@ function ProjectHover({
                 </button>
               ))}
           </div>
+
+          {/* Delete is only offered for empty projects (no sandboxes to orphan). */}
+          {isEmpty && (
+            <div className="sb-proj-pop-foot">
+              {confirmDel ? (
+                <>
+                  <label className="sb-proj-pop-chk">
+                    <input type="checkbox" checked={delFolder} onChange={(e) => setDelFolder(e.target.checked)} />
+                    Also delete the folder from disk
+                  </label>
+                  <div className="sb-proj-pop-delrow">
+                    <button className="sb-proj-pop-cancel" onClick={(e) => { e.stopPropagation(); setConfirmDel(false) }}>Cancel</button>
+                    <button
+                      className="sb-proj-pop-confirm"
+                      onClick={(e) => { e.stopPropagation(); removeProject(project.workspace, delFolder); setOpen(false); setConfirmDel(false) }}
+                    >
+                      Delete{delFolder ? ' + folder' : ''}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button className="sb-proj-pop-rm" onClick={(e) => { e.stopPropagation(); setConfirmDel(true) }}>
+                  <Trash2 size={12} /> Remove project
+                </button>
+              )}
+            </div>
+          )}
         </div>,
         document.body
       )}

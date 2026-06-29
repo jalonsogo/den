@@ -50,7 +50,7 @@ interface AppState {
   setPickerOpen:      (open: boolean) => void
   loadProjects:       () => void
   addProject:         () => Promise<string | null>
-  removeProject:      (dir: string) => void
+  removeProject:      (dir: string, deleteFolder?: boolean) => void
   setDeleting:        (id: string, on: boolean) => void
   updateSandbox:      (id: string, updates: Partial<Sandbox>) => void
   setActiveSandboxId: (id: string | null) => void
@@ -185,8 +185,8 @@ export const useStore = create<AppState>((set) => ({
     return dir ?? null
   },
 
-  removeProject: (dir) => {
-    window.minipit?.removeProject(dir).catch(() => {})
+  removeProject: (dir, deleteFolder) => {
+    window.minipit?.removeProject(dir, deleteFolder).catch(() => {})
     set((s) => ({ customProjects: s.customProjects.filter((d) => d !== dir) }))
   },
 

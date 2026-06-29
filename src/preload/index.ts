@@ -54,7 +54,7 @@ const api = {
   showOpenDialog:()                     => ipcRenderer.invoke('minipit:show-open-dialog'),
   listProjects:  ()                     => ipcRenderer.invoke('minipit:list-projects'),
   addProject:    ()                     => ipcRenderer.invoke('minipit:add-project'),
-  removeProject: (dir: string)          => ipcRenderer.invoke('minipit:remove-project', dir),
+  removeProject: (dir: string, deleteFolder?: boolean) => ipcRenderer.invoke('minipit:remove-project', dir, deleteFolder),
   defaultWorkspace: ()                  => ipcRenderer.invoke('minipit:default-workspace'),
 
   onSandboxesUpdated: (cb: (sandboxes: unknown[]) => void) => {

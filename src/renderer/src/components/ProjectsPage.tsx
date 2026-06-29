@@ -1,11 +1,14 @@
-import { ChevronLeft, Plus } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { AgentIcon } from './AgentIcon'
 import { FilesPanel } from './FilesPanel'
 import { ProjectAvatar } from './ProjectAvatar'
 
 export function ProjectsPage() {
-  const { sandboxes, activeProject, setActiveProject, setActiveSandboxId, setActivePage, setModal, setNewSandboxWorkspace, customProjects, addProject } = useStore()
+  const { sandboxes, activeProject, setActiveProject, setActiveSandboxId, setActivePage, setModal, setNewSandboxWorkspace, customProjects, addProject, removeProject } = useStore()
+  const [delFor, setDelFor] = useState<string | null>(null)
+  const [delFolder, setDelFolder] = useState(false)
 
   // Group sandboxes by workspace, then fold in empty (sandbox-less) projects.
   const projects = new Map<string, typeof sandboxes>()
@@ -103,19 +106,47 @@ export function ProjectsPage() {
                   <ProjectAvatar workspace={workspace} size={24} />
                   <span className="proj-name">{workspace.split('/').pop() || workspace}</span>
                   <span className="proj-path">{workspace}</span>
-                </div>
-                <div className="proj-boxes">
-                  {list.map((s) => (
-                    <button key={s.id} className="proj-box" onClick={() => setActiveSandboxId(s.id)}>
-                      <AgentIcon agent={s.agent} size={13} />
-                      <span>{s.name}</span>
-                      <span className={`proj-dot ${s.status === 'running' ? 'running' : 'stopped'}`} />
+                  {list.length === 0 && (
+                    <button
+                      className="proj-del"
+                      title="Remove project"
+                      onClick={(e) => { e.stopPropagation(); setDelFor(delFor === workspace ? null : workspace); setDelFolder(false) }}
+                    >
+                      <Trash2 size={14} />
                     </button>
-                  ))}
-                  <button className="proj-box proj-box-new" onClick={() => openNew(workspace)} title="New sandbox in this project">
-                    <Plus size={13} /> New sandbox
-                  </button>
+                  )}
                 </div>
+
+                {delFor === workspace ? (
+                  <div className="proj-del-confirm">
+                    <label className="proj-del-chk">
+                      <input type="checkbox" checked={delFolder} onChange={(e) => setDelFolder(e.target.checked)} />
+                      Also delete the folder from disk
+                    </label>
+                    <div className="proj-del-actions">
+                      <button className="btn btn-default btn-sm" onClick={() => setDelFor(null)}>Cancel</button>
+                      <button
+                        className="btn btn-destructive btn-sm"
+                        onClick={() => { removeProject(workspace, delFolder); setDelFor(null) }}
+                      >
+                        Delete{delFolder ? ' + folder' : ''}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="proj-boxes">
+                    {list.map((s) => (
+                      <button key={s.id} className="proj-box" onClick={() => setActiveSandboxId(s.id)}>
+                        <AgentIcon agent={s.agent} size={13} />
+                        <span>{s.name}</span>
+                        <span className={`proj-dot ${s.status === 'running' ? 'running' : 'stopped'}`} />
+                      </button>
+                    ))}
+                    <button className="proj-box proj-box-new" onClick={() => openNew(workspace)} title="New sandbox in this project">
+                      <Plus size={13} /> New sandbox
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
