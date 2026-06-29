@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="logo.png" alt="den" width="320" />
+<img src="resources/logo.png" alt="den" width="400" />
+</div>
 
-# den
+# DEN Studio (Developer Ephemeral Nodes)
 
 **A beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (the `sbx` CLI).**
 

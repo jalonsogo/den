@@ -6,26 +6,27 @@
   <title>den — Your AI Sandboxes, Beautifully Managed</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=Figtree:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
+    /* Monochrome palette matched to the den app icon (charcoal + white). */
     :root {
-      --sand-0:      #FEFCF6;
-      --sand-1:      #FFF8EC;
-      --sand-2:      #F5E5BF;
-      --sand-3:      #E6CF9A;
-      --ocean-deep:  #0D2B3E;
-      --ocean-mid:   #1B5E7B;
-      --ocean-bright:#2E9EC5;
-      --ocean-sky:   #A8D8EA;
-      --coral:       #E8784A;
-      --coral-light: #F4A07A;
-      --coral-pale:  #FFF0E8;
-      --navy:        #0A1F2E;
-      --text-dark:   #1A2B3C;
-      --text-mid:    #3D5A6E;
-      --text-light:  #7A9BAD;
+      --sand-0:      #FAFAFA;
+      --sand-1:      #F4F4F5;
+      --sand-2:      #E4E4E7;
+      --sand-3:      #D4D4D8;
+      --ocean-deep:  #18181B;
+      --ocean-mid:   #2B2E36;
+      --ocean-bright:#3F3F46;
+      --ocean-sky:   #D4D4D8;
+      --coral:       #26272E;
+      --coral-light: #3F3F46;
+      --coral-pale:  #F4F4F5;
+      --navy:        #18181B;
+      --text-dark:   #18181B;
+      --text-mid:    #52525B;
+      --text-light:  #A1A1AA;
       --white:       #FFFFFF;
     }
 
@@ -49,28 +50,28 @@
       justify-content: space-between;
       background: linear-gradient(
         135deg,
-        rgba(255, 251, 242, 0.78) 0%,
-        rgba(254, 248, 236, 0.68) 50%,
-        rgba(255, 251, 242, 0.78) 100%
+        rgba(255, 255, 255, 0.78) 0%,
+        rgba(250, 250, 250, 0.68) 50%,
+        rgba(255, 255, 255, 0.78) 100%
       );
       backdrop-filter: blur(24px) saturate(180%) brightness(1.04);
       -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.04);
       border-bottom: 1px solid rgba(255, 255, 255, 0.55);
       box-shadow:
-        0 1px 0 rgba(232, 213, 160, 0.3),
-        0 4px 24px rgba(13, 43, 62, 0.06),
+        0 1px 0 rgba(228, 228, 231, 0.3),
+        0 4px 24px rgba(24, 24, 27, 0.06),
         inset 0 1px 0 rgba(255, 255, 255, 0.9);
     }
     nav.scrolled {
       background: linear-gradient(
         135deg,
-        rgba(255, 251, 242, 0.85) 0%,
-        rgba(254, 248, 236, 0.75) 50%,
-        rgba(255, 251, 242, 0.85) 100%
+        rgba(255, 255, 255, 0.85) 0%,
+        rgba(250, 250, 250, 0.75) 50%,
+        rgba(255, 255, 255, 0.85) 100%
       );
       box-shadow:
-        0 1px 0 rgba(232, 213, 160, 0.4),
-        0 8px 32px rgba(13, 43, 62, 0.09),
+        0 1px 0 rgba(228, 228, 231, 0.4),
+        0 8px 32px rgba(24, 24, 27, 0.09),
         inset 0 1px 0 rgba(255, 255, 255, 0.95);
     }
     .nav-logo {
@@ -79,7 +80,7 @@
     }
     .nav-logo img { width: 34px; height: 34px; object-fit: contain; }
     .nav-logo-text {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 21px; font-weight: 600;
       color: var(--text-dark); letter-spacing: -0.3px;
     }
@@ -101,13 +102,13 @@
       padding: 9px 20px;
       border-radius: 100px;
       font-weight: 600 !important;
-      box-shadow: 0 2px 12px rgba(232,120,74,0.3);
+      box-shadow: 0 2px 12px rgba(38,39,46,0.3);
       transition: background 0.2s, transform 0.2s, box-shadow 0.2s !important;
     }
     .nav-cta:hover {
-      background: #d4663a !important;
+      background: #000000 !important;
       transform: translateY(-1px);
-      box-shadow: 0 6px 20px rgba(232,120,74,0.4) !important;
+      box-shadow: 0 6px 20px rgba(38,39,46,0.4) !important;
     }
 
     /* ─── HERO ─── */
@@ -125,8 +126,8 @@
     .hero-bg {
       position: absolute; inset: 0;
       background:
-        radial-gradient(ellipse 55% 40% at 18% 90%, rgba(232,120,74,0.06) 0%, transparent 60%),
-        radial-gradient(ellipse 45% 35% at 85% 80%, rgba(46,158,197,0.05) 0%, transparent 60%);
+        radial-gradient(ellipse 55% 40% at 18% 90%, rgba(38,39,46,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 35% at 85% 80%, rgba(63,63,70,0.05) 0%, transparent 60%);
     }
     /* subtle grain */
     .hero-bg::after {
@@ -139,7 +140,7 @@
     .hero-eyebrow {
       display: inline-flex; align-items: center; gap: 8px;
       background: var(--coral-pale);
-      border: 1px solid rgba(232,120,74,0.22);
+      border: 1px solid rgba(38,39,46,0.22);
       color: var(--coral);
       font-size: 11px; font-weight: 700;
       letter-spacing: 0.1em; text-transform: uppercase;
@@ -155,7 +156,7 @@
       object-fit: contain;
       margin-bottom: 36px;
       opacity: 1;
-      filter: drop-shadow(0 24px 48px rgba(13,43,62,0.14));
+      filter: drop-shadow(0 24px 48px rgba(24,24,27,0.14));
       position: relative;
     }
     .hero-logo.floating {
@@ -163,11 +164,11 @@
     }
 
     .hero-title {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: clamp(50px, 8vw, 92px);
-      font-weight: 700;
-      line-height: 1.01;
-      letter-spacing: -0.035em;
+      font-weight: 800;
+      line-height: 1.02;
+      letter-spacing: -0.04em;
       color: var(--text-dark);
       margin-bottom: 26px;
       max-width: 880px;
@@ -175,7 +176,7 @@
       animation: fadeUp 0.8s ease forwards 0.5s;
       position: relative;
     }
-    .hero-title em { font-style: italic; color: var(--ocean-mid); }
+    .hero-title em { font-style: normal; color: var(--text-light); }
 
     .hero-sub {
       font-size: 18px; font-weight: 400;
@@ -200,13 +201,13 @@
       font-size: 15px; font-weight: 600;
       padding: 14px 30px; border-radius: 100px;
       text-decoration: none;
-      box-shadow: 0 4px 22px rgba(232,120,74,0.32);
+      box-shadow: 0 4px 22px rgba(38,39,46,0.32);
       transition: all 0.25s;
     }
     .btn-primary:hover {
-      background: #d4663a;
+      background: #000000;
       transform: translateY(-2px);
-      box-shadow: 0 10px 32px rgba(232,120,74,0.42);
+      box-shadow: 0 10px 32px rgba(38,39,46,0.42);
     }
     .btn-secondary {
       display: inline-flex; align-items: center; gap: 8px;
@@ -257,7 +258,7 @@
       color: var(--ocean-bright); margin-bottom: 14px;
     }
     .section-title {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: clamp(34px, 5vw, 52px);
       font-weight: 600; text-align: center;
       line-height: 1.12; letter-spacing: -0.025em;
@@ -285,18 +286,18 @@
     .feature-card.visible { opacity: 1; transform: translateY(0); }
     .feature-card:hover {
       transform: translateY(-6px) !important;
-      box-shadow: 0 24px 64px rgba(13,43,62,0.09);
+      box-shadow: 0 24px 64px rgba(24,24,27,0.09);
     }
     .feat-icon {
       width: 52px; height: 52px; border-radius: 14px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 22px; margin-bottom: 22px; flex-shrink: 0;
+      color: var(--ocean-mid); margin-bottom: 22px; flex-shrink: 0;
     }
     .feat-icon.a { background: var(--sand-2); }
-    .feat-icon.b { background: rgba(46,158,197,0.1); }
-    .feat-icon.c { background: rgba(232,120,74,0.1); }
+    .feat-icon.b { background: rgba(63,63,70,0.1); }
+    .feat-icon.c { background: rgba(38,39,46,0.1); }
     .feat-title {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 19px; font-weight: 600;
       color: var(--text-dark); margin-bottom: 10px;
       letter-spacing: -0.02em;
@@ -333,15 +334,15 @@
     .step-num {
       width: 54px; height: 54px; border-radius: 50%;
       background: var(--ocean-deep); color: white;
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 20px; font-weight: 600;
       display: flex; align-items: center; justify-content: center;
       margin-bottom: 24px; position: relative; z-index: 1;
       flex-shrink: 0;
-      box-shadow: 0 4px 16px rgba(13,43,62,0.2);
+      box-shadow: 0 4px 16px rgba(24,24,27,0.2);
     }
     .step-title {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 17px; font-weight: 600;
       color: var(--text-dark); margin-bottom: 9px;
     }
@@ -358,7 +359,7 @@
       position: absolute; top: -220px; left: 50%;
       transform: translateX(-50%);
       width: 900px; height: 900px;
-      background: radial-gradient(ellipse, rgba(46,158,197,0.12) 0%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(63,63,70,0.12) 0%, transparent 70%);
       pointer-events: none;
     }
     .mockup-section .section-eyebrow { color: var(--ocean-sky); }
@@ -412,7 +413,7 @@
     }
     .ui-sb-header img { width: 22px; height: 22px; object-fit: contain; }
     .ui-sb-name {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 15px; font-weight: 600;
       color: rgba(255,255,255,0.88);
     }
@@ -431,7 +432,7 @@
       transition: all 0.15s;
     }
     .ui-nav-item.active {
-      background: rgba(46,158,197,0.14);
+      background: rgba(63,63,70,0.14);
       color: var(--ocean-sky);
     }
     .ui-nav-dot {
@@ -446,7 +447,7 @@
       justify-content: space-between; margin-bottom: 18px;
     }
     .ui-main-title {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 17px; font-weight: 600;
       color: rgba(255,255,255,0.88);
     }
@@ -504,6 +505,44 @@
     .log-m.blue  { color: var(--ocean-sky); }
     .log-m.dim   { color: rgba(255,255,255,0.4); }
 
+    /* den-accurate mockup: sandbox avatar rows + agent terminal */
+    .ui-sb-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px; margin: 0 4px 1px; }
+    .ui-sb-item.active { background: rgba(255,255,255,0.07); }
+    .ui-av {
+      width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.7);
+      font-size: 10px; font-weight: 600;
+    }
+    .ui-av-folder { font-size: 12px; }
+    .ui-sb-text { flex: 1; min-width: 0; }
+    .ui-sb-itemname { font-size: 12px; color: rgba(255,255,255,0.85); }
+    .ui-sb-itemsub { font-size: 10px; color: rgba(255,255,255,0.32); }
+    .ui-rundot { width: 6px; height: 6px; border-radius: 50%; background: #4ADE80; flex-shrink: 0; }
+    .ui-count { font-size: 10px; color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.08); border-radius: 8px; padding: 1px 6px; }
+
+    .ui-main2 { display: flex; flex-direction: column; background: #0F1D2B; overflow: hidden; }
+    .ui-detail-hdr { display: flex; align-items: center; gap: 9px; padding: 13px 18px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .ui-detail-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); }
+    .ui-chip { font-size: 10.5px; color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05); border-radius: 100px; padding: 2px 9px; }
+    .ui-detail-status { font-size: 12px; color: rgba(255,255,255,0.4); }
+    .ui-stop { margin-left: auto; font-size: 11.5px; color: rgba(255,255,255,0.78); border: 1px solid rgba(255,255,255,0.14); border-radius: 7px; padding: 4px 11px; }
+    .ui-termbar { display: flex; align-items: center; padding: 8px 14px; background: #0b1622; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .ui-seg { display: flex; gap: 2px; background: rgba(255,255,255,0.06); border-radius: 6px; padding: 2px; }
+    .ui-seg span { font-size: 11.5px; padding: 3px 11px; border-radius: 4px; color: rgba(255,255,255,0.4); }
+    .ui-seg span.on { background: rgba(255,255,255,0.12); color: #fff; }
+    .ui-files { margin-left: auto; font-size: 11.5px; color: rgba(255,255,255,0.5); }
+    .ui-term {
+      flex: 1; background: #0a0a0a; padding: 16px 18px;
+      font-family: 'Courier New', monospace; font-size: 11.5px; line-height: 1.9;
+      color: #d4d4d4; overflow: hidden;
+    }
+    .ui-term .tm-accent { color: #ffffff; }
+    .ui-term .tm-norm { color: #d4d4d4; }
+    .ui-term .tm-dim { color: rgba(255,255,255,0.42); }
+    .ui-term .tm-prompt { color: rgba(255,255,255,0.85); }
+    .ui-term .tm-caret { color: #fff; animation: pulse 1.1s steps(1) infinite; }
+
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.35; }
@@ -518,7 +557,7 @@
     }
     .stat-item { text-align: center; }
     .stat-num {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 44px; font-weight: 700;
       color: var(--ocean-deep);
       letter-spacing: -0.03em; line-height: 1;
@@ -538,22 +577,22 @@
       position: absolute; bottom: -80px; left: 50%;
       transform: translateX(-50%);
       width: 700px; height: 350px;
-      background: radial-gradient(ellipse, rgba(232,120,74,0.14) 0%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(38,39,46,0.14) 0%, transparent 70%);
     }
     .cta-section::after {
       content: '';
       position: absolute; top: -100px; right: -100px;
       width: 400px; height: 400px;
-      background: radial-gradient(ellipse, rgba(46,158,197,0.1) 0%, transparent 70%);
+      background: radial-gradient(ellipse, rgba(63,63,70,0.1) 0%, transparent 70%);
     }
     .cta-title {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: clamp(40px, 6vw, 66px);
       font-weight: 600; color: var(--white);
       line-height: 1.08; letter-spacing: -0.032em;
       margin-bottom: 20px; position: relative; z-index: 1;
     }
-    .cta-title em { font-style: italic; color: var(--ocean-sky); }
+    .cta-title em { font-style: normal; color: var(--ocean-sky); }
     .cta-sub {
       font-size: 17px; color: rgba(255,255,255,0.5);
       margin-bottom: 52px; max-width: 440px;
@@ -598,7 +637,7 @@
     }
     .footer-logo img { width: 26px; height: 26px; object-fit: contain; opacity: 0.75; }
     .footer-logo-text {
-      font-family: 'Fraunces', serif;
+      font-family: 'Figtree', sans-serif;
       font-size: 18px; font-weight: 600;
       color: rgba(255,255,255,0.65);
     }
@@ -649,7 +688,7 @@
 <!-- ── NAV ── -->
 <nav id="nav">
   <a href="https://den.studio" class="nav-logo">
-    <img src="logo.png" alt="den">
+    <img src="resources/logo.png" alt="den">
     <span class="nav-logo-text">den</span>
   </a>
   <ul class="nav-links">
@@ -667,7 +706,7 @@
 
   <div class="hero-eyebrow">Built on Docker Sandboxes</div>
 
-  <img id="heroLogo" src="logo.png" alt="den" class="hero-logo">
+  <img id="heroLogo" src="resources/logo.png" alt="den" class="hero-logo">
 
   <h1 class="hero-title">
     Your AI sandboxes,<br><em>beautifully</em> managed.
@@ -699,63 +738,49 @@
   </div>
 </section>
 
-<!-- wave to sand -->
-<div class="wave">
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 72" preserveAspectRatio="none" style="height:56px">
-    <path d="M0,36 C240,72 480,0 720,36 C960,72 1200,0 1440,36 L1440,72 L0,72 Z" fill="#FFF8EC"/>
-  </svg>
-</div>
-
 <!-- ── FEATURES ── -->
 <section class="features" id="features">
-  <div class="section-eyebrow">Everything you need</div>
-  <h2 class="section-title">The GUI sbx deserved</h2>
-  <p class="section-sub">From your first sandbox to a fleet of AI agents — den makes every step feel effortless.</p>
+  <div class="section-eyebrow">What it does</div>
+  <h2 class="section-title">A real window into sbx</h2>
+  <p class="section-sub">Launch sandboxes, drive agents, browse files, and manage network policy — without living in the terminal.</p>
 
   <div class="features-grid" id="featGrid">
     <div class="feature-card">
-      <div class="feat-icon a">🏖️</div>
-      <h3 class="feat-title">Visual Dashboard</h3>
-      <p class="feat-desc">See every sandbox at a glance. Status, resource usage, agent activity — one clean view, nothing buried in logs.</p>
+      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></div>
+      <h3 class="feat-title">Sandbox dashboard</h3>
+      <p class="feat-desc">Every sandbox with its agent, status and uptime in one window — plus a menu-bar menu for quick access.</p>
     </div>
     <div class="feature-card">
-      <div class="feat-icon b">⚡</div>
-      <h3 class="feat-title">One-Click Launch</h3>
-      <p class="feat-desc">Spin up an isolated microVM in seconds. Pick your environment, configure resources, and hit go.</p>
+      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+      <h3 class="feat-title">Agent &amp; shell terminals</h3>
+      <p class="feat-desc">Full agent TUIs — Claude Code, Codex, Cursor, Gemini — and an interactive shell, over a real PTY.</p>
     </div>
     <div class="feature-card">
-      <div class="feat-icon c">👁️</div>
-      <h3 class="feat-title">Live Agent Monitor</h3>
-      <p class="feat-desc">Watch your AI agents work in real time. Streaming logs, file events, and container activity — all surfaced clearly.</p>
+      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+      <h3 class="feat-title">Files, inline</h3>
+      <p class="feat-desc">Browse the sandbox workspace, open files in an editor, and see the agent's changes with live git status.</p>
     </div>
     <div class="feature-card">
-      <div class="feat-icon b">📂</div>
-      <h3 class="feat-title">File Explorer</h3>
-      <p class="feat-desc">Browse the sandbox filesystem from your desktop. Open, inspect, and copy files without manual volume mounts.</p>
+      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></div>
+      <h3 class="feat-title">Network policy</h3>
+      <p class="feat-desc">See exactly which domains a sandbox can reach, and add allow rules — without leaving the app.</p>
     </div>
     <div class="feature-card">
-      <div class="feat-icon a">🏗️</div>
-      <h3 class="feat-title">Environment Builder</h3>
-      <p class="feat-desc">Craft reusable sandbox templates visually. Layer tools, packages, and config — then save for next time.</p>
+      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg></div>
+      <h3 class="feat-title">Projects &amp; kits</h3>
+      <p class="feat-desc">Group sandboxes by workspace and layer tools, credentials and config with sbx kits and mixins.</p>
     </div>
     <div class="feature-card">
-      <div class="feat-icon c">🔒</div>
-      <h3 class="feat-title">Secure by Default</h3>
-      <p class="feat-desc">Every sandbox gets its own Docker daemon, filesystem, and network. Your host stays completely untouched.</p>
+      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+      <h3 class="feat-title">Isolated by default</h3>
+      <p class="feat-desc">Each sandbox is its own microVM with a separate filesystem and network. Your host stays untouched.</p>
     </div>
   </div>
 </section>
 
-<!-- wave to white -->
-<div class="wave" style="background: #FFF8EC;">
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 72" preserveAspectRatio="none" style="height:56px">
-    <path d="M0,36 C360,0 720,72 1080,36 C1260,18 1380,54 1440,36 L1440,72 L0,72 Z" fill="#FFFFFF"/>
-  </svg>
-</div>
-
 <!-- ── HOW IT WORKS ── -->
 <section class="how" id="how">
-  <div class="section-eyebrow">Simple as sand</div>
+  <div class="section-eyebrow">Get started</div>
   <h2 class="section-title">Up and running in minutes</h2>
   <p class="section-sub">den sits on top of your existing sbx setup. If you've used Docker Sandboxes, you're already halfway there.</p>
 
@@ -793,8 +818,8 @@
 <!-- ── MOCKUP ── -->
 <section class="mockup-section" id="demo">
   <div class="section-eyebrow">Preview</div>
-  <h2 class="section-title">A workspace that feels like home</h2>
-  <p class="section-sub" style="margin-bottom: 60px;">Designed for clarity. Built for the way AI engineers actually work.</p>
+  <h2 class="section-title">Sandboxes left, live agent right</h2>
+  <p class="section-sub" style="margin-bottom: 60px;">Your sandboxes and projects in the sidebar; the agent's terminal front and center.</p>
 
   <div class="browser-window" id="browserWin">
     <div class="browser-bar">
@@ -803,108 +828,68 @@
         <div class="browser-dot"></div>
         <div class="browser-dot"></div>
       </div>
-      <div class="browser-url">den — Sandboxes</div>
+      <div class="browser-url">ancient-eclipse · Running</div>
     </div>
     <div class="browser-content">
       <!-- Sidebar -->
       <div class="ui-sidebar">
         <div class="ui-sb-header">
-          <img src="logo.png" alt="">
+          <img src="resources/logo.png" alt="">
           <span class="ui-sb-name">den</span>
         </div>
         <div class="ui-nav-section">
-          <div class="ui-nav-section-label">Workspaces</div>
-          <div class="ui-nav-item active">
-            <div class="ui-nav-dot"></div>All Sandboxes
+          <div class="ui-nav-item"><div class="ui-nav-dot"></div>Home</div>
+        </div>
+        <div class="ui-nav-section">
+          <div class="ui-nav-section-label">Sandboxes</div>
+          <div class="ui-sb-item active">
+            <span class="ui-av">AE</span>
+            <div class="ui-sb-text"><div class="ui-sb-itemname">ancient-eclipse</div><div class="ui-sb-itemsub">minipit · running</div></div>
+            <span class="ui-rundot"></span>
           </div>
-          <div class="ui-nav-item">
-            <div class="ui-nav-dot"></div>Running
+          <div class="ui-sb-item">
+            <span class="ui-av">CM</span>
+            <div class="ui-sb-text"><div class="ui-sb-itemname">crimson-meteor</div><div class="ui-sb-itemsub">minipit</div></div>
           </div>
-          <div class="ui-nav-item">
-            <div class="ui-nav-dot"></div>Stopped
+          <div class="ui-sb-item">
+            <span class="ui-av">LA</span>
+            <div class="ui-sb-text"><div class="ui-sb-itemname">lucid-aurora</div><div class="ui-sb-itemsub">api · stopped</div></div>
           </div>
         </div>
         <div class="ui-nav-section">
-          <div class="ui-nav-section-label">Templates</div>
-          <div class="ui-nav-item">
-            <div class="ui-nav-dot"></div>Node + Claude
-          </div>
-          <div class="ui-nav-item">
-            <div class="ui-nav-dot"></div>Python ML
-          </div>
-          <div class="ui-nav-item">
-            <div class="ui-nav-dot"></div>Custom&hellip;
+          <div class="ui-nav-section-label">Projects</div>
+          <div class="ui-sb-item">
+            <span class="ui-av ui-av-folder">▦</span>
+            <div class="ui-sb-text"><div class="ui-sb-itemname">minipit</div></div>
+            <span class="ui-count">3</span>
           </div>
         </div>
       </div>
 
-      <!-- Main -->
-      <div class="ui-main">
-        <div class="ui-main-hdr">
-          <div class="ui-main-title">Sandboxes</div>
-          <button class="ui-new-btn">+ New Sandbox</button>
+      <!-- Main: a sandbox + its agent terminal -->
+      <div class="ui-main2">
+        <div class="ui-detail-hdr">
+          <span class="ui-rundot"></span>
+          <span class="ui-detail-name">ancient-eclipse</span>
+          <span class="ui-chip">claude</span>
+          <span class="ui-detail-status">Running · 4m 12s</span>
+          <span class="ui-stop">■ Stop</span>
         </div>
-        <div class="ui-sandbox-grid">
-          <div class="ui-sandbox-card">
-            <div class="ui-sc-top">
-              <div class="ui-sc-name">agent-run-042</div>
-              <div class="ui-status status-running">
-                <div class="ui-status-dot"></div>Running
-              </div>
-            </div>
-            <div class="ui-sc-meta">
-              <span>🐳 Docker 24</span>
-              <span>🤖 Claude Sonnet</span>
-              <span>⏱ 4m 12s</span>
-            </div>
-          </div>
-          <div class="ui-sandbox-card">
-            <div class="ui-sc-top">
-              <div class="ui-sc-name">python-scraper</div>
-              <div class="ui-status status-idle">
-                <div class="ui-status-dot"></div>Idle
-              </div>
-            </div>
-            <div class="ui-sc-meta">
-              <span>🐍 Python 3.12</span>
-              <span>🤖 Claude Opus</span>
-              <span>⏱ 0m 00s</span>
-            </div>
-          </div>
-          <div class="ui-sandbox-card">
-            <div class="ui-sc-top">
-              <div class="ui-sc-name">web-builder-01</div>
-              <div class="ui-status status-running">
-                <div class="ui-status-dot"></div>Running
-              </div>
-            </div>
-            <div class="ui-sc-meta">
-              <span>⚡ Node 20</span>
-              <span>🤖 Claude Sonnet</span>
-              <span>⏱ 11m 38s</span>
-            </div>
-          </div>
-          <div class="ui-sandbox-card">
-            <div class="ui-sc-top">
-              <div class="ui-sc-name">data-pipeline-v2</div>
-              <div class="ui-status status-idle">
-                <div class="ui-status-dot"></div>Idle
-              </div>
-            </div>
-            <div class="ui-sc-meta">
-              <span>🐳 Docker 24</span>
-              <span>🤖 Claude Haiku</span>
-              <span>⏱ 0m 00s</span>
-            </div>
-          </div>
+        <div class="ui-termbar">
+          <div class="ui-seg"><span class="on">Agent</span><span>Shell</span></div>
+          <span class="ui-files">▦ Files</span>
         </div>
-        <div class="ui-logs" id="uiLogs">
-          <div class="log-row"><span class="log-t">14:32:01</span><span class="log-m green">✓ Sandbox agent-run-042 started</span></div>
-          <div class="log-row"><span class="log-t">14:32:03</span><span class="log-m blue">→ Claude: Reading project structure...</span></div>
-          <div class="log-row"><span class="log-t">14:32:07</span><span class="log-m dim">&nbsp; Installing dependencies: npm install</span></div>
-          <div class="log-row"><span class="log-t">14:32:19</span><span class="log-m green">✓ Dependencies installed (47 packages)</span></div>
-          <div class="log-row"><span class="log-t">14:32:20</span><span class="log-m blue">→ Claude: Running tests to understand failures...</span></div>
-          <div class="log-row"><span class="log-t">14:32:31</span><span class="log-m dim">&nbsp; 3 tests failed — analyzing root cause</span></div>
+        <div class="ui-term">
+          <div class="tm-accent">✻ Claude Code <span class="tm-dim">v2.1 · /workspace</span></div>
+          <div>&nbsp;</div>
+          <div class="tm-prompt">&gt; refactor the auth module and add tests</div>
+          <div>&nbsp;</div>
+          <div class="tm-accent">● <span class="tm-norm">Reading the existing auth code…</span></div>
+          <div class="tm-dim">&nbsp;&nbsp;Read src/auth.ts (142 lines)</div>
+          <div class="tm-accent">● <span class="tm-norm">Updated src/auth.ts, added src/auth.test.ts</span></div>
+          <div class="tm-dim">&nbsp;&nbsp;✓ 12 tests passed</div>
+          <div>&nbsp;</div>
+          <div class="tm-prompt">&gt; <span class="tm-caret">▋</span></div>
         </div>
       </div>
     </div>
@@ -944,7 +929,7 @@
 <!-- ── FOOTER ── -->
 <footer>
   <a href="#" class="footer-logo">
-    <img src="logo.png" alt="">
+    <img src="resources/logo.png" alt="">
     <span class="footer-logo-text">den</span>
   </a>
   <ul class="footer-links">
