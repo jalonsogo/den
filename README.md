@@ -1,10 +1,12 @@
 <div align="center">
 
-<img src="logo.png" alt="minipit" width="320" />
+<img src="logo.png" alt="den" width="320" />
 
-# minipit
+# den
 
 **A beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (the `sbx` CLI).**
+
+[den.studio](https://den.studio)
 
 Launch, monitor, and work with AI‑agent sandboxes — without living in the terminal.
 
@@ -14,7 +16,7 @@ Launch, monitor, and work with AI‑agent sandboxes — without living in the te
 
 ## What it does
 
-minipit wraps the `sbx` CLI in a native macOS/Windows app:
+den wraps the `sbx` CLI in a native macOS/Windows app:
 
 - **Sandboxes** — create, run, stop, and delete agent sandboxes. Pick any agent (Claude, Codex, Cursor, Gemini, Copilot, Droid, …), a workspace, optional memory and Git‑clone isolation, and a random cosmic name.
 - **Agent & Shell terminals** — full‑screen agent TUIs (e.g. Claude Code) and an interactive shell, rendered with **xterm.js** over a real PTY.
@@ -69,5 +71,5 @@ src/
 ---
 
 <div align="center">
-<sub>Not affiliated with Docker, Inc. minipit is an independent GUI for the <code>sbx</code> CLI.</sub>
+<sub>Not affiliated with Docker, Inc. den is an independent GUI for the <code>sbx</code> CLI.</sub>
 </div>

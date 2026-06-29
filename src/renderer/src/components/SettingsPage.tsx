@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { ACCENTS } from '../lib/accent'
-import { TERM_THEMES } from '../lib/termThemes'
+import { TERM_THEMES, TERM_THEME_GROUPS } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
 import { LogsPanel } from './LogsPanel'
+import { SbxRuntimePanel } from './SbxRuntimePanel'
 import type { AppSettings } from '../types'
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -17,17 +18,27 @@ const DEFAULT_SETTINGS: AppSettings = {
 }
 
 export function SettingsPage() {
-  const { theme, toggleTheme, accent, accentColor, setAccent, setCustomAccent, termTheme, setTermTheme } = useStore()
-  const [tab, setTab] = useState<'general' | 'secrets' | 'logs'>('general')
+  const {
+    theme, toggleTheme, accent, accentColor, customAccents,
+    setAccent, setCustomAccent, saveCustomAccent, removeCustomAccent,
+    termTheme, setTermTheme
+  } = useStore()
+  const [tab, setTab] = useState<'general' | 'runtime' | 'secrets' | 'logs'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
   const [palette, setPalette] = useState<string[]>([])
 
-  // When a custom accent is active, generate its ramp via rampa (main process).
+  // The active custom hex: the live picker color, or a saved swatch's color.
+  const activeHex =
+    accent === 'custom'
+      ? accentColor
+      : customAccents.find((s) => s.id === accent)?.hex ?? null
+
+  // Generate the ramp for the active custom/saved color to show the strip.
   useEffect(() => {
-    if (accent !== 'custom') { setPalette([]); return }
-    window.minipit?.generatePalette(accentColor).then((p) => setPalette(p ?? [])).catch(() => setPalette([]))
-  }, [accent, accentColor])
+    if (!activeHex) { setPalette([]); return }
+    window.minipit?.generatePalette(activeHex).then((p) => setPalette(p ?? [])).catch(() => setPalette([]))
+  }, [activeHex])
 
   useEffect(() => {
     window.minipit?.getSettings().then((s) => setSettings(s ?? DEFAULT_SETTINGS)).catch(() => {})
@@ -46,7 +57,7 @@ export function SettingsPage() {
     <div className="page">
       <div className="page-hdr">
         <span className="page-title">Settings</span>
-        {tab === 'general' && (
+        {(tab === 'general' || tab === 'runtime') && (
           <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={handleSave}>
             {saved ? '✓ Saved' : 'Save'}
           </button>
@@ -55,11 +66,17 @@ export function SettingsPage() {
 
       <div className="tabs">
         <div className={`tab${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>General</div>
+        <div className={`tab${tab === 'runtime' ? ' active' : ''}`} onClick={() => setTab('runtime')}>Runtime</div>
         <div className={`tab${tab === 'secrets' ? ' active' : ''}`} onClick={() => setTab('secrets')}>Secrets</div>
         <div className={`tab${tab === 'logs' ? ' active' : ''}`} onClick={() => setTab('logs')}>Logs</div>
       </div>
 
-      {tab === 'logs' ? (
+      {tab === 'runtime' ? (
+        <SbxRuntimePanel
+          sbxPath={settings.sbxPath}
+          onChangePath={(v) => setSettings((s) => ({ ...s, sbxPath: v }))}
+        />
+      ) : tab === 'logs' ? (
         <LogsPanel />
       ) : tab === 'secrets' ? (
         <div className="page-body" style={{ padding: '16px 28px 28px' }}>
@@ -84,7 +101,11 @@ export function SettingsPage() {
               <div className="ss-sub">Colors for the agent & shell terminals.</div>
             </div>
             <select className="s-input" style={{ width: 160, cursor: 'pointer' }} value={termTheme} onChange={(e) => setTermTheme(e.target.value)}>
-              {TERM_THEMES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              {TERM_THEME_GROUPS.map((g) => (
+                <optgroup key={g.mode} label={g.label}>
+                  {TERM_THEMES.filter((t) => t.mode === g.mode).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div className="ss-row">
@@ -102,60 +123,56 @@ export function SettingsPage() {
                   style={{ background: a.color ?? 'var(--t1)' }}
                 />
               ))}
-              {/* Custom color — generates a ramp via rampa-sdk */}
+              {/* Saved custom swatches — click to apply, × to remove. */}
+              {customAccents.map((s) => (
+                <span key={s.id} className="accent-sw-saved">
+                  <button
+                    className={`accent-sw${accent === s.id ? ' on' : ''}`}
+                    title={s.hex}
+                    onClick={() => setAccent(s.id)}
+                    style={{ background: s.hex }}
+                  />
+                  <button
+                    className="accent-sw-x"
+                    title="Remove"
+                    onClick={() => removeCustomAccent(s.id)}
+                  >×</button>
+                </span>
+              ))}
+              {/* Live color picker — generates a ramp via rampa-sdk. */}
               <label
                 className={`accent-sw accent-sw-custom${accent === 'custom' ? ' on' : ''}`}
-                title="Custom color"
-                style={{ background: accent === 'custom' ? accentColor : undefined }}
+                title="Pick a custom color"
+                style={accent === 'custom' ? { background: accentColor } : undefined}
               >
                 <input
                   type="color"
                   value={accentColor}
                   onChange={(e) => setCustomAccent(e.target.value)}
-                  style={{ opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
                 />
               </label>
             </div>
           </div>
-          {accent === 'custom' && palette.length > 0 && (
+          {activeHex && palette.length > 0 && (
             <div className="ss-row" style={{ paddingTop: 0 }}>
               <div>
                 <div className="ss-lbl">Generated palette</div>
-                <div className="ss-sub">Ramp generated from your color with rampa.</div>
+                <div className="ss-sub">Ramp generated from your color with rampa — drives buttons & highlights.</div>
               </div>
-              <div className="ramp-strip">
-                {palette.map((c, i) => (
-                  <span key={i} className="ramp-step" title={c} style={{ background: c }} />
-                ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="ramp-strip">
+                  {palette.map((c, i) => (
+                    <span key={i} className="ramp-step" title={c} style={{ background: c }} />
+                  ))}
+                </div>
+                {accent === 'custom' && (
+                  <button className="btn btn-default btn-sm" onClick={() => saveCustomAccent(accentColor)}>
+                    Save swatch
+                  </button>
+                )}
               </div>
             </div>
           )}
-        </div>
-
-        <div className="ss">
-          <div className="ss-hdr">Docker Sandboxes</div>
-          <div className="ss-row">
-            <div>
-              <div className="ss-lbl">sbx binary path</div>
-              <div className="ss-sub">Auto-detected via Homebrew.</div>
-            </div>
-            <div style={{ display: 'flex', gap: 7 }}>
-              <input
-                className="s-input"
-                value={settings.sbxPath}
-                onChange={(e) => setSettings((s) => ({ ...s, sbxPath: e.target.value }))}
-                style={{ width: 192 }}
-              />
-              <button className="btn btn-default btn-sm">Verify</button>
-            </div>
-          </div>
-          <div className="ss-row">
-            <div>
-              <div className="ss-lbl">Account</div>
-              <div className="ss-sub">javier.alonso@docker.com</div>
-            </div>
-            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--destruct)' }}>Sign out</button>
-          </div>
         </div>
 
         <div className="ss">
@@ -163,7 +180,7 @@ export function SettingsPage() {
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Interval (focused)</div>
-              <div className="ss-sub">While minipit is the active window.</div>
+              <div className="ss-sub">While den is the active window.</div>
             </div>
             <input
               className="s-input"

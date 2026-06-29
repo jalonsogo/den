@@ -15,11 +15,12 @@ import { NewKitModal } from './components/modals/NewKitModal'
 import type { Sandbox, LogLine } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects } = useStore()
 
   useEffect(() => {
     // Initial load
     window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
+    loadProjects()
 
     // Live updates from main process
     const unsub1 = window.minipit?.onSandboxesUpdated((s) => {
@@ -42,6 +43,12 @@ export function App() {
     const unsub5 = window.minipit?.onSetTab((tab) =>
       setActiveTab(tab as 'terminal' | 'info')
     )
+    // Menu-bar (tray) quick-open: jump to a sandbox or a project.
+    const unsub6 = window.minipit?.onOpenSandbox((name) => setActiveSandboxId(name))
+    const unsub7 = window.minipit?.onOpenProject((workspace) => {
+      setActiveProject(workspace)
+      setActivePage('projects')
+    })
 
     return () => {
       unsub1?.()
@@ -49,6 +56,8 @@ export function App() {
       unsub3?.()
       unsub4?.()
       unsub5?.()
+      unsub6?.()
+      unsub7?.()
     }
   }, [])
 

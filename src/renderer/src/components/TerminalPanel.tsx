@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { PanelRight, Info } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -45,6 +46,7 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
 
     try { fit.fit() } catch { /* container not sized yet */ }
     onStart(term.cols, term.rows)
+    if (visible) setTimeout(() => { try { term.focus() } catch { /* ignore */ } }, 0)
 
     const unsub = subscribe((data) => term.write(data))
     const dataDisp = term.onData(onInput)
@@ -71,14 +73,24 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     if (termRef.current) termRef.current.options.theme = theme
   }, [theme])
 
-  // Refit + focus when this tab becomes visible.
+  // Refit + focus when this tab becomes visible so keystrokes go to the
+  // visible terminal (and not the hidden, still-mounted sibling).
   useEffect(() => {
-    if (!visible) return
-    const t = setTimeout(() => { try { fitRef.current?.fit() } catch { /* ignore */ } }, 0)
+    if (!visible) { termRef.current?.blur(); return }
+    const t = setTimeout(() => {
+      try { fitRef.current?.fit(); termRef.current?.focus() } catch { /* ignore */ }
+    }, 0)
     return () => clearTimeout(t)
   }, [visible])
 
-  return <div ref={ref} style={{ flex: 1, minHeight: 0, width: '100%', height: '100%', padding: '6px 8px' }} />
+  // Clicking anywhere in the container (incl. padding) focuses the terminal.
+  return (
+    <div
+      ref={ref}
+      onMouseDown={() => { if (visible) termRef.current?.focus() }}
+      style={{ flex: 1, minHeight: 0, width: '100%', height: '100%', padding: '6px 8px' }}
+    />
+  )
 }
 
 // ── Agent tab ─────────────────────────────────────────────────────────────
@@ -87,9 +99,9 @@ function AgentTerminal({ sandbox, visible, theme }: { sandbox: Sandbox; visible:
   if (sandbox.status !== 'running') {
     return (
       <div style={{
-        flex: 1, background: '#0a0a0a', display: 'flex',
+        flex: 1, background: theme.background, display: 'flex',
         alignItems: 'center', justifyContent: 'center',
-        color: 'rgba(255,255,255,0.2)', fontSize: 12
+        color: theme.foreground, opacity: 0.4, fontSize: 12
       }}>
         Start the sandbox to launch the agent.
       </div>
@@ -114,9 +126,9 @@ function ShellTerminal({ sandbox, visible, theme }: { sandbox: Sandbox; visible:
   if (sandbox.status !== 'running') {
     return (
       <div style={{
-        flex: 1, background: '#0a0a0a', display: 'flex',
+        flex: 1, background: theme.background, display: 'flex',
         alignItems: 'center', justifyContent: 'center',
-        color: 'rgba(255,255,255,0.2)', fontSize: 12
+        color: theme.foreground, opacity: 0.4, fontSize: 12
       }}>
         Start the sandbox to open a shell.
       </div>
@@ -138,13 +150,22 @@ function ShellTerminal({ sandbox, visible, theme }: { sandbox: Sandbox; visible:
 
 // ── Panel ─────────────────────────────────────────────────────────────────
 
-export function TerminalPanel({ sandbox }: { sandbox: Sandbox }) {
+export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo }: {
+  sandbox: Sandbox
+  dock?: 'files' | 'info' | null
+  onToggleFiles?: () => void
+  onShowInfo?: () => void
+}) {
   const [segment, setSegment] = useState<'agent' | 'shell'>('agent')
   const termThemeId = useStore((s) => s.termTheme)
   const theme = resolveTermTheme(termThemeId).theme
+  const bg = theme.background ?? '#0a0a0a'
 
   return (
-    <div className="term">
+    <div
+      className="term"
+      style={{ ['--tbg' as string]: bg, ['--tfg' as string]: theme.foreground ?? '#d4d4d4' }}
+    >
       <div className="term-bar">
         <div className="term-seg">
           <div className={`term-seg-item${segment === 'agent' ? ' active' : ''}`} onClick={() => setSegment('agent')}>
@@ -154,6 +175,27 @@ export function TerminalPanel({ sandbox }: { sandbox: Sandbox }) {
             Shell
           </div>
         </div>
+        <div className="term-right">
+          {onShowInfo && (
+            <button
+              className={`term-files${dock === 'info' ? ' active' : ''}`}
+              onClick={onShowInfo}
+              title="Sandbox info"
+            >
+              <Info size={14} />
+            </button>
+          )}
+          {onToggleFiles && (
+            <button
+              className={`term-files${dock === 'files' ? ' active' : ''}`}
+              onClick={onToggleFiles}
+              title={dock === 'files' ? 'Hide files' : 'Show files'}
+            >
+              <PanelRight size={14} />
+              Files
+            </button>
+          )}
+        </div>
       </div>
 
       {/*
@@ -162,7 +204,7 @@ export function TerminalPanel({ sandbox }: { sandbox: Sandbox }) {
       */}
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        background: '#0a0a0a',
+        background: bg,
         visibility: segment === 'agent' ? 'visible' : 'hidden',
         pointerEvents: segment === 'agent' ? 'auto' : 'none',
         position: segment === 'agent' ? 'relative' : 'absolute',
@@ -173,7 +215,7 @@ export function TerminalPanel({ sandbox }: { sandbox: Sandbox }) {
 
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        background: '#0a0a0a',
+        background: bg,
         visibility: segment === 'shell' ? 'visible' : 'hidden',
         pointerEvents: segment === 'shell' ? 'auto' : 'none',
         position: segment === 'shell' ? 'relative' : 'absolute',

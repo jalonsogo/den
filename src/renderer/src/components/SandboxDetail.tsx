@@ -1,29 +1,25 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, MoreVertical, PanelRight, TerminalSquare, Info, Play, Square } from 'lucide-react'
+import { MoreVertical, Play, Square } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
 import { FilesPanel } from './FilesPanel'
 import { AgentIcon } from './AgentIcon'
-import type { TabType } from '../types'
 
-const VIEWS: { id: TabType; label: string; icon: React.ReactNode }[] = [
-  { id: 'terminal', label: 'Terminal', icon: <TerminalSquare size={15} /> },
-  { id: 'info',     label: 'Info',     icon: <Info size={15} /> }
-]
+type Dock = 'files' | 'info' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, activeTab, setActiveTab, updateSandbox, setContextMenu } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
-  const [filesOpen, setFilesOpen] = useState(false)
-  const [filesWidth, setFilesWidth] = useState(300)
+  const [dock, setDock] = useState<Dock>(null)
+  const [dockWidth, setDockWidth] = useState(340)
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
     const onMove = (ev: MouseEvent) => {
       // Panel is docked right; width = distance from cursor to the window edge.
       const w = window.innerWidth - ev.clientX
-      setFilesWidth(Math.min(640, Math.max(220, w)))
+      setDockWidth(Math.min(680, Math.max(260, w)))
     }
     const onUp = () => {
       document.removeEventListener('mousemove', onMove)
@@ -35,14 +31,14 @@ export function SandboxDetail() {
     document.body.style.cursor = 'col-resize'
   }
 
-  // Refresh ports when the Info view is shown (ports now live inside Info).
+  // Refresh ports when the Info dock is shown (ports live inside Info).
   useEffect(() => {
-    if (activeTab === 'info' && sandbox?.name) {
+    if (dock === 'info' && sandbox?.name) {
       window.minipit?.getPorts(sandbox.name).then((ports) => {
         if (ports?.length) updateSandbox(sandbox.name, { ports })
       }).catch(() => {})
     }
-  }, [activeTab, sandbox?.name])
+  }, [dock, sandbox?.name])
 
   if (!sandbox) {
     return (
@@ -72,10 +68,6 @@ export function SandboxDetail() {
       console.error(e)
       updateSandbox(sandbox.id, { status: 'stopped' })
     }
-  }
-
-  const handleOpenInFinder = () => {
-    window.minipit?.openInFinder(sandbox.workspace)
   }
 
   const handleMenu = (e: React.MouseEvent) => {
@@ -121,51 +113,22 @@ export function SandboxDetail() {
         </div>
       </div>
 
-      <div className="detail-switch-bar">
-        <div className="detail-switch">
-          {VIEWS.map((v) => (
-            <button
-              key={v.id}
-              className={`detail-switch-item${activeTab === v.id ? ' active' : ''}`}
-              onClick={() => setActiveTab(v.id)}
-            >
-              {v.icon}
-              {v.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ flex: 1 }} />
-        <button
-          className="tab-files-toggle"
-          onClick={handleOpenInFinder}
-          title={`Open ${sandbox.workspace} in Finder`}
-        >
-          <FolderOpen size={14} />
-        </button>
-        <button
-          className={`tab-files-toggle${filesOpen ? ' active' : ''}`}
-          onClick={() => setFilesOpen((v) => !v)}
-          title={filesOpen ? 'Hide files' : 'Show files'}
-        >
-          <PanelRight size={14} />
-          Files
-        </button>
-      </div>
-
       <div className="detail-body">
         <div className="detail-main">
-          <div className={`tab-panel${activeTab === 'terminal' ? ' active' : ''}`}>
-            <TerminalPanel sandbox={sandbox} />
-          </div>
-          <div className={`tab-panel${activeTab === 'info' ? ' active' : ''}`}>
-            <InfoPanel sandbox={sandbox} />
-          </div>
+          <TerminalPanel
+            sandbox={sandbox}
+            dock={dock}
+            onToggleFiles={() => setDock((d) => (d === 'files' ? null : 'files'))}
+            onShowInfo={() => setDock((d) => (d === 'info' ? null : 'info'))}
+          />
         </div>
-        {filesOpen && (
+        {dock && (
           <>
             <div className="files-resize" onMouseDown={startResize} />
-            <div className="files-side" style={{ width: filesWidth }}>
-              <FilesPanel sandbox={sandbox} />
+            <div className="files-side" style={{ width: dockWidth }}>
+              {dock === 'files'
+                ? <FilesPanel sandbox={sandbox} />
+                : <InfoPanel sandbox={sandbox} onClose={() => setDock(null)} />}
             </div>
           </>
         )}
