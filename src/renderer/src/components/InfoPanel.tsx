@@ -6,8 +6,7 @@ import { PortsPanel } from './PortsPanel'
 import { AGENTS, type Sandbox, type NetworkPolicy } from '../types'
 
 export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: () => void }) {
-  const { setDeleting, setSandboxes, updateSandbox } = useStore()
-  const isDeleting = sandbox.status === 'deleting'
+  const { updateSandbox } = useStore()
 
   const [policy, setPolicy] = useState<NetworkPolicy | null>(null)
   const [polLoading, setPolLoading] = useState(true)
@@ -56,20 +55,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
     }
   }
 
-  const handleDelete = async () => {
-    if (isDeleting) return
-    if (!confirm(`Delete sandbox "${sandbox.name}"? This cannot be undone.`)) return
-    setDeleting(sandbox.id, true)
-    try {
-      await window.minipit?.deleteSandbox(sandbox.name)
-      // Refresh immediately so the row disappears without waiting for the poll.
-      const list = await window.minipit?.listSandboxes()
-      if (list) setSandboxes(list)
-    } catch (e) {
-      console.error(e)
-      setDeleting(sandbox.id, false)
-    }
-  }
 
   return (
     <div className="info-dock">
@@ -206,14 +191,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
             )}
           </div>
         )}
-      </div>
-
-      <div className="info-actions">
-        <button className="btn btn-default btn-sm">Save snapshot</button>
-        <button className="btn btn-ghost btn-sm">Reset</button>
-        <button className="btn btn-destructive btn-sm" style={{ marginLeft: 'auto' }} onClick={handleDelete} disabled={isDeleting}>
-          {isDeleting ? 'Deleting…' : 'Delete sandbox'}
-        </button>
       </div>
       </div>
     </div>

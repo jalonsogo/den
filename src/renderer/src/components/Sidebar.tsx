@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Sun, Moon, Plus, Filter, X, MoreVertical,
+  Sun, Moon, Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown,
   Home, FolderGit2, LayoutGrid, Layers, Package, Settings
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -10,20 +10,23 @@ import { AgentIcon } from './AgentIcon'
 import { ProjectAvatar } from './ProjectAvatar'
 import type { Sandbox, PageType } from '../types'
 
-// Collapsed-rail project icon with a hover popover: lists the project's
-// sandboxes (click to switch), and a "New sandbox" action.
-function CollapsedProject({
-  project, active, onOpenProject, onNew, onOpenSandbox
+// Project row/icon with a hover popover that lists the project's sandboxes
+// (click to switch), the full path, and a "New sandbox" action. Used for both
+// the collapsed rail icon and the expanded project rows.
+function ProjectHover({
+  project, className, onClick, onNew, onOpenSandbox, children
 }: {
   project: { workspace: string; list: Sandbox[] }
-  active: boolean
-  onOpenProject: () => void
+  className?: string
+  onClick?: () => void
   onNew: () => void
   onOpenSandbox: (id: string) => void
+  children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const closeTimer = useRef<ReturnType<typeof setTimeout>>()
+  const pickerOpen = useStore((s) => s.pickerOpen)
   const name = project.workspace.split('/').pop() || project.workspace
 
   const show = (e: React.MouseEvent) => {
@@ -35,14 +38,9 @@ function CollapsedProject({
   const hide = () => { closeTimer.current = setTimeout(() => setOpen(false), 140) }
 
   return (
-    <div
-      className={`sb-nav-item${active ? ' active' : ''}`}
-      onMouseEnter={show}
-      onMouseLeave={hide}
-      onClick={onOpenProject}
-    >
-      <ProjectAvatar workspace={project.workspace} size={26} editable={false} />
-      {open && createPortal(
+    <div className={className} onMouseEnter={show} onMouseLeave={hide} onClick={onClick}>
+      {children}
+      {open && !pickerOpen && createPortal(
         <div
           className="sb-proj-pop"
           style={{ top: pos.top, left: pos.left }}
@@ -54,20 +52,23 @@ function CollapsedProject({
             <span className="sb-proj-pop-name">{name}</span>
             <span className="sb-proj-pop-count">{project.list.length}</span>
           </div>
-          <button className="sb-proj-pop-new" onClick={() => { onNew(); setOpen(false) }}>
+          <div className="sb-proj-pop-path">{project.workspace}</div>
+          <button className="sb-proj-pop-new" onClick={(e) => { e.stopPropagation(); onNew(); setOpen(false) }}>
             <Plus size={13} /> New sandbox
           </button>
           <div className="sb-proj-pop-list">
-            {project.list.map((s) => (
-              <button
-                key={s.id}
-                className="sb-proj-pop-item"
-                onClick={() => { onOpenSandbox(s.id); setOpen(false) }}
-              >
-                <span className="sb-proj-pop-dot" data-on={s.status === 'running'} />
-                <span className="sb-proj-pop-name">{s.name}</span>
-              </button>
-            ))}
+            {project.list.length === 0
+              ? <div className="sb-proj-pop-empty">No sandboxes yet</div>
+              : project.list.map((s) => (
+                <button
+                  key={s.id}
+                  className="sb-proj-pop-item"
+                  onClick={(e) => { e.stopPropagation(); onOpenSandbox(s.id); setOpen(false) }}
+                >
+                  <span className="sb-proj-pop-dot" data-on={s.status === 'running'} />
+                  <span className="sb-proj-pop-name">{s.name}</span>
+                </button>
+              ))}
           </div>
         </div>,
         document.body
@@ -136,11 +137,13 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
 export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage, setActiveSandboxId,
-    setNewSandboxWorkspace, setActiveProject, theme, toggleTheme, sidebarCollapsed
+    setNewSandboxWorkspace, setActiveProject, theme, toggleTheme, sidebarCollapsed,
+    customProjects, addProject
   } = useStore()
   const collapsed = sidebarCollapsed
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
+  const [libOpen, setLibOpen] = useState(() => localStorage.getItem('minipit:libraryOpen') === '1')
 
   // Filter by name, provider (agent), or status.
   const q = filter.trim().toLowerCase()
@@ -151,12 +154,20 @@ export function Sidebar() {
     s.status.toLowerCase().includes(q)
   )
 
-  // Group sandboxes into projects by workspace directory.
+  // Group sandboxes into projects by workspace directory, then fold in any
+  // empty projects the user created (folders with no sandbox yet).
   const projects: { workspace: string; list: Sandbox[] }[] = []
   for (const s of sandboxes) {
     let p = projects.find((x) => x.workspace === s.workspace)
     if (!p) { p = { workspace: s.workspace, list: [] }; projects.push(p) }
     p.list.push(s)
+  }
+  for (const ws of customProjects) {
+    if (!projects.find((p) => p.workspace === ws)) projects.push({ workspace: ws, list: [] })
+  }
+
+  const newProject = () => {
+    addProject().then((dir) => { if (dir) { setActiveProject(dir); setActivePage('projects') } })
   }
 
   const openNew = (workspace?: string) => {
@@ -177,19 +188,6 @@ export function Sidebar() {
         </Tooltip.Portal>
       </Tooltip.Root>
     ) : node
-
-  // Always-on tooltip (e.g. show a project's full path on hover, even expanded).
-  const tipAlways = (label: string, node: React.ReactElement) => (
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>{node}</Tooltip.Trigger>
-      <Tooltip.Portal>
-        <Tooltip.Content className="sb-tip" side="right" sideOffset={8}>
-          {label}
-          <Tooltip.Arrow className="sb-tip-arrow" />
-        </Tooltip.Content>
-      </Tooltip.Portal>
-    </Tooltip.Root>
-  )
 
   const navItem = (page: PageType, label: string, icon: React.ReactNode) =>
     tip(
@@ -267,9 +265,9 @@ export function Sidebar() {
 
       <div className="sb-div" />
 
-      {/* Projects — title shows all; a row opens that project */}
+      {/* Projects — title opens all; a row opens that project (hover = popover) */}
       <div className="sb-section">
-        {!collapsed ? (
+        {!collapsed && (
           <div className="sb-sec-head">
             <button
               className={`sb-sec-title${activePage === 'projects' ? ' active' : ''}`}
@@ -277,42 +275,48 @@ export function Sidebar() {
             >
               Projects
             </button>
-            <button className="sb-add" onClick={() => openNew()} title="New project"><Plus size={16} /></button>
+            <button className="sb-add" onClick={newProject} title="New project — pick or create a folder"><Plus size={16} /></button>
           </div>
-        ) : projects.length === 0 ? (
-          tip('Projects',
-            <div
-              className={`sb-nav-item${activePage === 'projects' ? ' active' : ''}`}
-              onClick={() => { setActiveProject(null); setActivePage('projects') }}
-            >
-              <FolderGit2 size={16} />
-            </div>
-          )
-        ) : (
-          projects.map((p) => (
-            <CollapsedProject
-              key={p.workspace}
-              project={p}
-              active={activePage === 'projects'}
-              onOpenProject={() => { setActiveProject(p.workspace); setActivePage('projects') }}
-              onNew={() => openNew(p.workspace)}
-              onOpenSandbox={(id) => { setActiveSandboxId(id); setActivePage('sandbox') }}
-            />
-          ))
         )}
-        {!collapsed && (
+
+        {collapsed ? (
+          projects.length === 0
+            ? tip('Projects',
+                <div
+                  className={`sb-nav-item${activePage === 'projects' ? ' active' : ''}`}
+                  onClick={() => { setActiveProject(null); setActivePage('projects') }}
+                >
+                  <FolderGit2 size={16} />
+                </div>
+              )
+            : projects.map((p) => (
+                <ProjectHover
+                  key={p.workspace}
+                  project={p}
+                  className={`sb-nav-item${activePage === 'projects' ? ' active' : ''}`}
+                  onClick={() => { setActiveProject(p.workspace); setActivePage('projects') }}
+                  onNew={() => openNew(p.workspace)}
+                  onOpenSandbox={(id) => { setActiveSandboxId(id); setActivePage('sandbox') }}
+                >
+                  <ProjectAvatar workspace={p.workspace} size={26} editable={false} />
+                </ProjectHover>
+              ))
+        ) : (
           projects.length === 0
             ? <div className="sb-empty">No projects</div>
             : projects.map((p) => (
               <div className="sb-proj" key={p.workspace}>
-                <div className="sb-proj-main" onClick={() => { setActiveProject(p.workspace); setActivePage('projects') }}>
-                  <ProjectAvatar workspace={p.workspace} size={22} />
-                  {tipAlways(
-                    p.workspace,
-                    <span className="sb-proj-name">{p.workspace.split('/').pop() || p.workspace}</span>
-                  )}
+                <ProjectAvatar workspace={p.workspace} size={22} />
+                <ProjectHover
+                  project={p}
+                  className="sb-proj-label"
+                  onClick={() => { setActiveProject(p.workspace); setActivePage('projects') }}
+                  onNew={() => openNew(p.workspace)}
+                  onOpenSandbox={(id) => { setActiveSandboxId(id); setActivePage('sandbox') }}
+                >
+                  <span className="sb-proj-name">{p.workspace.split('/').pop() || p.workspace}</span>
                   <span className="sb-proj-count">{p.list.length}</span>
-                </div>
+                </ProjectHover>
                 <button className="sb-proj-add" title="New sandbox in this project" onClick={() => openNew(p.workspace)}>
                   <Plus size={13} />
                 </button>
@@ -323,13 +327,35 @@ export function Sidebar() {
 
       <div className="sb-div" />
 
-      {/* Library */}
-      <div className="sb-nav">
-        {!collapsed && <span className="sb-label">Library</span>}
-        {navItem('templates', 'Templates', <LayoutGrid size={16} />)}
-        {navItem('mixins', 'Mixins', <Layers size={16} />)}
-        {navItem('kits', 'Kits', <Package size={16} />)}
+      {/* Library — collapsible (collapsed by default), styled like Projects */}
+      <div className="sb-section">
+        {!collapsed && (
+          <div className="sb-sec-head">
+            <button
+              className="sb-sec-title"
+              onClick={() => setLibOpen((o) => { const n = !o; localStorage.setItem('minipit:libraryOpen', n ? '1' : '0'); return n })}
+            >
+              Library
+            </button>
+            <button
+              className="sb-add"
+              title={libOpen ? 'Collapse' : 'Expand'}
+              onClick={() => setLibOpen((o) => { const n = !o; localStorage.setItem('minipit:libraryOpen', n ? '1' : '0'); return n })}
+            >
+              {libOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            </button>
+          </div>
+        )}
+        {(collapsed || libOpen) && (
+          <>
+            {navItem('templates', 'Templates', <LayoutGrid size={16} />)}
+            {navItem('mixins', 'Mixins', <Layers size={16} />)}
+            {navItem('kits', 'Kits', <Package size={16} />)}
+          </>
+        )}
       </div>
+
+      <div className="sb-div" />
 
       <div className="sb-bottom">
         {navItem('settings', 'Settings', <Settings size={16} />)}

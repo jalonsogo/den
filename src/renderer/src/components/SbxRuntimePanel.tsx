@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { ExternalLink } from 'lucide-react'
 import type { SbxRelease } from '../types'
 
 const CAP = 200_000
+const MANAGER_LABEL: Record<string, string> = {
+  brew: 'Homebrew', winget: 'winget', apt: 'apt', manual: 'manual install'
+}
 
 // Extract the base x.y.z semver from a version string for comparison.
 function baseSemver(v?: string | null): string | null {
@@ -42,6 +46,7 @@ export function SbxRuntimePanel({
   const [output, setOutput] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [verify, setVerify] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
+  const [install, setInstall] = useState<import('../types').SbxInstallInfo | null>(null)
   const outRef = useRef<HTMLDivElement>(null)
 
   const loadVersion = () => {
@@ -61,6 +66,7 @@ export function SbxRuntimePanel({
 
   useEffect(() => {
     loadVersion()
+    window.minipit?.sbxInstallInfo().then((i) => setInstall(i ?? null)).catch(() => {})
     window.minipit?.sbxReleases().then((r) => setReleases(r ?? [])).catch(() => {}).finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -83,7 +89,7 @@ export function SbxRuntimePanel({
   const run = async (action: 'update' | 'redownload') => {
     setBusy(action)
     setOutput('')
-    const res = await window.minipit?.sbxBrew(action).catch(() => null)
+    const res = await window.minipit?.sbxUpdate(action).catch(() => null)
     setBusy(null)
     if (res?.ok) loadVersion()
   }
@@ -113,7 +119,9 @@ export function SbxRuntimePanel({
         <div className="ss-row">
           <div>
             <div className="ss-lbl">sbx binary path</div>
-            <div className="ss-sub">Auto-detected via Homebrew. Click Save to persist.</div>
+            <div className="ss-sub">
+              {install ? `Installed via ${MANAGER_LABEL[install.manager]}. ` : ''}Click Save to persist.
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 7 }}>
             <input
@@ -132,19 +140,34 @@ export function SbxRuntimePanel({
             <div className="ss-lbl">Latest release</div>
             <div className="ss-sub">{loading ? 'Checking GitHub…' : latest ? `${latest} · ${fmtDate(releases[0]?.date)}` : 'Unavailable'}</div>
           </div>
-          <div style={{ display: 'flex', gap: 7 }}>
-            <button
-              className={`btn btn-sm ${updateAvailable ? 'btn-primary' : 'btn-default'}`}
-              onClick={() => run('update')}
-              disabled={busy !== null}
-            >
-              {busy === 'update' ? 'Updating…' : 'Update'}
+          {install && !install.canAutoUpdate ? (
+            <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(install.releasesUrl)}>
+              <ExternalLink size={13} /> Download
             </button>
-            <button className="btn btn-default btn-sm" onClick={() => run('redownload')} disabled={busy !== null}>
-              {busy === 'redownload' ? 'Reinstalling…' : 'Redownload'}
-            </button>
-          </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 7 }}>
+              <button
+                className={`btn btn-sm ${updateAvailable ? 'btn-primary' : 'btn-default'}`}
+                onClick={() => run('update')}
+                disabled={busy !== null}
+              >
+                {busy === 'update' ? 'Updating…' : 'Update'}
+              </button>
+              <button className="btn btn-default btn-sm" onClick={() => run('redownload')} disabled={busy !== null}>
+                {busy === 'redownload' ? 'Reinstalling…' : 'Redownload'}
+              </button>
+            </div>
+          )}
         </div>
+        {install && !install.canAutoUpdate && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-cmdhint">
+              {install.manager === 'apt'
+                ? <>Update with: <code>{install.updateCmd}</code></>
+                : <>This sbx wasn’t installed by a package manager den can drive. Update by downloading the latest build above (or re-run your installer).</>}
+            </div>
+          </div>
+        )}
         {output && (
           <div className="ss-row" style={{ paddingTop: 0 }}>
             <div className="rt-output" ref={outRef}>

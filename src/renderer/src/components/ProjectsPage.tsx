@@ -5,19 +5,26 @@ import { FilesPanel } from './FilesPanel'
 import { ProjectAvatar } from './ProjectAvatar'
 
 export function ProjectsPage() {
-  const { sandboxes, activeProject, setActiveProject, setActiveSandboxId, setModal, setNewSandboxWorkspace } = useStore()
+  const { sandboxes, activeProject, setActiveProject, setActiveSandboxId, setActivePage, setModal, setNewSandboxWorkspace, customProjects, addProject } = useStore()
 
-  // Group sandboxes by workspace directory.
+  // Group sandboxes by workspace, then fold in empty (sandbox-less) projects.
   const projects = new Map<string, typeof sandboxes>()
   for (const s of sandboxes) {
     if (!projects.has(s.workspace)) projects.set(s.workspace, [])
     projects.get(s.workspace)!.push(s)
+  }
+  for (const ws of customProjects) {
+    if (!projects.has(ws)) projects.set(ws, [])
   }
   const entries = [...projects.entries()]
 
   const openNew = (workspace?: string) => {
     setNewSandboxWorkspace(workspace ?? null)
     setModal('new-sandbox')
+  }
+
+  const newProject = () => {
+    addProject().then((dir) => { if (dir) { setActiveProject(dir); setActivePage('projects') } })
   }
 
   // ── Single project detail ──────────────────────────────────────────────
@@ -71,7 +78,7 @@ export function ProjectsPage() {
     <div className="page">
       <div className="page-hdr">
         <span className="page-title">Projects</span>
-        <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => openNew()}>
+        <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={newProject}>
           <Plus size={13} /> New project
         </button>
       </div>
@@ -83,8 +90,8 @@ export function ProjectsPage() {
 
         {entries.length === 0 ? (
           <div className="proj-empty">
-            <p>No projects yet. A project is the workspace folder you launch a sandbox from.</p>
-            <button className="btn btn-primary btn-sm" onClick={() => openNew()}>
+            <p>No projects yet. A project is a workspace folder — pick or create one, then launch a sandbox in it.</p>
+            <button className="btn btn-primary btn-sm" onClick={newProject}>
               <Plus size={13} /> New project
             </button>
           </div>

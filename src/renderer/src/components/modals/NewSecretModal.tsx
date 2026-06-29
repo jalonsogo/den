@@ -17,7 +17,7 @@ export function NewSecretModal() {
   const handleOAuth = async () => {
     const fn = service === 'anthropic' ? window.minipit?.anthropicOAuth : () => window.minipit?.oauthSecret('openai')
     if (typeof window.minipit?.anthropicOAuth !== 'function' || typeof window.minipit?.oauthSecret !== 'function') {
-      setError('OAuth needs an app restart to load. Quit minipit and relaunch, then try again.')
+      setError('OAuth needs an app restart to load. Quit den and relaunch, then try again.')
       return
     }
     setOauthing(true)

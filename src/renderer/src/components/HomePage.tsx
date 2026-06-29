@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Plus, Box, Square, ChevronRight, ShieldCheck, Download } from 'lucide-react'
+import { Plus, ChevronRight, ShieldCheck, Download } from 'lucide-react'
 import { useStore } from '../store'
+import { AgentIcon } from './AgentIcon'
 import { formatUptime } from '../lib/utils'
 import type { NetworkPolicy } from '../types'
 
@@ -15,7 +16,7 @@ function isOlder(a: number[] | null, b: number[] | null): boolean {
 }
 
 export function HomePage() {
-  const { sandboxes, setModal, setActiveSandboxId, setActivePage, updateSandbox } = useStore()
+  const { sandboxes, setModal, setActiveSandboxId, setActivePage } = useStore()
   const running = sandboxes.filter((s) => s.status === 'running')
   const stopped = sandboxes.filter((s) => s.status !== 'running')
 
@@ -33,12 +34,6 @@ export function HomePage() {
   const allowHosts = policy?.ok
     ? (policy.rules ?? []).filter((r) => r.decision.toLowerCase() === 'allow').reduce((n, r) => n + r.resources.length, 0)
     : null
-
-  const handleStop = async (e: React.MouseEvent, name: string, id: string) => {
-    e.stopPropagation()
-    updateSandbox(id, { status: 'stopping' })
-    await window.minipit?.stopSandbox(name).catch(() => {})
-  }
 
   return (
     <div className="page">
@@ -101,18 +96,10 @@ export function HomePage() {
         ) : (
           running.map((s) => (
             <div key={s.id} className="home-row" onClick={() => setActiveSandboxId(s.id)}>
-              <Box size={15} style={{ color: 'var(--t3)' }} />
+              <AgentIcon agent={s.agent} size={15} />
               <span className="home-row-name">{s.name}</span>
               <span className="home-row-sub">{s.agent}</span>
-              {s.uptimeSeconds ? <span className="home-row-up">{formatUptime(s.uptimeSeconds)}</span> : null}
-              <button
-                className="home-row-stop"
-                title="Stop sandbox"
-                onClick={(e) => handleStop(e, s.name, s.id)}
-                disabled={s.status === 'stopping'}
-              >
-                <Square size={11} fill="currentColor" />
-              </button>
+              {s.uptimeSeconds ? <span className="home-row-up" style={{ marginLeft: 'auto' }}>{formatUptime(s.uptimeSeconds)}</span> : null}
             </div>
           ))
         )}

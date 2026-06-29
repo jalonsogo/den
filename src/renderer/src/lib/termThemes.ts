@@ -10,7 +10,7 @@ export interface TermTheme {
 export const TERM_THEMES: TermTheme[] = [
   {
     id: 'minipit',
-    label: 'minipit (default)',
+    label: 'den (default)',
     mode: 'dark',
     theme: {
       background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4',

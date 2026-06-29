@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Check, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Plus, RefreshCw } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { randomName } from '../../lib/names'
@@ -22,6 +22,8 @@ export function NewSandboxModal() {
   const [ddOpen, setDdOpen]           = useState(false)
   const [launching, setLaunching]     = useState(false)
   const [error, setError]             = useState('')
+  const [availKits, setAvailKits]     = useState<{ name: string; dir: string }[]>([])
+  const [selKits, setSelKits]         = useState<string[]>([])
 
   // Load available templates for the "From template" option.
   useEffect(() => {
@@ -29,6 +31,10 @@ export function NewSandboxModal() {
       setTemplates(t ?? [])
       if (t && t[0]) setTemplate((cur) => cur || `${t[0].repository}:${t[0].tag}`)
     }).catch(() => {})
+    // Mixin kits can be stacked onto the new sandbox at creation (--kit).
+    window.minipit?.listKits().then((k) =>
+      setAvailKits((k ?? []).filter((x) => x.kind === 'mixin').map((x) => ({ name: x.name, dir: x.dir })))
+    ).catch(() => {})
   }, [])
 
   const ddRef = useRef<HTMLDivElement>(null)
@@ -70,7 +76,8 @@ export function NewSandboxModal() {
         workspace,
         memory: memValue !== 'default' ? memValue : undefined,
         branch: clone,
-        template: source === 'template' && template ? template : undefined
+        template: source === 'template' && template ? template : undefined,
+        kits: selKits
       })
       const sandboxes = await window.minipit?.listSandboxes()
       if (sandboxes) setSandboxes(sandboxes)
@@ -230,6 +237,26 @@ export function NewSandboxModal() {
                     --clone
                   </code>
                 </div>
+
+                {availKits.length > 0 && (
+                  <div className="fg">
+                    <label className="flabel">Mixins <span className="flabel-hint">stacked with --kit</span></label>
+                    <div className="kit-multi">
+                      {availKits.map((k) => {
+                        const on = selKits.includes(k.dir)
+                        return (
+                          <button
+                            key={k.dir}
+                            className={`kit-chip${on ? ' on' : ''}`}
+                            onClick={() => setSelKits((s) => on ? s.filter((d) => d !== k.dir) : [...s, k.dir])}
+                          >
+                            {on ? <Check size={12} /> : <Plus size={12} />} {k.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

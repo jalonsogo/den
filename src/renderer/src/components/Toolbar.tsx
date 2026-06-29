@@ -35,8 +35,8 @@ export function Toolbar() {
     if (activePage === 'templates')  return { title: 'Templates', sub: 'Reusable sandbox images' }
     if (activePage === 'mixins')     return { title: 'Mixins', sub: 'Layer tools onto an agent' }
     if (activePage === 'kits')       return { title: 'Kits', sub: 'Define an agent from scratch' }
-    if (activePage === 'settings')   return { title: 'Settings', sub: 'minipit preferences' }
-    if (!sandbox) return { title: 'minipit', sub: 'No sandbox selected' }
+    if (activePage === 'settings')   return { title: 'Settings', sub: 'den preferences' }
+    if (!sandbox) return { title: 'den', sub: 'No sandbox selected' }
     const uptime = sandbox.uptimeSeconds ? formatUptime(sandbox.uptimeSeconds) : ''
     const sub = sandbox.status === 'running' ? `Running · ${uptime}` : 'Stopped'
     return { title: sandbox.name, sub }

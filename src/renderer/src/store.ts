@@ -29,6 +29,9 @@ interface AppState {
   customAccents: SavedAccent[]
   termTheme: string
   projectColors: Record<string, string>
+  projectIcons: Record<string, string>
+  pickerOpen: boolean
+  customProjects: string[]
 
   setSandboxes:       (sandboxes: Sandbox[]) => void
   setSecretTarget:    (service: SecretService | null) => void
@@ -43,6 +46,11 @@ interface AppState {
   removeCustomAccent: (id: string) => void
   setTermTheme:       (id: string) => void
   setProjectColor:    (workspace: string, hex: string | null) => void
+  setProjectIcon:     (workspace: string, icon: string | null) => void
+  setPickerOpen:      (open: boolean) => void
+  loadProjects:       () => void
+  addProject:         () => Promise<string | null>
+  removeProject:      (dir: string) => void
   setDeleting:        (id: string, on: boolean) => void
   updateSandbox:      (id: string, updates: Partial<Sandbox>) => void
   setActiveSandboxId: (id: string | null) => void
@@ -76,6 +84,11 @@ export const useStore = create<AppState>((set) => ({
   projectColors: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:projectColors') ?? '{}') ?? {} } catch { return {} }
   })(),
+  projectIcons: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:projectIcons') ?? '{}') ?? {} } catch { return {} }
+  })(),
+  pickerOpen: false,
+  customProjects: [],
 
   setSecretTarget: (service) => set({ secretTarget: service }),
 
@@ -147,6 +160,35 @@ export const useStore = create<AppState>((set) => ({
       localStorage.setItem('minipit:projectColors', JSON.stringify(next))
       return { projectColors: next }
     }),
+
+  setProjectIcon: (workspace, icon) =>
+    set((state) => {
+      const next = { ...state.projectIcons }
+      if (icon) next[workspace] = icon
+      else delete next[workspace]
+      localStorage.setItem('minipit:projectIcons', JSON.stringify(next))
+      return { projectIcons: next }
+    }),
+
+  setPickerOpen: (open) => set({ pickerOpen: open }),
+
+  loadProjects: async () => {
+    const p = await window.minipit?.listProjects().catch(() => [])
+    set({ customProjects: p ?? [] })
+  },
+
+  addProject: async () => {
+    const dir = await window.minipit?.addProject().catch(() => null)
+    if (dir) {
+      set((s) => ({ customProjects: s.customProjects.includes(dir) ? s.customProjects : [...s.customProjects, dir] }))
+    }
+    return dir ?? null
+  },
+
+  removeProject: (dir) => {
+    window.minipit?.removeProject(dir).catch(() => {})
+    set((s) => ({ customProjects: s.customProjects.filter((d) => d !== dir) }))
+  },
 
   toggleTheme: () =>
     set((state) => {

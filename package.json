@@ -1,12 +1,20 @@
 {
-  "name": "minipit",
+  "name": "den",
   "version": "0.1.0",
   "description": "A beautiful GUI for Docker Sandboxes",
   "main": "./out/main/index.js",
+  "homepage": "https://den.studio",
   "author": {
-    "name": "minipit"
+    "name": "den",
+    "url": "https://den.studio"
   },
   "license": "MIT",
+  "build": {
+    "appId": "studio.den.app",
+    "productName": "den",
+    "mac": { "icon": "resources/logo.png" },
+    "win": { "icon": "resources/logo.png" }
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",

@@ -21,6 +21,7 @@ const api = {
   removeTemplate:(ref: string)          => ipcRenderer.invoke('minipit:remove-template', ref),
   createKit:     (name: string, spec: string) => ipcRenderer.invoke('minipit:create-kit', name, spec),
   listKits:      ()                     => ipcRenderer.invoke('minipit:list-kits'),
+  kitAdd:        (sandbox: string, dir: string) => ipcRenderer.invoke('minipit:kit-add', sandbox, dir),
   removeKit:     (dir: string)          => ipcRenderer.invoke('minipit:remove-kit', dir),
   listSecrets:   ()                     => ipcRenderer.invoke('minipit:list-secrets'),
   setSecret:     (service: string, value: string) => ipcRenderer.invoke('minipit:set-secret', service, value),
@@ -41,7 +42,8 @@ const api = {
   saveSettings:  (s: unknown)           => ipcRenderer.invoke('minipit:save-settings', s),
   sbxVersion:    (path?: string)        => ipcRenderer.invoke('minipit:sbx-version', path),
   sbxReleases:   ()                     => ipcRenderer.invoke('minipit:sbx-releases'),
-  sbxBrew:       (action: string)       => ipcRenderer.invoke('minipit:sbx-brew', action),
+  sbxInstallInfo: ()                    => ipcRenderer.invoke('minipit:sbx-install-info'),
+  sbxUpdate:     (action: string)       => ipcRenderer.invoke('minipit:sbx-update', action),
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyAllow:   (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-allow', name, resources),
   onRuntimeOutput: (cb: (chunk: string) => void) => {
@@ -50,6 +52,9 @@ const api = {
     return () => ipcRenderer.removeListener('minipit:runtime-output', handler)
   },
   showOpenDialog:()                     => ipcRenderer.invoke('minipit:show-open-dialog'),
+  listProjects:  ()                     => ipcRenderer.invoke('minipit:list-projects'),
+  addProject:    ()                     => ipcRenderer.invoke('minipit:add-project'),
+  removeProject: (dir: string)          => ipcRenderer.invoke('minipit:remove-project', dir),
   defaultWorkspace: ()                  => ipcRenderer.invoke('minipit:default-workspace'),
 
   onSandboxesUpdated: (cb: (sandboxes: unknown[]) => void) => {
@@ -66,6 +71,16 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, page: string) => cb(page)
     ipcRenderer.on('minipit:navigate', handler)
     return () => ipcRenderer.removeListener('minipit:navigate', handler)
+  },
+  onOpenSandbox: (cb: (name: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string) => cb(name)
+    ipcRenderer.on('minipit:open-sandbox', handler)
+    return () => ipcRenderer.removeListener('minipit:open-sandbox', handler)
+  },
+  onOpenProject: (cb: (workspace: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, workspace: string) => cb(workspace)
+    ipcRenderer.on('minipit:open-project', handler)
+    return () => ipcRenderer.removeListener('minipit:open-project', handler)
   },
   onOpenModal: (cb: (modal: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, modal: string) => cb(modal)

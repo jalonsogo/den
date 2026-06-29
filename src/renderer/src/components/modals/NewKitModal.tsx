@@ -108,7 +108,7 @@ export function NewKitModal() {
       <div className="modal" style={{ width: 540 }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
           <div className="m-title">New Kit</div>
-          <div className="m-sub">Describe the kit — minipit writes the spec.yaml and packs it.</div>
+          <div className="m-sub">Describe the kit — den writes the spec.yaml and packs it.</div>
         </div>
 
         <div className="m-body">

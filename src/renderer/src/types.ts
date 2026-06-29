@@ -152,6 +152,15 @@ export interface NetworkPolicy {
   error?: string
 }
 
+export interface SbxInstallInfo {
+  manager: 'brew' | 'winget' | 'apt' | 'manual'
+  real: string
+  canAutoUpdate: boolean
+  releasesUrl: string
+  updateCmd: string
+  redownloadCmd: string
+}
+
 export interface AppSettings {
   sbxPath: string
   pollFocused: string
@@ -184,6 +193,7 @@ declare global {
       removeTemplate(ref: string): Promise<void>
       createKit(name: string, spec: string): Promise<{ dir: string; zip: string; output: string }>
       listKits(): Promise<{ name: string; kind: string; dir: string; hasZip: boolean }[]>
+      kitAdd(sandbox: string, dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
       removeKit(dir: string): Promise<void>
       listSecrets(): Promise<StoredSecret[]>
       setSecret(service: string, value: string): Promise<void>
@@ -200,15 +210,21 @@ declare global {
       saveSettings(settings: Partial<AppSettings>): Promise<void>
       sbxVersion(path?: string): Promise<{ ok: boolean; raw?: string; version?: string; error?: string }>
       sbxReleases(): Promise<SbxRelease[]>
-      sbxBrew(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
+      sbxInstallInfo(): Promise<SbxInstallInfo>
+      sbxUpdate(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
       onRuntimeOutput(cb: (chunk: string) => void): () => void
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>
+      listProjects(): Promise<string[]>
+      addProject(): Promise<string | null>
+      removeProject(dir: string): Promise<void>
       defaultWorkspace(): Promise<string>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onNavigate(cb: (page: string) => void): () => void
+      onOpenSandbox(cb: (name: string) => void): () => void
+      onOpenProject(cb: (workspace: string) => void): () => void
       onOpenModal(cb: (modal: string) => void): () => void
       onSetTab(cb: (tab: string) => void): () => void
       onStopActive(cb: () => void): () => void

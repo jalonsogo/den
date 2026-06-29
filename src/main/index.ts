@@ -63,6 +63,52 @@ function getBrewPath(): string {
   )
 }
 
+const SBX_RELEASES_URL = 'https://github.com/docker/sbx-releases/releases/latest'
+type InstallManager = 'brew' | 'winget' | 'apt' | 'manual'
+
+// Detect how the sbx binary was installed so updates use the right tool
+// (instead of forcing Homebrew). Resolves symlinks to inspect the real path.
+async function detectInstallManager(): Promise<{ manager: InstallManager; real: string }> {
+  const fs = require('fs')
+  const p = getSbxPath()
+  let real = p
+  try { real = fs.realpathSync(p) } catch { /* keep p */ }
+  if (process.platform === 'darwin') {
+    return { manager: /\/(Caskroom|Cellar)\//.test(real) ? 'brew' : 'manual', real }
+  }
+  if (process.platform === 'win32') {
+    return { manager: /(WindowsApps|\\Packages\\|WinGet)/i.test(real) ? 'winget' : 'manual', real }
+  }
+  if (process.platform === 'linux') {
+    const owned = await new Promise<boolean>((res) =>
+      execFile('dpkg', ['-S', real], { timeout: 5000 }, (err) => res(!err)))
+    return { manager: owned ? 'apt' : 'manual', real }
+  }
+  return { manager: 'manual', real }
+}
+
+// The package-manager command to update/redownload sbx, per manager.
+function pkgCommand(manager: InstallManager, action: 'update' | 'redownload'): { bin: string; args: string[] } | null {
+  switch (manager) {
+    case 'brew':
+      return { bin: getBrewPath(), args: action === 'redownload' ? ['reinstall', '--cask', 'docker/tap/sbx'] : ['upgrade', '--cask', 'docker/tap/sbx'] }
+    case 'winget':
+      return { bin: 'winget', args: action === 'redownload' ? ['install', '--id', 'Docker.sbx', '-e', '--force'] : ['upgrade', '--id', 'Docker.sbx', '-e'] }
+    case 'apt':
+      return { bin: 'sudo', args: action === 'redownload' ? ['apt-get', 'install', '--reinstall', '-y', 'docker-sbx'] : ['apt-get', 'install', '--only-upgrade', '-y', 'docker-sbx'] }
+    default:
+      return null
+  }
+}
+
+// Human-readable command for display/copy (brew shown by name, not full path).
+function displayCommand(manager: InstallManager, action: 'update' | 'redownload'): string {
+  const c = pkgCommand(manager, action)
+  if (!c) return ''
+  const bin = manager === 'brew' ? 'brew' : c.bin
+  return `${bin} ${c.args.join(' ')}`
+}
+
 // Parse the column-aligned `sbx policy ls` table into structured rules.
 // Resources span multiple lines (continuation rows have a blank PROVENANCE).
 function parsePolicyLs(out: string) {
@@ -247,7 +293,7 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         if (!code) { res.writeHead(400); res.end('Missing authorization code'); return }
         if (rState && rState !== state) { res.writeHead(400); res.end('State mismatch'); return }
         res.writeHead(200, { 'Content-Type': 'text/html' })
-        res.end('<body style="font-family:sans-serif;padding:40px"><h2>✓ Connected. You can close this tab and return to minipit.</h2></body>')
+        res.end('<body style="font-family:sans-serif;padding:40px"><h2>✓ Connected. You can close this tab and return to den.</h2></body>')
         server.close()
 
         const resp = await fetch(ANTHROPIC_OAUTH.tokenUrl, {
@@ -473,6 +519,9 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+  // Menu-bar app: closing the window doesn't quit. Drop the destroyed reference
+  // so the tray can recreate it instead of touching a dead object.
+  mainWindow.on('closed', () => { mainWindow = null })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -486,20 +535,67 @@ function createWindow(): void {
   }
 }
 
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return }
+  if (!mainWindow.isVisible()) mainWindow.show()
+  mainWindow.focus()
+}
+
+// Show the window (recreating it if it was closed) and deliver a tray-driven
+// navigation event once the renderer has finished loading.
+function navigateFromTray(channel: string, payload: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    mainWindow?.webContents.once('did-finish-load', () =>
+      mainWindow?.webContents.send(channel, payload))
+  } else {
+    showMainWindow()
+    mainWindow.webContents.send(channel, payload)
+  }
+}
+
 function createTray(): void {
-  const logoPath = join(__dirname, '../../resources/logo.png')
-  const img = nativeImage.createFromPath(logoPath).resize({ width: 16, height: 16 })
+  // Dedicated menu-bar glyph; template image auto-adapts to light/dark menubar.
+  const iconPath = join(__dirname, '../../resources/icon/icon-dark.png')
+  const img = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
   img.setTemplateImage(true)
   tray = new Tray(img)
-  tray.setToolTip('minipit')
-  tray.on('click', () => {
-    if (!mainWindow) return
-    if (mainWindow.isVisible()) mainWindow.focus()
-    else {
-      mainWindow.show()
-      mainWindow.focus()
-    }
-  })
+  tray.setToolTip('den')
+  updateTrayMenu([])
+}
+
+// Build the menu-bar dropdown: quick access to running sandboxes and projects.
+function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspace: string }>): void {
+  if (!tray) return
+  const running = sandboxes.filter((s) => s.status === 'running')
+
+  const projects: { workspace: string; count: number }[] = []
+  for (const s of sandboxes) {
+    let p = projects.find((x) => x.workspace === s.workspace)
+    if (!p) { p = { workspace: s.workspace, count: 0 }; projects.push(p) }
+    p.count++
+  }
+
+  const items: Electron.MenuItemConstructorOptions[] = [
+    { label: 'Open den', click: showMainWindow },
+    { type: 'separator' },
+    { label: running.length ? 'Running sandboxes' : 'No running sandboxes', enabled: false },
+    ...running.map((s) => ({
+      label: s.name,
+      click: () => navigateFromTray('minipit:open-sandbox', s.name)
+    })),
+    { type: 'separator' },
+    { label: projects.length ? 'Projects' : 'No projects', enabled: false },
+    ...projects.map((p) => ({
+      label: `${p.workspace.split('/').pop() || p.workspace}  (${p.count})`,
+      click: () => navigateFromTray('minipit:open-project', p.workspace)
+    })),
+    { type: 'separator' },
+    { label: 'New Sandbox…', click: () => navigateFromTray('minipit:open-modal', 'new-sandbox') },
+    { type: 'separator' },
+    { label: 'Quit den', role: 'quit' }
+  ]
+  tray.setContextMenu(Menu.buildFromTemplate(items))
 }
 
 function setAppMenu(): void {
@@ -508,9 +604,9 @@ function setAppMenu(): void {
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
-      label: 'minipit',
+      label: 'den',
       submenu: [
-        { label: 'About minipit', role: 'about' },
+        { label: 'About den', role: 'about' },
         { type: 'separator' },
         { label: 'Preferences…', accelerator: 'Cmd+,', click: () => send('minipit:navigate', 'settings') },
         { type: 'separator' },
@@ -593,12 +689,15 @@ function setupIPC(): void {
     branch?: boolean
     name?: string
     template?: string
+    kits?: string[]
   }) => {
     const args = ['create']
     if (config.name) args.push('--name', config.name)
     if (config.memory) args.push('-m', config.memory)
     if (config.branch) args.push('--clone')
     if (config.template) args.push('-t', config.template)
+    // --kit can only be passed at creation; stack one flag per kit directory.
+    for (const dir of config.kits ?? []) args.push('--kit', dir)
     args.push(config.agent, config.workspace)
     const out = await sbx(args, { timeout: 120000 })
     // `sbx create` prints e.g. "✓ Created sandbox 'claude-foo'" plus extra lines,
@@ -653,6 +752,16 @@ function setupIPC(): void {
     // pack validates the spec and produces the ZIP artifact.
     const output = await sbx(['kit', 'pack', base, '-o', zip], { timeout: 30000 })
     return { dir: base, zip, output }
+  })
+
+  // Apply a kit to a RUNNING sandbox (re-runs install commands, re-copies files).
+  ipcMain.handle('minipit:kit-add', async (_, sandbox: string, kitDir: string) => {
+    try {
+      const output = await sbx(['kit', 'add', sandbox, kitDir], { timeout: 120000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
   })
 
   ipcMain.handle('minipit:list-kits', () => {
@@ -826,7 +935,7 @@ function setupIPC(): void {
   ipcMain.handle('minipit:sbx-releases', async () => {
     try {
       const res = await fetch('https://api.github.com/repos/docker/sbx-releases/releases?per_page=8', {
-        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'minipit' }
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'den' }
       })
       if (!res.ok) throw new Error(`GitHub ${res.status}`)
       const data = (await res.json()) as Array<Record<string, unknown>>
@@ -844,28 +953,40 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:sbx-brew', (_, action: 'update' | 'redownload') =>
-    new Promise((resolve) => {
-      const brew = getBrewPath()
-      const args =
-        action === 'redownload'
-          ? ['reinstall', '--cask', 'docker/tap/sbx']
-          : ['upgrade', '--cask', 'docker/tap/sbx']
-      const send = (chunk: string) => mainWindow?.webContents.send('minipit:runtime-output', chunk)
-      send(`$ brew ${args.join(' ')}\n\n`)
-      const proc = spawn(brew, args, { env: { ...process.env } })
+  ipcMain.handle('minipit:sbx-install-info', async () => {
+    const { manager, real } = await detectInstallManager()
+    return {
+      manager,
+      real,
+      canAutoUpdate: manager === 'brew' || manager === 'winget',
+      releasesUrl: SBX_RELEASES_URL,
+      updateCmd: displayCommand(manager, 'update'),
+      redownloadCmd: displayCommand(manager, 'redownload')
+    }
+  })
+
+  ipcMain.handle('minipit:sbx-update', async (_, action: 'update' | 'redownload') => {
+    const { manager } = await detectInstallManager()
+    const send = (chunk: string) => mainWindow?.webContents.send('minipit:runtime-output', chunk)
+    const cmd = pkgCommand(manager, action)
+    // Only brew/winget can run non-interactively from the GUI (apt needs sudo).
+    if (!cmd || !(manager === 'brew' || manager === 'winget')) {
+      send(`Auto-${action} isn't available for a "${manager}" install.\n`)
+      send(manager === 'apt'
+        ? `Run in a terminal:\n  ${displayCommand(manager, action)}\n`
+        : `Download the latest build from:\n  ${SBX_RELEASES_URL}\n`)
+      return { ok: false, code: -1 }
+    }
+    return await new Promise((resolve) => {
+      const display = manager === 'brew' ? 'brew' : cmd.bin
+      send(`$ ${display} ${cmd.args.join(' ')}\n\n`)
+      const proc = spawn(cmd.bin, cmd.args, { env: { ...process.env } })
       proc.stdout.on('data', (d) => send(d.toString()))
       proc.stderr.on('data', (d) => send(d.toString()))
-      proc.on('error', (e) => {
-        send(`\n[error] ${e.message}\n`)
-        resolve({ ok: false, code: -1 })
-      })
-      proc.on('close', (code) => {
-        send(`\n[exit ${code}]\n`)
-        resolve({ ok: code === 0, code: code ?? -1 })
-      })
+      proc.on('error', (e) => { send(`\n[error] ${e.message}\n`); resolve({ ok: false, code: -1 }) })
+      proc.on('close', (code) => { send(`\n[exit ${code}]\n`); resolve({ ok: code === 0, code: code ?? -1 }) })
     })
-  )
+  })
 
   ipcMain.handle('minipit:network-policy', async (_, name?: string) => {
     try {
@@ -905,6 +1026,27 @@ function setupIPC(): void {
   ipcMain.handle('minipit:show-open-dialog', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'] })
     return result.canceled ? null : result.filePaths[0]
+  })
+
+  // ── Projects (empty workspaces, persisted independently of sandboxes) ───────
+  ipcMain.handle('minipit:list-projects', () => (store.get('projects') as string[]) ?? [])
+
+  ipcMain.handle('minipit:add-project', async () => {
+    // Pick or create a folder; the OS panel's "New Folder" covers creation.
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Add Project'
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const dir = result.filePaths[0]
+    const list = (store.get('projects') as string[]) ?? []
+    if (!list.includes(dir)) { list.push(dir); store.set('projects', list) }
+    return dir
+  })
+
+  ipcMain.handle('minipit:remove-project', (_, dir: string) => {
+    const list = ((store.get('projects') as string[]) ?? []).filter((d) => d !== dir)
+    store.set('projects', list)
   })
 
   // ── Shell PTY ──────────────────────────────────────────────────────────────
@@ -981,6 +1123,7 @@ function startPolling(): void {
     try {
       const sandboxes = await listSandboxes()
       mainWindow?.webContents.send('minipit:sandboxes-updated', sandboxes)
+      updateTrayMenu(sandboxes)
     } catch { /* silent */ }
   }
   poll()
@@ -988,7 +1131,7 @@ function startPolling(): void {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.minipit.app')
+  electronApp.setAppUserModelId('studio.den.app')
   app.on('browser-window-created', (_, window) => { optimizer.watchWindowShortcuts(window) })
 
   setAppMenu()

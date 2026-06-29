@@ -244,6 +244,9 @@ html, body, #root {
   padding: 0 8px 5px;
   display: block;
 }
+/* No jarring OS focus ring on sidebar controls; subtle ring for keyboard nav. */
+.sidebar button:focus { outline: none; }
+.sidebar button:focus-visible { outline: 2px solid var(--border-hi); outline-offset: -2px; border-radius: 6px; }
 
 .sb-item {
   display: flex;
@@ -489,6 +492,11 @@ html, body, #root {
   margin-left: auto; font-size: 11px; color: var(--t3);
   background: var(--bg-subtle); border-radius: 100px; padding: 1px 7px;
 }
+.sb-proj-pop-path {
+  font-size: 11px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace;
+  padding: 0 6px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb-proj-pop-empty { font-size: 12px; color: var(--t3); padding: 6px; }
 .sb-proj-pop-new {
   display: flex; align-items: center; gap: 7px; width: 100%;
   padding: 6px; border: none; background: none; border-radius: 6px;
@@ -546,9 +554,11 @@ html, body, #root {
 .sb-sec-title.active { color: var(--sb-active-fg); }
 
 /* Project rows in the sidebar */
-.sb-proj { display: flex; align-items: center; border-radius: 8px; margin-bottom: 1px; }
+.sb-proj { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; margin-bottom: 1px; }
 .sb-proj:hover { background: var(--sb-hover); }
 .sb-proj-main { flex: 1; display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; min-width: 0; }
+/* Hover/click target = name + count only (icon = picker, + stays reachable). */
+.sb-proj-label { display: inline-flex; align-items: center; gap: 7px; min-width: 0; cursor: pointer; }
 
 /* Customizable project avatar */
 .sb-proj-av {
@@ -562,18 +572,31 @@ html, body, #root {
 /* Project color picker popover */
 .proj-cpick-scrim { position: fixed; inset: 0; z-index: 320; }
 .proj-cpick {
-  position: fixed; z-index: 330; width: 168px;
+  position: fixed; z-index: 330; width: 232px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.25); padding: 9px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25); padding: 10px;
 }
-.proj-cpick-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.proj-cpick-lbl {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--t3); margin-bottom: 7px;
+}
+.proj-cpick-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 12px; }
 .proj-cpick-sw {
-  width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent;
+  width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent;
   cursor: pointer; padding: 0; transition: transform 0.1s;
 }
 .proj-cpick-sw:hover { transform: scale(1.12); }
 .proj-cpick-sw.on { border-color: var(--t1); }
-.proj-cpick-foot { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
+.proj-cpick-icons { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.proj-cpick-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 7px;
+  background: var(--bg-subtle); border: 1px solid transparent; color: var(--t2);
+  cursor: pointer; padding: 0;
+}
+.proj-cpick-icon:hover { border-color: var(--border-hi); }
+.proj-cpick-icon.on { border-color: var(--t1); background: var(--bg); }
+.proj-cpick-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .proj-cpick-custom {
   width: 26px; height: 26px; border-radius: 50%; overflow: hidden; cursor: pointer; flex-shrink: 0;
   border: 1px solid var(--border);
@@ -594,10 +617,10 @@ html, body, #root {
   border-radius: 9px; padding: 1px 6px; flex-shrink: 0;
 }
 .sb-proj-add {
-  width: 24px; height: 24px; flex-shrink: 0; margin-right: 4px;
+  width: 22px; height: 22px; flex-shrink: 0; margin-left: auto;
   display: flex; align-items: center; justify-content: center;
   border: none; background: none; color: var(--sb-muted); cursor: pointer;
-  border-radius: 6px; opacity: 0; transition: opacity 0.1s;
+  border-radius: 6px; opacity: 0.55; transition: opacity 0.1s, background 0.1s, color 0.1s;
 }
 .sb-proj:hover .sb-proj-add { opacity: 1; }
 .sb-proj-add:hover { background: var(--sb-active); color: var(--sb-fg); }
@@ -987,47 +1010,27 @@ html, body, #root {
 }
 
 /* ── Ports ── */
-.ports-panel { flex: 1; overflow-y: auto; padding: 18px; }
-
-.ports-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  margin-bottom: 14px;
-  font-size: 12.5px;
-  color: var(--t2);
-  background: var(--bg-subtle);
+/* Compact ports — fits the narrow Info dock */
+.ports-empty {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12.5px; color: var(--t3);
 }
-
-.ports-tbl { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-
-.ptbl-hdr {
-  display: grid;
-  grid-template-columns: 80px 100px 70px 1fr 100px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-subtle);
+.ports-list { display: flex; flex-direction: column; }
+.port-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid var(--border);
 }
-.pth { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--t3); }
-
-.ptbl-row {
-  display: grid;
-  grid-template-columns: 80px 100px 70px 1fr 100px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  align-items: center;
+.port-row:last-of-type { border-bottom: none; }
+.p-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--t4); flex-shrink: 0; }
+.p-dot.on { background: var(--green); }
+.port-map { font-size: 12.5px; color: var(--t1); font-family: 'SF Mono','Menlo',monospace; }
+.port-proto { font-size: 11px; color: var(--t3); }
+.ports-add {
+  align-self: flex-start; margin-top: 6px;
+  font-size: 12px; color: var(--t2); background: none; border: none; cursor: pointer; padding: 2px 0;
 }
-.ptbl-row:last-child { border-bottom: none; }
-.ptbl-row:hover { background: var(--bg-subtle); }
-
-.pval  { font-size: 13px; font-weight: 600; color: var(--t1); font-family: 'SF Mono','Menlo',monospace; }
-.pval2 { font-size: 13px; color: var(--t2); font-family: 'SF Mono','Menlo',monospace; }
-.pproto { font-size: 12px; color: var(--t3); }
-.p-status { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--green); }
-.p-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.ports-add:hover { color: var(--t1); }
+.ports-hint { font-size: 11px; color: var(--t3); margin-top: 6px; }
 
 /* ── Files ── */
 .files-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -1190,8 +1193,8 @@ html, body, #root {
 .page-body { flex: 1; overflow-y: auto; padding: 18px; }
 
 /* ── Home ── */
-/* Dashboard fills the page width and wraps responsively */
-.home-dash { max-width: 1200px; }
+/* Dashboard fills the full page width and wraps responsively */
+.home-dash { max-width: none; }
 .home-stats { display: flex; gap: 12px; flex-wrap: wrap; }
 .home-stat { flex: 1 1 150px; min-width: 150px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .home-stat-n { font-size: 26px; font-weight: 600; color: var(--t1); line-height: 1; }
@@ -1266,6 +1269,31 @@ html, body, #root {
   background: var(--bg); color: var(--t1); font-size: 12px; cursor: pointer;
 }
 .proj-box:hover { border-color: var(--border-hi); }
+/* Kit → "Add to sandbox" inline picker */
+.kit-add-picker {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 8px 10px 10px 30px;
+}
+.kit-add-empty { font-size: 12px; color: var(--t3); }
+.kit-add-sb {
+  font-size: 12px; color: var(--t1);
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 10px; cursor: pointer;
+}
+.kit-add-sb:hover { border-color: var(--border-hi); }
+.kit-add-sb:disabled { opacity: 0.5; cursor: default; }
+
+/* New Sandbox modal — mixin multi-select chips */
+.kit-multi { display: flex; flex-wrap: wrap; gap: 6px; }
+.kit-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--t2);
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 100px;
+  padding: 4px 10px; cursor: pointer;
+}
+.kit-chip:hover { border-color: var(--border-hi); color: var(--t1); }
+.kit-chip.on { color: var(--prim-fg, #fff); background: var(--primary); border-color: var(--primary); }
+
 .proj-box-new { color: var(--t2); border-style: dashed; }
 .proj-box-new:hover { color: var(--t1); border-color: var(--border-hi); }
 .proj-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
@@ -1535,6 +1563,12 @@ html, body, #root {
   padding: 0;
 }
 .rt-output .logs-pre { margin: 0; color: #d4d4d4; }
+.rt-cmdhint { font-size: 11.5px; color: var(--t3); line-height: 1.5; }
+.rt-cmdhint code {
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11px;
+  background: var(--bg-subtle); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; color: var(--t2);
+}
 
 .rt-rel { border-top: 1px solid var(--border); }
 .rt-rel:first-of-type { border-top: none; }
@@ -1751,12 +1785,12 @@ html, body, #root {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 8px 28px rgba(0,0,0,0.18); padding: 4px;
-  max-height: 280px; overflow-y: auto;
+  max-height: 184px; overflow-y: auto;
 }
 .agent-dd-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 9px; border-radius: 5px; cursor: pointer;
-  font-size: 13px; color: var(--t1);
+  display: flex; align-items: center; gap: 9px;
+  padding: 5px 9px; border-radius: 5px; cursor: pointer;
+  font-size: 12.5px; color: var(--t1);
 }
 .agent-dd-item:hover { background: var(--bg-subtle); }
 .agent-dd-item.on { background: var(--bg-subtle); }

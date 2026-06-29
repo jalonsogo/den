@@ -180,7 +180,7 @@ export function SettingsPage() {
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Interval (focused)</div>
-              <div className="ss-sub">While minipit is the active window.</div>
+              <div className="ss-sub">While den is the active window.</div>
             </div>
             <input
               className="s-input"
