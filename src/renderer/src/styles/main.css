@@ -2137,18 +2137,25 @@ html, body, #root {
 .ctx-kbd { font-size: 11.5px; color: var(--t3); }
 .ctx-sep { height: 1px; background: var(--border); margin: 3px 0; }
 
-/* Terminal theme picker inside the options menu */
-.ctx-theme { display: flex; align-items: center; gap: 10px; padding: 6px 12px; }
-.ctx-theme-lbl { flex: 1; white-space: nowrap; }
-.ctx-theme-select {
-  appearance: none; -webkit-appearance: none;
-  background: var(--bg-subtle); color: var(--t1);
-  border: 1px solid var(--border); border-radius: 5px;
-  font-size: 12px; padding: 3px 22px 3px 8px; cursor: pointer; outline: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='gray' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
-  background-repeat: no-repeat; background-position: right 7px center;
+/* Terminal theme submenu (flyout) inside the options menu */
+.ctx-has-sub { position: relative; }
+.ctx-sub-arrow { color: var(--t3); font-size: 15px; line-height: 1; }
+.ctx-submenu {
+  position: absolute; top: -5px; left: 100%; margin-left: 3px; z-index: 2001;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.22); padding: 4px; min-width: 190px;
+  max-height: 360px; overflow-y: auto;
 }
-.ctx-theme-select:hover { border-color: var(--border-hi); }
+.ctx-sub-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
+  color: var(--t3); padding: 6px 10px 3px;
+}
+.ctx-sub-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; font-size: 13px;
+}
+.ctx-sub-item:hover { background: var(--bg-subtle); }
+.ctx-sub-check { width: 12px; color: var(--accent, var(--primary)); flex-shrink: 0; }
 
 /* ── Animations ── */
 @keyframes pulse {

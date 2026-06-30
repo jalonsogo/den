@@ -1,15 +1,14 @@
 <div align="center">
 
-<img src="resources/logo.png" alt="den" width="400" />
-</div>
+<img src="resources/icon/dock.png" alt="den" width="300" />
 
-# DEN Studio (Developer Ephemeral Nodes)
+# Den · Developer Ephemeral Node
 
-**A beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (the `sbx` CLI).**
+**Spin up ephemeral coding environments where AI builds your apps.**
 
 [den.studio](https://den.studio)
 
-Launch, monitor, and work with AI‑agent sandboxes — without living in the terminal.
+Den is a beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (the `sbx` CLI). Launch disposable, isolated environments, point an AI agent (Claude Code, Codex, Cursor, Gemini, …) at a workspace, and let it build, run, and iterate on apps — then throw the sandbox away when you're done. All without living in the terminal.
 
 </div>
 

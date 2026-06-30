@@ -16,6 +16,10 @@ import { execFile, spawn } from 'child_process'
 import Store from 'electron-store'
 import pty from 'node-pty'
 
+// Name the app early (before whenReady) so menus, the About panel and the dock
+// label read "den" instead of "Electron" in dev. Packaged builds use productName.
+app.setName('den')
+
 const store = new Store()
 
 let mainWindow: BrowserWindow | null = null

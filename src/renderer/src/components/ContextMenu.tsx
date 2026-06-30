@@ -8,6 +8,7 @@ export function ContextMenu() {
   const setTermTheme = useStore((s) => s.setTermTheme)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
+  const [themeOpen, setThemeOpen] = useState(false)
 
   const sandbox = sandboxes.find((s) => s.id === contextMenu.sandboxId)
 
@@ -50,6 +51,11 @@ export function ContextMenu() {
     window.minipit?.openInFinder(sandbox.workspace)
   }
 
+  const pickTheme = (id: string) => {
+    setTermTheme(id)
+    setContextMenu({ visible: false })
+  }
+
 
   const handleDelete = async () => {
     setContextMenu({ visible: false })
@@ -85,24 +91,32 @@ export function ContextMenu() {
       <div className="ctx-item">Save Snapshot…</div>
       <div className="ctx-item">Reset…</div>
       <div className="ctx-sep" />
-      <div className="ctx-theme">
-        <span className="ctx-theme-lbl">Terminal theme</span>
-        <select
-          className="ctx-theme-select"
-          value={termTheme}
-          onChange={(e) => setTermTheme(e.target.value)}
-        >
-          {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
-            <option key={t.id} value={t.id}>{t.label}</option>
-          ))}
-          {TERM_THEME_GROUPS.map((g) => (
-            <optgroup key={g.mode} label={g.label}>
-              {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+      <div
+        className="ctx-item ctx-has-sub"
+        onMouseEnter={() => setThemeOpen(true)}
+        onMouseLeave={() => setThemeOpen(false)}
+      >
+        Terminal theme
+        <span className="ctx-sub-arrow">›</span>
+        {themeOpen && (
+          <div className="ctx-submenu">
+            {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
+              <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
+                <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
+              </div>
+            ))}
+            {TERM_THEME_GROUPS.map((g) => (
+              <div key={g.mode}>
+                <div className="ctx-sub-label">{g.label}</div>
+                {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => (
+                  <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
+                    <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="ctx-sep" />
       <div className="ctx-item destructive" onClick={handleDelete}>
