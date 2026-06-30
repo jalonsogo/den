@@ -617,6 +617,43 @@
     }
     .stat-label { font-size: 13px; color: var(--text-mid); font-weight: 500; }
 
+    /* ─── READINESS HOOK ─── */
+    .ready {
+      background: var(--ocean-deep);
+      padding: 140px 52px;
+      text-align: center;
+      position: relative; overflow: hidden;
+    }
+    .ready::before {
+      content: '';
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 820px; height: 820px;
+      background: radial-gradient(ellipse, rgba(63,63,70,0.16) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .ready-inner {
+      position: relative; z-index: 1;
+      opacity: 0; transform: translateY(26px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .ready-inner.visible { opacity: 1; transform: translateY(0); }
+    .ready .section-eyebrow { color: var(--ocean-sky); }
+    .ready-title {
+      font-family: 'Figtree', sans-serif;
+      font-size: clamp(40px, 6.5vw, 76px);
+      font-weight: 700; color: var(--white);
+      line-height: 1.04; letter-spacing: -0.035em;
+      margin-bottom: 24px;
+    }
+    .ready-title em { font-style: normal; color: var(--ocean-sky); }
+    .ready-sub {
+      font-size: 18px; color: rgba(255,255,255,0.55);
+      max-width: 560px; margin: 0 auto 44px; line-height: 1.65;
+    }
+    .ready-sub em { font-style: normal; color: rgba(255,255,255,0.85); }
+    .ready-btn { font-size: 16px; padding: 16px 38px; }
+
     /* ─── CTA ─── */
     .cta-section {
       background: linear-gradient(155deg, var(--ocean-mid) 0%, var(--ocean-deep) 100%);
@@ -748,7 +785,6 @@
   </a>
   <ul class="nav-links">
     <li><a href="#features">Features</a></li>
-    <li><a href="#how">How it works</a></li>
     <li><a href="#demo">Preview</a></li>
     <li><a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener">sbx docs</a></li>
     <li><a href="#cta" class="nav-cta">Download</a></li>
@@ -870,36 +906,15 @@
   </div>
 </section>
 
-<!-- ── HOW IT WORKS ── -->
-<section class="how" id="how">
-  <div class="section-eyebrow">Get started</div>
-  <h2 class="section-title">Up and running in minutes</h2>
-  <p class="section-sub">den sits on top of your existing sbx setup. If you've used Docker Sandboxes, you're already halfway there.</p>
-
-  <div class="steps" id="stepsGrid">
-    <div class="step">
-      <div class="step-num">1</div>
-      <h3 class="step-title">Install den</h3>
-      <p class="step-desc">Download the app, drop it in Applications. No Homebrew, no npm install, no setup wizard.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">2</div>
-      <h3 class="step-title">Connect to sbx</h3>
-      <p class="step-desc">Sign in with your Docker account. den picks up your sbx credentials automatically.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <h3 class="step-title">Create a sandbox</h3>
-      <p class="step-desc">Pick a base image, tweak resources if you like, and launch. Your isolated microVM is ready in seconds.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">4</div>
-      <h3 class="step-title">Let it run</h3>
-      <p class="step-desc">Launch Claude, Codex, Antigravity or OpenCode, turn off the prompts, and let it build, explore and ship — unattended.</p>
-    </div>
+<!-- ── READINESS HOOK ── -->
+<section class="ready" id="ready">
+  <div class="ready-inner">
+    <div class="section-eyebrow">The real question</div>
+    <h2 class="ready-title">Are you ready for<br><em>full YOLO mode?</em></h2>
+    <p class="ready-sub">Uncover what your agents can really do. Stop babysitting them, stop clicking <em>approve</em> — box them in, turn them loose, and get on with your day.</p>
+    <a href="#cta" class="btn-white ready-btn">I'm ready →</a>
   </div>
 </section>
-
 
 <!-- ── CTA ── -->
 <section class="cta-section" id="cta">
@@ -953,21 +968,6 @@
   const featGrid = document.getElementById('featGrid');
   if (featGrid) cardObserver.observe(featGrid);
 
-  // Step observer
-  const stepObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-      const steps = entry.target.querySelectorAll('.step');
-      steps.forEach((s, i) => {
-        setTimeout(() => s.classList.add('visible'), i * 110);
-      });
-      stepObserver.unobserve(entry.target);
-    });
-  }, { threshold: 0.15 });
-
-  const stepsGrid = document.getElementById('stepsGrid');
-  if (stepsGrid) stepObserver.observe(stepsGrid);
-
   // Browser mockup
   const browserObs = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -980,6 +980,18 @@
 
   const bw = document.getElementById('browserWin');
   if (bw) browserObs.observe(bw);
+
+  // Readiness hook reveal
+  const revealObs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('visible');
+      revealObs.unobserve(entry.target);
+    });
+  }, { threshold: 0.25 });
+
+  const readyInner = document.querySelector('.ready-inner');
+  if (readyInner) revealObs.observe(readyInner);
 
   // Animate log lines
   const logRows = document.querySelectorAll('.log-row');
