@@ -123,7 +123,7 @@ export function SettingsPage() {
           <SecretsPanel />
         </div>
       ) : (
-      <div className="page-body" style={{ padding: '8px 28px 28px' }}>
+      <div className="page-body" style={{ padding: '24px 28px 28px' }}>
         <div className="ss">
           <div className="ss-hdr">Appearance</div>
           <div className="ss-row">

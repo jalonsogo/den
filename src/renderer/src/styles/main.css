@@ -1145,6 +1145,9 @@ html, body, #root {
   flex-shrink: 0; font-size: 9px; font-weight: 700; min-width: 14px; text-align: center;
   border-radius: 3px; padding: 0 3px; margin-left: 4px;
 }
+/* Folder roll-up count: a pill, so it reads as "N changes in here" rather than
+   a single-letter file status. */
+.frow-badge-count { border-radius: 100px; min-width: 16px; padding: 0 5px; }
 
 /* File editor window (#/editor) */
 .few { display: flex; flex-direction: column; height: 100vh; background: var(--bg); }
