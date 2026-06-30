@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Sun, Moon, Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
+  Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
   Home, FolderGit2, LayoutGrid, Layers, Package, Settings
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -168,7 +168,7 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
 export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage, setActiveSandboxId,
-    setNewSandboxWorkspace, setActiveProject, theme, toggleTheme, sidebarCollapsed,
+    setNewSandboxWorkspace, setActiveProject, sidebarCollapsed,
     customProjects, addProject
   } = useStore()
   const collapsed = sidebarCollapsed
@@ -380,8 +380,8 @@ export function Sidebar() {
         {(collapsed || libOpen) && (
           <>
             {navItem('templates', 'Templates', <LayoutGrid size={16} />)}
-            {navItem('mixins', 'Mixins', <Layers size={16} />)}
-            {navItem('kits', 'Kits', <Package size={16} />)}
+            {navItem('mixins', 'Mixin Kits', <Layers size={16} />)}
+            {navItem('kits', 'Sandbox Kits', <Package size={16} />)}
           </>
         )}
       </div>
@@ -399,13 +399,6 @@ export function Sidebar() {
             sbx · connected
           </span>
         )}
-        <button
-          className="sb-icon-btn"
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-        >
-          {theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}
-        </button>
       </div>
     </aside>
     </Tooltip.Provider>

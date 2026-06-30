@@ -120,6 +120,7 @@ export function SandboxDetail() {
             dock={dock}
             onToggleFiles={() => setDock((d) => (d === 'files' ? null : 'files'))}
             onShowInfo={() => setDock((d) => (d === 'info' ? null : 'info'))}
+            onStart={handleStart}
           />
         </div>
         {dock && (

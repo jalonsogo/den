@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X, Layers, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store'
 import { formatUptime } from '../lib/utils'
 import { PortsPanel } from './PortsPanel'
@@ -10,6 +10,11 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
 
   const [policy, setPolicy] = useState<NetworkPolicy | null>(null)
   const [polLoading, setPolLoading] = useState(true)
+  const [kits, setKits] = useState<string[]>([])
+
+  useEffect(() => {
+    window.minipit?.appliedKits(sandbox.name).then((k) => setKits(k ?? [])).catch(() => setKits([]))
+  }, [sandbox.name])
   const [allowInput, setAllowInput] = useState('')
   const [allowBusy, setAllowBusy] = useState(false)
   const [allowMsg, setAllowMsg] = useState<{ ok: boolean; text: string; offerRestart?: boolean } | null>(null)
@@ -107,6 +112,15 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
         <PortsPanel sandbox={sandbox} />
       </div>
 
+      {kits.length > 0 && (
+        <div className="info-block">
+          <div className="info-block-title">Kits</div>
+          <div className="info-kits">
+            {kits.map((k) => <span className="info-kit" key={k}><Layers size={12} />{k}</span>)}
+          </div>
+        </div>
+      )}
+
       <div className="info-block">
         <div className="info-block-title" style={{ display: 'flex', alignItems: 'center' }}>
           Network policy
@@ -125,6 +139,15 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
               <div className="np-meta">
                 {policy.governance && <span className="np-gov">⛬ {policy.governance}</span>}
                 {policy.sync && <span className="np-sync">{policy.sync}</span>}
+              </div>
+            )}
+            {policy.governance && (
+              <div className="np-gov-note">
+                <AlertTriangle size={14} className="np-gov-ic" />
+                <span>
+                  <strong>{policy.governance}.</strong> Local allow rules may be overridden — to guarantee
+                  access, the domain must be added to the governance profile.
+                </span>
               </div>
             )}
             {policy.rules && policy.rules.length > 0 ? (
@@ -182,13 +205,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
               </div>
             )}
 
-            {policy?.ok && policy.governance && (
-              <div className="np-banner warn">
-                <span className="np-banner-txt">
-                  Governed remotely ({policy.governance}) — a local rule may be overridden; it may need to be added in the governance profile.
-                </span>
-              </div>
-            )}
           </div>
         )}
       </div>

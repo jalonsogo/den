@@ -12,8 +12,8 @@
   "build": {
     "appId": "studio.den.app",
     "productName": "den",
-    "mac": { "icon": "resources/logo.png" },
-    "win": { "icon": "resources/logo.png" }
+    "mac": { "icon": "resources/icon/dock.png" },
+    "win": { "icon": "resources/icon/dock.png" }
   },
   "scripts": {
     "dev": "electron-vite dev",

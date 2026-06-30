@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Check, Plus, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Plus, RefreshCw, Search, Layers, X } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { randomName } from '../../lib/names'
@@ -24,6 +24,11 @@ export function NewSandboxModal() {
   const [error, setError]             = useState('')
   const [availKits, setAvailKits]     = useState<{ name: string; dir: string }[]>([])
   const [selKits, setSelKits]         = useState<string[]>([])
+  const [progress, setProgress]       = useState('')   // live `sbx create` output
+  const progRef = useRef<HTMLPreElement>(null)
+  const [kitQuery, setKitQuery]       = useState('')
+  const [kitDdOpen, setKitDdOpen]     = useState(false)
+  const kitDdRef = useRef<HTMLDivElement>(null)
 
   // Load available templates for the "From template" option.
   useEffect(() => {
@@ -52,6 +57,16 @@ export function NewSandboxModal() {
     return () => document.removeEventListener('mousedown', handler)
   }, [ddOpen])
 
+  // Close the kit dropdown on outside click.
+  useEffect(() => {
+    if (!kitDdOpen) return
+    const handler = (e: MouseEvent) => {
+      if (kitDdRef.current && !kitDdRef.current.contains(e.target as Node)) setKitDdOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [kitDdOpen])
+
   // Default the workspace to the shared ~/minipit folder unless a project was chosen.
   useEffect(() => {
     if (newSandboxWorkspace) return
@@ -68,7 +83,12 @@ export function NewSandboxModal() {
   const handleLaunch = async () => {
     if (!workspace) { setError('Workspace is required'); return }
     setError('')
+    setProgress('')
     setLaunching(true)
+    const unsub = window.minipit?.onCreateOutput((chunk) => {
+      setProgress((p) => p + chunk)
+      requestAnimationFrame(() => { if (progRef.current) progRef.current.scrollTop = progRef.current.scrollHeight })
+    })
     try {
       const created = await window.minipit?.createSandbox({
         name: name.trim() || undefined,
@@ -84,10 +104,12 @@ export function NewSandboxModal() {
       // createSandbox also attaches (sbx run) in the main process — jump straight
       // into the new sandbox so its agent terminal is shown.
       if (created) setActiveSandboxId(created)
+      unsub?.()
       setModal(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setLaunching(false)
+      unsub?.()
     }
   }
 
@@ -97,6 +119,7 @@ export function NewSandboxModal() {
     source === 'template' && template ? `-t ${template.split('/').pop()}` : '',
     memValue !== 'default' ? `-m ${memValue}` : '',
     clone ? '--clone' : '',
+    ...selKits.map((dir) => `--kit ${availKits.find((k) => k.dir === dir)?.name ?? dir}`),
     agent,
     workspace || '<workspace>'
   ].filter(Boolean).join(' ')
@@ -200,6 +223,68 @@ export function NewSandboxModal() {
             <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
           </div>
 
+          {/* Mixin kits — stacked onto the agent at creation (--kit) */}
+          {availKits.length > 0 && (
+            <div className="fg">
+              <label className="flabel">Mixin kits <span className="flabel-hint">layered onto the agent</span></label>
+
+              {/* Selected kits as removable items */}
+              {selKits.length > 0 && (
+                <div className="kit-sel-list">
+                  {selKits.map((dir) => {
+                    const k = availKits.find((a) => a.dir === dir)
+                    return (
+                      <div key={dir} className="kit-sel-item">
+                        <Layers size={13} />
+                        <span className="kit-sel-name">{k?.name ?? dir}</span>
+                        <button className="kit-sel-rm" title="Remove" onClick={() => setSelKits((s) => s.filter((d) => d !== dir))}>
+                          <X size={13} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Searchable dropdown to add a kit */}
+              <div className="kit-dd" ref={kitDdRef}>
+                <button type="button" className="kit-dd-trigger" onClick={() => setKitDdOpen((v) => !v)}>
+                  <Plus size={13} /> Add a mixin kit
+                  <ChevronDown size={13} style={{ marginLeft: 'auto', color: 'var(--t3)' }} />
+                </button>
+                {kitDdOpen && (
+                  <div className="kit-dd-menu">
+                    <div className="kit-dd-search">
+                      <Search size={13} className="kit-dd-search-ic" />
+                      <input
+                        autoFocus
+                        value={kitQuery}
+                        placeholder="Search kits…"
+                        onChange={(e) => setKitQuery(e.target.value)}
+                      />
+                    </div>
+                    <div className="kit-dd-options">
+                      {(() => {
+                        const q = kitQuery.trim().toLowerCase()
+                        const opts = availKits.filter((k) => !selKits.includes(k.dir) && (!q || k.name.toLowerCase().includes(q)))
+                        if (opts.length === 0) return <div className="kit-dd-empty">{availKits.every((k) => selKits.includes(k.dir)) ? 'All kits added' : 'No matches'}</div>
+                        return opts.map((k) => (
+                          <button
+                            key={k.dir}
+                            className="kit-dd-opt"
+                            onClick={() => { setSelKits((s) => [...s, k.dir]); setKitQuery(''); setKitDdOpen(false) }}
+                          >
+                            <Layers size={13} /> {k.name}
+                          </button>
+                        ))
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Advanced — collapsible */}
           <div className="adv">
             <button className="adv-toggle" onClick={() => setAdvanced((v) => !v)}>
@@ -238,37 +323,24 @@ export function NewSandboxModal() {
                   </code>
                 </div>
 
-                {availKits.length > 0 && (
-                  <div className="fg">
-                    <label className="flabel">Mixins <span className="flabel-hint">stacked with --kit</span></label>
-                    <div className="kit-multi">
-                      {availKits.map((k) => {
-                        const on = selKits.includes(k.dir)
-                        return (
-                          <button
-                            key={k.dir}
-                            className={`kit-chip${on ? ' on' : ''}`}
-                            onClick={() => setSelKits((s) => on ? s.filter((d) => d !== k.dir) : [...s, k.dir])}
-                          >
-                            {on ? <Check size={12} /> : <Plus size={12} />} {k.name}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
 
-          <div className="cmd-blk">
-            {cmdParts.split(' ').map((word, i) => {
-              if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
-              if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
-              if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
-              return <span key={i} className="cm-v">{word} </span>
-            })}
-          </div>
+          {launching || progress ? (
+            <div className="cmd-blk create-log">
+              <pre ref={progRef} className="create-log-pre">{progress || 'Starting…'}</pre>
+            </div>
+          ) : (
+            <div className="cmd-blk">
+              {cmdParts.split(' ').map((word, i) => {
+                if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
+                if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
+                if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
+                return <span key={i} className="cm-v">{word} </span>
+              })}
+            </div>
+          )}
 
           {error && (
             <div style={{ color: 'var(--destruct)', fontSize: 12, marginTop: 10, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: 6 }}>

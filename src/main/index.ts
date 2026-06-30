@@ -16,6 +16,10 @@ import { execFile, spawn } from 'child_process'
 import Store from 'electron-store'
 import pty from 'node-pty'
 
+// Name the app early (before whenReady) so menus, the About panel and the dock
+// label read "den" instead of "Electron" in dev. Packaged builds use productName.
+app.setName('den')
+
 const store = new Store()
 
 let mainWindow: BrowserWindow | null = null
@@ -61,6 +65,38 @@ function getBrewPath(): string {
       }
     }) ?? 'brew'
   )
+}
+
+// Kit artifacts live in the app's own data folder (not the user's home). On
+// first use we migrate any kits authored under the legacy ~/minipit-kits path.
+let kitsRootCache = ''
+function kitsRoot(): string {
+  if (kitsRootCache) return kitsRootCache
+  const fs = require('fs')
+  const root = join(app.getPath('userData'), 'kits')
+  fs.mkdirSync(root, { recursive: true })
+  const legacy = join(app.getPath('home'), 'minipit-kits')
+  try {
+    if (fs.existsSync(legacy)) {
+      for (const entry of fs.readdirSync(legacy)) {
+        const from = join(legacy, entry)
+        const to = join(root, entry)
+        if (!fs.existsSync(to)) { try { fs.renameSync(from, to) } catch { /* cross-device or busy */ } }
+      }
+    }
+  } catch (e) { console.error('kit migration failed:', e) }
+  kitsRootCache = root
+  return root
+}
+
+// sbx has no "which kits are on this sandbox" query, so track it locally.
+function recordKits(sandbox: string, kitDirs: string[]): void {
+  if (!sandbox || !kitDirs?.length) return
+  const path = require('path')
+  const map = (store.get('appliedKits') as Record<string, string[]>) ?? {}
+  const names = kitDirs.map((d) => path.basename(d))
+  map[sandbox] = Array.from(new Set([...(map[sandbox] ?? []), ...names]))
+  store.set('appliedKits', map)
 }
 
 const SBX_RELEASES_URL = 'https://github.com/docker/sbx-releases/releases/latest'
@@ -499,7 +535,7 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24) {
 }
 
 function createWindow(): void {
-  const logoPath = join(__dirname, '../../resources/logo.png')
+  const logoPath = join(__dirname, '../../resources/icon/dock.png')
   const logoImg = nativeImage.createFromPath(logoPath)
 
   mainWindow = new BrowserWindow({
@@ -699,12 +735,30 @@ function setupIPC(): void {
     // --kit can only be passed at creation; stack one flag per kit directory.
     for (const dir of config.kits ?? []) args.push('--kit', dir)
     args.push(config.agent, config.workspace)
-    const out = await sbx(args, { timeout: 120000 })
+    // Stream output so the New Sandbox modal can show live progress (image pull,
+    // kit injection, startup) instead of a silent "Creating…" spinner.
+    const send = (chunk: string) => mainWindow?.webContents.send('minipit:create-output', chunk)
+    send(`$ sbx ${args.join(' ')}\n`)
+    const out = await new Promise<string>((resolve, reject) => {
+      const proc = spawn(getSbxPath(), args, { env: { ...process.env } })
+      let buf = ''
+      let err = ''
+      proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
+      proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
+      proc.on('error', (e) => reject(e))
+      const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx create timed out')) }, 120000)
+      proc.on('close', (code) => {
+        clearTimeout(timer)
+        if (code === 0) resolve(buf.trim())
+        else reject(new Error(err.trim() || buf.trim() || `sbx create exited ${code}`))
+      })
+    })
     // `sbx create` prints e.g. "✓ Created sandbox 'claude-foo'" plus extra lines,
     // so parse the quoted name rather than using the whole message.
     const match = out.match(/sandbox ['"]([^'"]+)['"]/i)
     const sandboxName =
       config.name ?? match?.[1] ?? `${config.agent}-${config.workspace.split('/').pop()}`
+    recordKits(sandboxName, config.kits ?? [])
     // The agent session is started by the Agent terminal (agent-ensure) at the
     // terminal's real size — avoids a default-size session that renders garbled.
     return sandboxName
@@ -742,22 +796,80 @@ function setupIPC(): void {
   })
 
   // ── Kits ───────────────────────────────────────────────────────────────
-  // Kit artifacts authored under ~/minipit-kits/<name>/ (spec.yaml + files/).
-  ipcMain.handle('minipit:create-kit', async (_, name: string, specYaml: string) => {
+  // Kit artifacts authored under <userData>/kits/<name>/ (spec.yaml + files/).
+  ipcMain.handle('minipit:create-kit', async (_, name: string, specYaml: string, files?: string[]) => {
     const fs = require('fs')
-    const base = join(app.getPath('home'), 'minipit-kits', name)
+    const path = require('path')
+    const base = join(kitsRoot(), name)
     fs.mkdirSync(join(base, 'files'), { recursive: true })
     fs.writeFileSync(join(base, 'spec.yaml'), specYaml)
-    const zip = join(app.getPath('home'), 'minipit-kits', `${name}.zip`)
+    // Bundle attached reference files into the kit (injected into the workspace).
+    if (files?.length) {
+      const dest = join(base, 'files', 'workspace')
+      fs.mkdirSync(dest, { recursive: true })
+      for (const fp of files) {
+        try { fs.copyFileSync(fp, join(dest, path.basename(fp))) } catch (e) { console.error('copy kit file failed:', e) }
+      }
+    }
+    const zip = join(kitsRoot(), `${name}.zip`)
     // pack validates the spec and produces the ZIP artifact.
     const output = await sbx(['kit', 'pack', base, '-o', zip], { timeout: 30000 })
     return { dir: base, zip, output }
+  })
+
+  ipcMain.handle('minipit:pick-files', async () => {
+    const r = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Docs', extensions: ['pdf', 'txt', 'md', 'markdown', 'json', 'yaml', 'yml', 'csv'] }]
+    })
+    return r.canceled ? [] : r.filePaths
+  })
+
+  ipcMain.handle('minipit:applied-kits', (_, sandbox: string) => {
+    const fromStore = ((store.get('appliedKits') as Record<string, string[]>) ?? {})[sandbox] ?? []
+    // Also derive from the sandbox's durable-startup dirs (host-side), which sbx
+    // names `NNN-startup-<kit>` — so kits show even if applied outside the app.
+    // The first entry is the agent's own built-in startup, so exclude it.
+    const derived: string[] = []
+    try {
+      const fs = require('fs')
+      const dir = join(app.getPath('home'),
+        'Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/runtimes/durable-startup', sandbox)
+      let agent = ''
+      try {
+        const rt = JSON.parse(fs.readFileSync(join(app.getPath('home'),
+          'Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/runtimes', `${sandbox}.json`), 'utf8'))
+        agent = rt?.AgentName ?? rt?.agent ?? ''
+      } catch { /* no runtime json */ }
+      for (const name of fs.readdirSync(dir) as string[]) {
+        const m = name.match(/^\d+-startup-(.+)$/)
+        if (m && m[1] !== agent) derived.push(m[1])
+      }
+    } catch { /* not running / no durable-startup */ }
+    return Array.from(new Set([...fromStore, ...derived]))
+  })
+
+  ipcMain.handle('minipit:read-kit', (_, dir: string) => {
+    try { return require('fs').readFileSync(join(dir, 'spec.yaml'), 'utf8') as string }
+    catch { return '' }
+  })
+
+  // Rewrite a kit's spec.yaml and re-pack it.
+  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string) => {
+    try {
+      require('fs').writeFileSync(join(dir, 'spec.yaml'), spec)
+      const output = await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
   })
 
   // Apply a kit to a RUNNING sandbox (re-runs install commands, re-copies files).
   ipcMain.handle('minipit:kit-add', async (_, sandbox: string, kitDir: string) => {
     try {
       const output = await sbx(['kit', 'add', sandbox, kitDir], { timeout: 120000 })
+      recordKits(sandbox, [kitDir])
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
@@ -766,7 +878,7 @@ function setupIPC(): void {
 
   ipcMain.handle('minipit:list-kits', () => {
     const fs = require('fs')
-    const base = join(app.getPath('home'), 'minipit-kits')
+    const base = kitsRoot()
     try {
       return (fs.readdirSync(base, { withFileTypes: true }) as { name: string; isDirectory: () => boolean }[])
         .filter((d) => d.isDirectory())
@@ -896,6 +1008,18 @@ function setupIPC(): void {
 
   ipcMain.handle('minipit:stop-log-tail', () => {
     if (logTail) { logTail.kill(); logTail = null }
+  })
+
+  // Kit/startup logs live INSIDE the sandbox (the durable-startup dispatcher
+  // writes every startup command's output here). Not host-tailable, so read it
+  // on demand via exec; callers poll for "follow".
+  ipcMain.handle('minipit:sandbox-kit-log', async (_, name: string) => {
+    try {
+      const text = await sbx(['exec', name, 'sh', '-c', 'cat /var/log/sbx-kit-startup.log 2>/dev/null'], { timeout: 10000 })
+      return { ok: true, text }
+    } catch (e) {
+      return { ok: false, text: '', error: e instanceof Error ? e.message : String(e) }
+    }
   })
 
   ipcMain.handle('minipit:get-settings', () => ({
@@ -1139,6 +1263,22 @@ function startPolling(): void {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('studio.den.app')
   app.on('browser-window-created', (_, window) => { optimizer.watchWindowShortcuts(window) })
+
+  // Brand the running app: dock icon (dev shows the default Electron icon
+  // otherwise) and the native "About den" panel (which pulls its icon/name from
+  // the running app, so it'd be blank/Electron without this).
+  // Use the tightly-cropped dock icon (logo.png has large transparent margins
+  // that make the dock/About icon render small next to other apps).
+  const dockIconPath = join(__dirname, '../../resources/icon/dock.png')
+  const brandLogo = nativeImage.createFromPath(dockIconPath)
+  if (process.platform === 'darwin' && !brandLogo.isEmpty()) app.dock?.setIcon(brandLogo)
+  app.setAboutPanelOptions({
+    applicationName: 'den',
+    applicationVersion: `Version ${app.getVersion()}`,
+    version: '',
+    copyright: '© Docker · den.studio',
+    iconPath: dockIconPath
+  })
 
   setAppMenu()
   createWindow()
