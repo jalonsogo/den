@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: mac
+          - os: windows-latest
+            target: win
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish ${{ matrix.target }}
+        run: npm run build && npx electron-builder --${{ matrix.target }} --publish always
+        env:
+          # Used by electron-builder to create/attach the GitHub Release.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No signing certs configured yet — skip auto-discovery so the
+          # macOS build doesn't fail trying to sign. Harmless on Windows.
+          CSC_IDENTITY_AUTO_DISCOVERY: false

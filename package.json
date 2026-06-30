@@ -12,6 +12,7 @@
   "build": {
     "appId": "studio.den.app",
     "productName": "den",
+    "publish": [{ "provider": "github" }],
     "mac": { "icon": "resources/icon/dock.png" },
     "win": { "icon": "resources/icon/dock.png" }
   },
