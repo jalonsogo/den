@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, ChevronRight, FolderOpen, ArrowUp, X, HardDrive, ShieldAlert } from 'lucide-react'
+import { Plus, ChevronRight, FolderOpen, ArrowUp, X, HardDrive, ShieldAlert, Zap, ShieldCheck, Boxes, Terminal } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import type { SbxRelease, StorageUsage } from '../types'
 import { ProjectAvatar } from './ProjectAvatar'
@@ -82,20 +82,48 @@ export function HomePage() {
     setDismissed(latest)
   }
 
-  // Welcome / empty state — no sandboxes yet, so surface a single centered CTA.
+  // Welcome / empty state — no sandboxes yet, so surface hero + two CTAs + feature highlights.
   if (sandboxes.length === 0) {
     return (
       <div className="page">
         <div className="home-empty">
           <img className="home-empty-mark" src={brandMark} alt="den" width={52} height={56} />
-          <h1 className="home-empty-title">Welcome to den</h1>
+          <span className="home-empty-eyebrow">
+            <Zap size={11} />
+            Ephemeral AI coding environments
+          </span>
+          <h1 className="home-empty-title">Your sandbox, ready in seconds</h1>
           <p className="home-empty-sub">
-            Spin up an isolated sandbox to run agents, terminals, and tools — safely, in their own space.
+            Den spins up isolated Docker containers for AI agents and coding workflows —
+            with terminals, file access, and network controls built in.
           </p>
-          <button className="btn btn-primary" onClick={() => setModal('new-sandbox')}>
-            <Plus size={15} />
-            Create your first sandbox
-          </button>
+          <div className="home-empty-actions">
+            <button className="btn btn-primary" onClick={() => setModal('new-sandbox')}>
+              <Plus size={15} />
+              Create your first sandbox
+            </button>
+            <button className="btn btn-default" onClick={() => setActivePage('kits')}>
+              <Boxes size={14} />
+              Browse kits
+            </button>
+          </div>
+          <div className="home-empty-features">
+            <div className="home-empty-feat">
+              <Terminal size={14} className="home-empty-feat-ic" />
+              <span className="home-empty-feat-title">Full terminal access</span>
+              <span className="home-empty-feat-sub">Drop into a shell inside any running sandbox</span>
+            </div>
+            <div className="home-empty-feat">
+              <ShieldCheck size={14} className="home-empty-feat-ic" />
+              <span className="home-empty-feat-title">Isolated by default</span>
+              <span className="home-empty-feat-sub">Network policy controls what each sandbox can reach</span>
+            </div>
+            <div className="home-empty-feat">
+              <Boxes size={14} className="home-empty-feat-ic" />
+              <span className="home-empty-feat-title">Ready-made kits</span>
+              <span className="home-empty-feat-sub">Start with pre-configured agents, tools, and MCPs</span>
+            </div>
+          </div>
         </div>
       </div>
     )
