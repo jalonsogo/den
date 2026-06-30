@@ -618,13 +618,17 @@ function hookLog(...args: unknown[]): void {
 // else writes our config directly.
 function injectClaudeHooks(name: string): void {
   const cfg = JSON.stringify(DEN_HOOKS)
+  // Write den_hooks to a real file and merge two plain files with jq. Process
+  // substitution (`<(…)`) is bash-only and the sandbox's /bin/sh is dash, so
+  // `sh -c` would fail with "Syntax error: ( unexpected" and never install the hooks.
   const script =
     'mkdir -p ~/.claude ~/.den && touch ~/.den/events.jsonl && ' +
     `den_hooks='${cfg.replace(/'/g, `'\\''`)}' && ` +
+    'printf %s "$den_hooks" > ~/.den/hooks.json && ' +
     'if command -v jq >/dev/null 2>&1 && [ -s ~/.claude/settings.json ]; then ' +
-    '  jq -s ".[0] * .[1]" ~/.claude/settings.json <(printf %s "$den_hooks") > ~/.claude/settings.json.tmp ' +
+    '  jq -s ".[0] * .[1]" ~/.claude/settings.json ~/.den/hooks.json > ~/.claude/settings.json.tmp ' +
     '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
-    'else printf %s "$den_hooks" > ~/.claude/settings.json && echo wrote; fi'
+    'else cp ~/.den/hooks.json ~/.claude/settings.json && echo wrote; fi'
   execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
     if (err) { hookLog(`inject FAILED for ${name}:`, err.message); console.error(`hook inject failed for ${name}:`, err.message) }
     else hookLog(`injected into ${name} (${stdout.trim() || 'ok'}) → ~/.claude/settings.json`)
@@ -819,7 +823,11 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      contextIsolation: true
+      contextIsolation: true,
+      // The finalize chime fires on an IPC event, not a click, so Chromium's
+      // gesture-gated autoplay policy would otherwise keep the AudioContext
+      // suspended and swallow it.
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
 
