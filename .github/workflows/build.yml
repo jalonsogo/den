@@ -17,7 +17,9 @@ jobs:
         include:
           - os: macos-latest
             target: mac
-          - os: windows-latest
+          # Pinned to 2022: the node-gyp that compiles node-pty doesn't
+          # recognize the newer Visual Studio on the windows-latest (2025) image.
+          - os: windows-2022
             target: win
     runs-on: ${{ matrix.os }}
 
