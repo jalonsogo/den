@@ -930,6 +930,21 @@ function setAppMenu(): void {
       ]
     },
     {
+      // Without this, the standard clipboard accelerators (copy/paste/cut/
+      // select-all) are never registered, so you can't copy from or paste into
+      // the sandbox terminal.
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
       label: 'View',
       submenu: [
         { label: 'Terminal', accelerator: 'Cmd+1', click: () => send('minipit:set-tab', 'terminal') },
