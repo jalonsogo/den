@@ -185,8 +185,12 @@ html, body { height:100%; overflow:hidden;
 .term-screen { flex:1; overflow-y:auto; background:var(--term-bg);
   font-family:'SF Mono','Menlo','DejaVu Sans Mono',monospace; font-size:12.5px; line-height:1.55;
   color:var(--term-fg); padding:14px 18px 10px; white-space:pre-wrap; word-break:break-word; }
-.term-screen::-webkit-scrollbar, .shell-screen::-webkit-scrollbar { width:9px; }
-.term-screen::-webkit-scrollbar-thumb, .shell-screen::-webkit-scrollbar-thumb { background:color-mix(in srgb, var(--term-fg) 16%, transparent); border-radius:6px; }
+/* Slim, subtle scrollbars everywhere (matches the app). */
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background:transparent; }
+::-webkit-scrollbar-thumb { background-color:var(--border-hi); border-radius:100px; border:3px solid transparent; background-clip:padding-box; min-height:28px; }
+::-webkit-scrollbar-thumb:hover { background-color:var(--t3); }
+.term-screen::-webkit-scrollbar-thumb, .shell-screen::-webkit-scrollbar-thumb { background-color:color-mix(in srgb, var(--term-fg) 22%, transparent); }
 
 .cc-box { border:1px solid var(--term-border); border-radius:8px; padding:16px 22px; margin-bottom:16px;
   display:grid; grid-template-columns:1fr 1px 1fr; gap:0 24px; align-items:center; }
@@ -367,6 +371,47 @@ html, body { height:100%; overflow:hidden;
   background:var(--t1); color:var(--bg); font-size:12.5px; font-weight:500; padding:8px 14px; border-radius:8px;
   box-shadow:0 8px 24px rgba(0,0,0,0.3); opacity:0; pointer-events:none; transition:all .2s; }
 .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* Modal (New Sandbox) */
+.overlay { position:absolute; inset:0; background:rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center;
+  z-index:300; backdrop-filter:blur(2px); padding:clamp(20px,5vh,48px) clamp(20px,4vw,48px); }
+.modal { background:var(--bg); border-radius:10px; width:460px; max-width:100%; max-height:100%; display:flex; flex-direction:column;
+  box-shadow:0 0 0 1px var(--border), 0 20px 60px rgba(0,0,0,0.18); overflow:hidden; }
+.m-hdr { padding:18px 20px 14px; border-bottom:1px solid var(--border); text-align:center; }
+.m-title { font-size:15px; font-weight:600; letter-spacing:-0.015em; }
+.m-sub { font-size:12px; color:var(--t3); margin-top:3px; }
+.m-body { padding:18px 20px; flex:1; overflow-y:auto; }
+.m-ftr { padding:12px 20px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--bg-subtle); }
+.fg { margin-bottom:14px; }
+.flabel { display:block; font-size:12.5px; font-weight:500; margin-bottom:5px; }
+.finput { width:100%; font-family:inherit; font-size:13px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); padding:7px 10px; color:var(--t1); outline:none; }
+.finput:focus { border-color:var(--t1); }
+.fhint { font-size:11px; color:var(--t3); margin-top:4px; }
+.frow-2 { display:flex; gap:7px; }
+.frow-2 .finput { flex:1; }
+.src-seg { display:flex; gap:4px; background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--radius); padding:3px; }
+.src-seg-item { flex:1; padding:6px 0; border:none; background:none; cursor:pointer; font-size:12.5px; font-weight:500; color:var(--t2); border-radius:4px; }
+.src-seg-item.active { background:var(--bg); color:var(--t1); box-shadow:0 1px 2px rgba(0,0,0,0.08); }
+.agent-dd { position:relative; }
+.agent-dd-btn { width:100%; display:flex; align-items:center; gap:10px; padding:11px 12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--t1); cursor:pointer; font-size:13.5px; font-weight:500; }
+.agent-dd-btn:hover { border-color:var(--border-hi); }
+.agent-dd-list { position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:50; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); box-shadow:0 8px 28px rgba(0,0,0,0.18); padding:4px; }
+.agent-dd-item { display:flex; align-items:center; gap:9px; padding:5px 9px; border-radius:5px; cursor:pointer; font-size:12.5px; }
+.agent-dd-item:hover, .agent-dd-item.on { background:var(--bg-subtle); }
+.tog-row { display:flex; align-items:center; gap:9px; font-size:12.5px; color:var(--t1); }
+.flabel-code { font-size:11px; background:var(--bg-subtle); padding:1px 6px; border-radius:4px; font-family:'SF Mono','Menlo',monospace; }
+.adv { border-top:1px solid var(--border); margin-top:4px; padding-top:12px; }
+.adv-toggle { display:flex; align-items:center; gap:5px; background:none; border:none; cursor:pointer; font-size:12.5px; font-weight:600; color:var(--t2); padding:0; }
+.adv-toggle:hover { color:var(--t1); }
+.adv-body { margin-top:14px; }
+.mem-slider-wrap { display:flex; flex-direction:column; gap:8px; }
+.mem-slider-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--t3); }
+.mem-slider-value { font-size:13px; font-weight:600; }
+.mem-slider { -webkit-appearance:none; appearance:none; width:100%; height:4px; border-radius:2px;
+  background:linear-gradient(to right, var(--primary) var(--pct,0%), var(--border) var(--pct,0%)); outline:none; cursor:pointer; }
+.mem-slider::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:#fff; border:1px solid var(--border-hi); box-shadow:0 1px 3px rgba(0,0,0,0.2); cursor:pointer; }
+.cmd-blk { background:#111; border-radius:var(--radius); padding:10px 13px; font-family:'SF Mono','Menlo',monospace; font-size:11.5px; color:rgba(255,255,255,0.6); margin-top:12px; overflow-x:auto; white-space:nowrap; }
+.cm-b { color:#4ade80; } .cm-a { color:#f59e0b; } .cm-f { color:#60a5fa; } .cm-v { color:rgba(255,255,255,0.55); }
 
 svg { display:block; }
 .fade { animation:fadein .18s ease; }
@@ -614,7 +659,7 @@ let themePref = 'light';  // light | dark | system
 let accent = 'default';
 let termTheme = 'claude-light';
 let settingsTab = 'general';
-const settings = { soundOn:true, launchAtLogin:true, menuBarOnly:true, notifyOnExit:true, notifyOnError:false,
+const settings = { soundOn:true, askSound:true, launchAtLogin:true, menuBarOnly:true, notifyOnExit:true, notifyOnError:false,
   pollFocused:'5s', pollBackground:'30s' };
 
 const $ = (s)=>document.querySelector(s);
@@ -706,6 +751,7 @@ function renderSidebar(){
       <span class="sb-proj-label"><span class="sb-proj-name">${name}</span><span class="sb-proj-count">${p.list.length}</span></span>
       <button class="sb-proj-add" title="New sandbox">${svg('plus',13)}</button>`;
     row.addEventListener('click',()=>{ page='projects'; renderAll(); });
+    row.querySelector('.sb-proj-add').addEventListener('click',(e)=>{ e.stopPropagation(); openNewSandbox(p.workspace); });
     pl.appendChild(row);
   }
 }
@@ -795,6 +841,7 @@ nothing to commit, working tree clean
             <div class="term-seg-item ${tab==='shell'?'active':''}" data-tab="shell">Shell</div>
           </div>
           <div class="term-right">
+            <button class="term-files" data-act="redraw" title="Redraw terminal (force a repaint)">${svg('refresh',13)}</button>
             <button class="term-files ${dock==='info'?'active':''}" data-act="info" title="Sandbox info">${svg('info',14)}</button>
             <button class="term-files" data-act="files" title="Show files">${svg('panelRight',14)} Files</button>
           </div>
@@ -825,7 +872,8 @@ function wireDetail(){
   content.querySelectorAll('[data-tab]').forEach(t=>t.addEventListener('click',()=>{ tab=t.dataset.tab; renderContent(); }));
   content.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',(e)=>{
     const s=byId(activeId); const act=b.dataset.act;
-    if(act==='info'){ dock=dock==='info'?null:'info'; renderContent(); }
+    if(act==='redraw'){ toast('Redrew terminal'); }
+    else if(act==='info'){ dock=dock==='info'?null:'info'; renderContent(); }
     else if(act==='files'){ toast('Files panel'); }
     else if(act==='closedock'){ dock=null; renderContent(); }
     else if(act==='stop'){ s.status='stopped'; s.activity=null; s.uptime=null; if(tab==='shell')tab='agent'; renderAll(); }
@@ -889,6 +937,7 @@ function renderSettings(){
       </div>
       <div class="ss"><div class="ss-hdr">Notifications</div>
         ${toggleRow('soundOn','Sound when an agent finishes','Play a cue when an agent hands a task back to you.')}
+        ${toggleRow('askSound','Sound when an agent needs you','A different cue when the agent asks a question or needs permission.')}
         ${toggleRow('notifyOnExit','Notify on agent exit','')}
         ${toggleRow('notifyOnError','Notify on errors','')}
       </div>
@@ -919,7 +968,6 @@ function wireSettings(){
   c.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>{ const k=b.dataset.toggle; settings[k]=!settings[k]; b.classList.toggle('on'); }));
   c.querySelectorAll('[data-set]').forEach(inp=>inp.addEventListener('change',()=>{ settings[inp.dataset.set]=inp.value; toast('Saved'); }));
   const ts=$('#termSel'); if(ts) ts.addEventListener('change',()=>{ termTheme=ts.value; });
-  const hn=$('#homeNew'); if(hn) hn.addEventListener('click',()=>toast('New sandbox…'));
 }
 
 // ── Templates (table, like the real product) ──
@@ -1009,16 +1057,111 @@ function renderContent(){
   c.querySelectorAll('[data-open-proj]').forEach(b=>b.addEventListener('click',()=>{ page='projects'; renderAll(); }));
   c.querySelectorAll('[data-toast]').forEach(b=>b.addEventListener('click',(e)=>{ e.stopPropagation(); toast(b.dataset.toast); }));
   const gn=$('#gridNew'); if(gn) gn.addEventListener('click',()=>toast('Coming soon'));
+  const hn=$('#homeNew'); if(hn) hn.addEventListener('click',()=>openNewSandbox());
+}
+
+// ── New Sandbox modal ──
+const NS_ADJ=['feral','electric','lively','hidden','quiet','bold','crimson','lunar','golden','swift','amber','silent'];
+const NS_NOUN=['cosmos','satellite','canyon','harbor','meadow','falcon','cipher','nebula','willow','foundry','beacon','delta'];
+function randomName(){ return NS_ADJ[Math.floor(Math.random()*NS_ADJ.length)]+'-'+NS_NOUN[Math.floor(Math.random()*NS_NOUN.length)]; }
+const NS_MEM=['default','2g','4g','8g','16g','32g'];
+const NS_AGENTS=[['claude','Claude Code'],['codex','Codex'],['gemini','Gemini']];
+const NS_NEWCOLORS=['#3b82f6','#8b5cf6','#06b6d4','#f97316','#22c55e','#ec4899'];
+let nsEl=null;
+function closeNS(){ if(nsEl){ nsEl.remove(); nsEl=null; } }
+function openNewSandbox(ws){
+  closeNS();
+  const st={ name:randomName(), agent:'claude', source:'new', clone:false, memIdx:0, wsEdited:!!ws, ws:ws||'' };
+  const slug=()=>st.name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');
+  if(!st.ws) st.ws='~/den/'+(slug()||'sandbox');
+  const tplOpts=TEMPLATES.map(t=>`<option value="${t.repo}:${t.tag}">${t.tag} · ${t.flavor}</option>`).join('');
+  const agentItems=NS_AGENTS.map(([id,l])=>`<div class="agent-dd-item${id==='claude'?' on':''}" data-agent="${id}">${agentIcon(id,18)}<span>${l}</span></div>`).join('');
+  const memLabels=NS_MEM.map(m=>`<span>${m}</span>`).join('');
+  const el=document.createElement('div'); el.className='overlay fade';
+  el.innerHTML=`<div class="modal">
+    <div class="m-hdr"><div class="m-title">New Sandbox</div><div class="m-sub">Pick an agent and workspace, then launch.</div></div>
+    <div class="m-body">
+      <div class="fg"><label class="flabel">Name</label><div class="frow-2">
+        <input class="finput" id="nsName" value="${st.name}">
+        <button class="btn btn-default btn-sm" id="nsRand" title="Random name">${svg('refresh',13)}</button></div></div>
+      <div class="fg"><label class="flabel">Agent</label>
+        <div class="agent-dd" id="nsAgentDd">
+          <button class="agent-dd-btn" id="nsAgentBtn"><span id="nsAgentIc">${agentIcon('claude',20)}</span><span class="agent-dd-label" id="nsAgentLbl">Claude Code</span><span style="margin-left:auto;color:var(--t3)">${svg('chevron',16)}</span></button>
+          <div class="agent-dd-list" id="nsAgentList" style="display:none">${agentItems}</div></div></div>
+      <div class="fg"><label class="flabel">Base image</label>
+        <div class="src-seg"><button class="src-seg-item active" data-src="new">Default</button><button class="src-seg-item" data-src="template">From template</button></div>
+        <select class="finput" id="nsTpl" style="margin-top:8px;cursor:pointer;display:none">${tplOpts}</select></div>
+      <div class="fg"><label class="flabel">Workspace path</label><div class="frow-2">
+        <input class="finput" id="nsWs" value="${st.ws}">
+        <button class="btn btn-default btn-sm" id="nsBrowse">Browse…</button></div>
+        <div class="fhint">The directory sbx mounts as the agent's primary workspace.</div></div>
+      <div class="fg"><label class="flabel">Isolation</label>
+        <div class="tog-row"><button class="s-toggle" id="nsClone"></button> Git clone isolation <code class="flabel-code">--clone</code></div>
+        <div class="fhint">Work in a standalone clone; changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.</div></div>
+      <div class="adv"><button class="adv-toggle" id="nsAdvTog"><span id="nsAdvChev" style="display:inline-flex;transition:transform .12s">${svg('chevron',13)}</span> Advanced</button>
+        <div class="adv-body" id="nsAdvBody" style="display:none">
+          <div class="fg"><label class="flabel" style="display:flex;justify-content:space-between">Memory <span class="mem-slider-value" id="nsMemVal">default</span></label>
+            <div class="mem-slider-wrap"><input type="range" class="mem-slider" id="nsMem" min="0" max="5" value="0" style="--pct:0%"><div class="mem-slider-labels">${memLabels}</div></div></div>
+        </div></div>
+      <div class="cmd-blk" id="nsCmd"></div>
+    </div>
+    <div class="m-ftr"><button class="btn btn-ghost" id="nsCancel">Cancel</button><button class="btn btn-primary" id="nsCreate">Create Sandbox</button></div>
+  </div>`;
+  document.body.appendChild(el); nsEl=el;
+  const q=(s)=>el.querySelector(s);
+
+  const cmd=()=>{
+    const parts=[['sbx','cm-b'],['create','cm-a']];
+    if(st.name.trim()) parts.push(['--name','cm-f'],[st.name.trim(),'cm-v']);
+    if(st.source==='template'){ const t=q('#nsTpl').value; if(t) parts.push(['-t','cm-f'],[t.split('/').pop(),'cm-v']); }
+    if(st.memIdx>0) parts.push(['-m','cm-f'],[NS_MEM[st.memIdx],'cm-v']);
+    if(st.clone) parts.push(['--clone','cm-f']);
+    parts.push([st.agent,'cm-a'],[st.ws||'<workspace>','cm-v']);
+    q('#nsCmd').innerHTML=parts.map(([w,c])=>`<span class="${c}">${w}</span>`).join(' ');
+  };
+  const syncWs=()=>{ if(!st.wsEdited){ st.ws='~/den/'+(slug()||'sandbox'); q('#nsWs').value=st.ws; } };
+  cmd();
+
+  q('#nsName').addEventListener('input',(e)=>{ st.name=e.target.value; syncWs(); cmd(); });
+  q('#nsRand').addEventListener('click',()=>{ st.name=randomName(); q('#nsName').value=st.name; syncWs(); cmd(); });
+  q('#nsAgentBtn').addEventListener('click',(e)=>{ e.stopPropagation(); const l=q('#nsAgentList'); l.style.display=l.style.display==='none'?'block':'none'; });
+  el.querySelectorAll('[data-agent]').forEach(it=>it.addEventListener('click',()=>{
+    st.agent=it.dataset.agent; el.querySelectorAll('[data-agent]').forEach(x=>x.classList.toggle('on',x===it));
+    q('#nsAgentIc').innerHTML=agentIcon(st.agent,20); q('#nsAgentLbl').textContent=NS_AGENTS.find(a=>a[0]===st.agent)[1];
+    q('#nsAgentList').style.display='none'; cmd(); }));
+  el.querySelectorAll('[data-src]').forEach(b=>b.addEventListener('click',()=>{
+    st.source=b.dataset.src; el.querySelectorAll('[data-src]').forEach(x=>x.classList.toggle('active',x===b));
+    q('#nsTpl').style.display=st.source==='template'?'block':'none'; cmd(); }));
+  q('#nsTpl').addEventListener('change',cmd);
+  q('#nsWs').addEventListener('input',(e)=>{ st.ws=e.target.value; st.wsEdited=true; cmd(); });
+  q('#nsBrowse').addEventListener('click',()=>toast('Choose a folder…'));
+  q('#nsClone').addEventListener('click',()=>{ st.clone=!st.clone; q('#nsClone').classList.toggle('on',st.clone); cmd(); });
+  q('#nsAdvTog').addEventListener('click',()=>{ const b=q('#nsAdvBody'); const on=b.style.display==='none'; b.style.display=on?'block':'none'; q('#nsAdvChev').style.transform=on?'rotate(90deg)':''; });
+  q('#nsMem').addEventListener('input',(e)=>{ st.memIdx=+e.target.value; q('#nsMemVal').textContent=NS_MEM[st.memIdx];
+    e.target.style.setProperty('--pct',(st.memIdx/(NS_MEM.length-1)*100)+'%'); cmd(); });
+  q('#nsCancel').addEventListener('click',closeNS);
+  el.addEventListener('click',(e)=>{ if(e.target===el) closeNS(); });
+  q('#nsCreate').addEventListener('click',()=>{
+    const nm=st.name.trim()||randomName();
+    const proj=st.ws.split('/').pop()||'workspace';
+    const init=(nm.split(/[^a-z0-9]+/i).filter(Boolean).slice(0,2).map(p=>p[0]).join('')||nm[0]).toUpperCase();
+    if(!PROJ_COLORS[proj]) PROJ_COLORS[proj]=NS_NEWCOLORS[SANDBOXES.length%NS_NEWCOLORS.length];
+    SANDBOXES.push({ id:'s'+SANDBOXES.length+'_'+nm, name:nm, agent:st.agent, workspace:proj, status:'running', activity:'waiting',
+      uptime:'0m 02s', initials:init, branch:st.clone?'sandbox/'+nm:'main', cpu:'2 vCPU', mem:st.memIdx>0?NS_MEM[st.memIdx].toUpperCase():'4 GB',
+      scrollback:()=>welcome()+'<span class="t-mut">Agent ready.</span>\n' });
+    activeId=SANDBOXES[SANDBOXES.length-1].id; page='sandbox'; tab='agent'; closeNS(); renderAll(); toast('Created '+nm);
+  });
 }
 
 // ── Account menu + nav ──
 $('#acctBtn').addEventListener('click',(e)=>{ e.stopPropagation(); const m=$('#acctMenu'); m.style.display=m.style.display==='none'?'block':'none'; });
 $('#settingsLink').addEventListener('click',()=>{ $('#acctMenu').style.display='none'; page='settings'; renderAll(); });
 document.querySelectorAll('.sidebar [data-nav]').forEach(b=>b.addEventListener('click',()=>{ page=b.dataset.nav; if(page==='projects'){} renderAll(); }));
-$('#newSbxBtn').addEventListener('click',()=>toast('New sandbox…'));
+$('#newSbxBtn').addEventListener('click',()=>openNewSandbox());
 document.addEventListener('click',(e)=>{
   if(!$('#acctWrap').contains(e.target)) $('#acctMenu').style.display='none';
   if(ctxEl && !ctxEl.contains(e.target)) closeCtx();
+  if(nsEl){ const dd=nsEl.querySelector('#nsAgentDd'); const list=nsEl.querySelector('#nsAgentList'); if(dd && list && !dd.contains(e.target)) list.style.display='none'; }
 });
 document.addEventListener('contextmenu',(e)=>{ if(ctxEl && !ctxEl.contains(e.target)) closeCtx(); });
 window.addEventListener('blur',closeCtx);

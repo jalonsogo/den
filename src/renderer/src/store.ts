@@ -250,7 +250,15 @@ export const useStore = create<AppState>((set) => ({
         ? state.activeSandboxId
         : (sandboxes[0]?.id ?? null)
 
-      return { sandboxes, activeSandboxId, deletingIds }
+      // Activity ("Working…"/"Waiting") only makes sense for a running agent.
+      // Drop it for anything not running (stopped externally, after a den
+      // restart, etc.) so a stale state can't linger on a stopped sandbox.
+      const runningNames = new Set(sandboxes.filter((s) => s.status === 'running').map((s) => s.name))
+      const agentActivity = Object.fromEntries(
+        Object.entries(state.agentActivity).filter(([name]) => runningNames.has(name))
+      )
+
+      return { sandboxes, activeSandboxId, deletingIds, agentActivity }
     }),
 
   setDeleting: (id, on) =>
@@ -264,9 +272,19 @@ export const useStore = create<AppState>((set) => ({
     })),
 
   updateSandbox: (id, updates) =>
-    set((state) => ({
-      sandboxes: state.sandboxes.map((s) => (s.id === id ? { ...s, ...updates } : s))
-    })),
+    set((state) => {
+      const sandboxes = state.sandboxes.map((s) => (s.id === id ? { ...s, ...updates } : s))
+      // Stopping/stopping/deleting: clear any lingering "Working…"/"Waiting".
+      let agentActivity = state.agentActivity
+      if (updates.status && updates.status !== 'running') {
+        const sb = sandboxes.find((s) => s.id === id)
+        if (sb && agentActivity[sb.name] !== undefined) {
+          agentActivity = { ...agentActivity }
+          delete agentActivity[sb.name]
+        }
+      }
+      return { sandboxes, agentActivity }
+    }),
 
   setActiveSandboxId: (id) => set({ activeSandboxId: id, activePage: 'sandbox', activeTab: 'terminal' }),
 

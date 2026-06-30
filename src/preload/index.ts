@@ -92,6 +92,11 @@ const api = {
     ipcRenderer.on('minipit:agent-activity', handler)
     return () => ipcRenderer.removeListener('minipit:agent-activity', handler)
   },
+  onAgentAttention: (cb: (name: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string) => cb(name)
+    ipcRenderer.on('minipit:agent-attention', handler)
+    return () => ipcRenderer.removeListener('minipit:agent-attention', handler)
+  },
   onFilesChanged: (cb: (name: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, name: string) => cb(name)
     ipcRenderer.on('minipit:files-changed', handler)

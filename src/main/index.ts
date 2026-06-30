@@ -595,6 +595,10 @@ const DEN_HOOKS = {
     UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
     PreToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
     PostToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
+    // Notification fires when the agent needs the user — a permission prompt, an
+    // asked question, or the idle "waiting for input" reminder. Distinct from
+    // Stop (turn finished) so we can play a different cue.
+    Notification: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
     Stop: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }]
   }
 }
@@ -665,6 +669,14 @@ function startEventTail(name: string, attempt = 0): void {
       try { ev = JSON.parse(line) } catch { hookLog(`${name} unparsable line:`, line.slice(0, 120)); continue }
       hookLog(`${name} ▸`, ev.hook_event_name, ev.tool_name ?? '')
       switch (ev.hook_event_name) {
+        case 'Notification':
+          // The agent is blocked waiting for the user (question/permission/idle).
+          // Send the attention cue *before* flipping state so the renderer can
+          // play the "needs input" sound instead of the finish sound for this
+          // transition.
+          mainWindow?.webContents.send('minipit:agent-attention', name)
+          setAgentState(name, 'waiting')
+          break
         case 'Stop':
           setAgentState(name, 'waiting')
           break
@@ -1018,6 +1030,9 @@ function setupIPC(): void {
       proc.kill()
       sbxProcesses.delete(name)
     }
+    // Clear activity now rather than waiting on the PTY's onExit (which can race
+    // or never fire if there's no attached process), so "Working…" doesn't stick.
+    clearAgentActivity(name)
     await sbx(['stop', name])
     uptimeMap.delete(name)
   })
@@ -1028,6 +1043,7 @@ function setupIPC(): void {
       proc.kill()
       sbxProcesses.delete(name)
     }
+    clearAgentActivity(name)
     await sbx(['rm', '--force', name])
     uptimeMap.delete(name)
   })
@@ -1633,7 +1649,7 @@ function setupIPC(): void {
   // a file path, not raw bytes, so the renderer types this path into the PTY.
   ipcMain.handle('minipit:agent-drop-file', async (_, name: string, fileName: string, bytes: Uint8Array): Promise<string | null> => {
     if (!sbxProcesses.get(name)) return null
-    if (!bytes?.byteLength || bytes.byteLength > 25 * 1024 * 1024) return null // cap at 25 MB
+    if (!bytes?.byteLength || bytes.byteLength > 100 * 1024 * 1024) return null // cap at 100 MB (docs/PDFs/decks)
     // Strip path components and shell-hostile chars; keep it short.
     const safe = ((fileName.split(/[\\/]/).pop() || 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(-120)) || 'file'
     return new Promise((resolve) => {

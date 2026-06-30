@@ -8,7 +8,8 @@ import { LogsPanel } from './LogsPanel'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
 import {
   SOUND_OPTIONS, type SoundId, isSoundEnabled, setSoundEnabled,
-  getSoundId, setSoundId, setCustomSound, previewSound
+  getSoundId, setSoundId, setCustomSound, getCustomSound, previewSound,
+  isAskSoundEnabled, setAskSoundEnabled, getAskSoundId, setAskSoundId, setAskCustomSound, getAskCustomSound
 } from '../lib/sound'
 import type { AppSettings } from '../types'
 
@@ -38,6 +39,11 @@ export function SettingsPage() {
   const [soundId, setSound] = useState<SoundId>(getSoundId())
   const [customName, setCustomName] = useState<string | null>(null)
 
+  // Ask-sound prefs (agent needs your input — question/permission/idle).
+  const [askOn, setAskOn] = useState(isAskSoundEnabled())
+  const [askId, setAsk] = useState<SoundId>(getAskSoundId())
+  const [askCustomName, setAskCustomName] = useState<string | null>(null)
+
   const onPickCustom = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -46,7 +52,20 @@ export function SettingsPage() {
       setCustomSound(reader.result as string)
       setCustomName(file.name)
       setSound('custom'); setSoundId('custom')
-      previewSound('custom')
+      previewSound('custom', reader.result as string)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const onPickAskCustom = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setAskCustomSound(reader.result as string)
+      setAskCustomName(file.name)
+      setAsk('custom'); setAskSoundId('custom')
+      previewSound('custom', reader.result as string)
     }
     reader.readAsDataURL(file)
   }
@@ -263,7 +282,46 @@ export function SettingsPage() {
                   <input type="file" accept="audio/*" style={{ display: 'none' }} onChange={onPickCustom} />
                 </label>
               ) : (
-                <button className="btn btn-default btn-sm" disabled={!soundOn} onClick={() => previewSound(soundId)}>
+                <button className="btn btn-default btn-sm" disabled={!soundOn} onClick={() => previewSound(soundId, getCustomSound())}>
+                  Test
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Sound when an agent needs you</div>
+              <div className="ss-sub">Play a different cue when the agent asks a question or needs permission.</div>
+            </div>
+            <button
+              className={`s-toggle${askOn ? ' on' : ''}`}
+              onClick={() => { const v = !askOn; setAskOn(v); setAskSoundEnabled(v) }}
+            />
+          </div>
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Question sound</div>
+              <div className="ss-sub">
+                {askId === 'custom' && askCustomName ? `Custom: ${askCustomName}` : 'Pick a built-in cue or your own audio file.'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <select
+                className="s-input"
+                style={{ width: 150, cursor: 'pointer' }}
+                value={askId}
+                disabled={!askOn}
+                onChange={(e) => { const id = e.target.value as SoundId; setAsk(id); setAskSoundId(id) }}
+              >
+                {SOUND_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              {askId === 'custom' ? (
+                <label className="btn btn-default btn-sm" style={{ cursor: 'pointer' }}>
+                  Choose…
+                  <input type="file" accept="audio/*" style={{ display: 'none' }} onChange={onPickAskCustom} />
+                </label>
+              ) : (
+                <button className="btn btn-default btn-sm" disabled={!askOn} onClick={() => previewSound(askId, getAskCustomSound())}>
                   Test
                 </button>
               )}

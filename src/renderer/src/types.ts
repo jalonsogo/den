@@ -262,6 +262,7 @@ declare global {
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
       onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
+      onAgentAttention(cb: (name: string) => void): () => void
       onFilesChanged(cb: (name: string) => void): () => void
       onNavigate(cb: (page: string) => void): () => void
       onOpenSandbox(cb: (name: string) => void): () => void
