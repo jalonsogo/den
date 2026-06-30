@@ -47,8 +47,21 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     term.open(ref.current)
     fitRef.current = fit
 
-    try { fit.fit() } catch { /* container not sized yet */ }
+    // Fit to the container and force a repaint. xterm's canvas can render blank
+    // if it was sized before layout settled (navigation, font load, dock width),
+    // so refit across a couple of frames + a delayed fallback — otherwise the
+    // screen stays empty until some resize (e.g. toggling a dock) forces a fit.
+    const refit = () => {
+      try {
+        fit.fit()
+        if (term.rows > 0) term.refresh(0, term.rows - 1)
+      } catch { /* container not sized yet */ }
+    }
+
+    refit()
     onStart(term.cols, term.rows)
+    requestAnimationFrame(() => { refit(); requestAnimationFrame(refit) })
+    const settleT = setTimeout(refit, 150)
     if (visible) setTimeout(() => { try { term.focus() } catch { /* ignore */ } }, 0)
 
     const unsub = subscribe((data) => term.write(data))
@@ -73,12 +86,13 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     })
 
     const ro = new ResizeObserver(() => {
-      try { fit.fit() } catch { /* ignore */ }
+      refit()
       onResize(term.cols, term.rows)
     })
     ro.observe(ref.current)
 
     return () => {
+      clearTimeout(settleT)
       ro.disconnect()
       dataDisp.dispose()
       selDisp.dispose()
@@ -99,10 +113,15 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
   // visible terminal (and not the hidden, still-mounted sibling).
   useEffect(() => {
     if (!visible) { termRef.current?.blur(); return }
-    const t = setTimeout(() => {
-      try { fitRef.current?.fit(); termRef.current?.focus() } catch { /* ignore */ }
-    }, 0)
-    return () => clearTimeout(t)
+    const raf = requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit()
+        const term = termRef.current
+        if (term && term.rows > 0) term.refresh(0, term.rows - 1)
+        term?.focus()
+      } catch { /* ignore */ }
+    })
+    return () => cancelAnimationFrame(raf)
   }, [visible])
 
   // A drop only fires if dragover is preventDefault'd — otherwise Electron's
