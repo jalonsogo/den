@@ -3,7 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>den — Your AI Sandboxes, Beautifully Managed</title>
+  <title>den — Let coding agents run full YOLO, safely</title>
+  <meta name="description" content="den runs every coding agent in a disposable, network-policed microVM. Stop babysitting yes/no/cancel prompts — turn off the guardrails and let Claude, Codex, Antigravity, or OpenCode run unattended.">
+  <meta property="og:title" content="den — Let coding agents run full YOLO, safely">
+  <meta property="og:description" content="Ephemeral, isolated sandboxes you control with your own policies and tools. Full support for Codex, Antigravity, Claude, OpenCode and more.">
+  <meta property="og:image" content="screenshots/app-home.png">
+  <meta property="og:type" content="website">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -270,28 +275,57 @@
       margin: 0 auto 72px; line-height: 1.65;
     }
 
-    .features-grid {
+    /* Bento grid — varied tile sizes on a 4-column track. */
+    .bento {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 22px; max-width: 1080px; margin: 0 auto;
+      grid-template-columns: repeat(4, 1fr);
+      grid-auto-rows: minmax(186px, auto);
+      gap: 18px; max-width: 1120px; margin: 0 auto;
     }
-    .feature-card {
+    .bento-tile {
       background: var(--white);
       border-radius: 22px;
-      padding: 36px 30px;
+      padding: 30px;
       border: 1px solid rgba(0,0,0,0.05);
+      position: relative; overflow: hidden;
+      display: flex; flex-direction: column;
       opacity: 0; transform: translateY(32px);
       transition: opacity 0.6s ease, transform 0.6s ease, box-shadow 0.28s;
     }
-    .feature-card.visible { opacity: 1; transform: translateY(0); }
-    .feature-card:hover {
-      transform: translateY(-6px) !important;
+    .bento-tile.visible { opacity: 1; transform: translateY(0); }
+    .bento-tile:hover {
+      transform: translateY(-5px) !important;
       box-shadow: 0 24px 64px rgba(24,24,27,0.09);
     }
+    /* spans */
+    .bento-a { grid-column: span 2; grid-row: span 2; }
+    .bento-b { grid-column: span 2; }
+    .bento-e { grid-column: span 2; }
+    .bento-f { grid-column: span 2; }
+    /* dark hero tile */
+    .bento-a {
+      background: linear-gradient(165deg, var(--ocean-mid) 0%, var(--ocean-deep) 100%);
+      border-color: rgba(255,255,255,0.06);
+      justify-content: space-between;
+    }
+    .bento-a .feat-title { color: var(--white); font-size: 26px; }
+    .bento-a .feat-desc { color: rgba(255,255,255,0.55); font-size: 15px; }
+    .bento-a .feat-icon { background: rgba(255,255,255,0.1); color: var(--white); }
+    .bento-shot {
+      margin-top: 22px; border-radius: 12px; width: 100%;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.4);
+      display: block;
+    }
+    .bento-tile.light-shot .bento-shot {
+      border-color: rgba(0,0,0,0.06);
+      box-shadow: 0 14px 40px rgba(24,24,27,0.12);
+    }
+
     .feat-icon {
-      width: 52px; height: 52px; border-radius: 14px;
+      width: 50px; height: 50px; border-radius: 14px;
       display: flex; align-items: center; justify-content: center;
-      color: var(--ocean-mid); margin-bottom: 22px; flex-shrink: 0;
+      color: var(--ocean-mid); margin-bottom: 20px; flex-shrink: 0;
     }
     .feat-icon.a { background: var(--sand-2); }
     .feat-icon.b { background: rgba(63,63,70,0.1); }
@@ -303,6 +337,16 @@
       letter-spacing: -0.02em;
     }
     .feat-desc { font-size: 13.5px; line-height: 1.68; color: var(--text-mid); }
+
+    /* agent chips */
+    .agent-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+    .agent-chip {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 13px; font-weight: 600; color: var(--text-dark);
+      background: var(--sand-1); border: 1px solid rgba(0,0,0,0.06);
+      border-radius: 100px; padding: 7px 14px;
+    }
+    .agent-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ocean-bright); }
 
     /* ─── HOW IT WORKS ─── */
     .how {
@@ -375,6 +419,7 @@
       transition: opacity 0.9s ease, transform 0.9s ease;
     }
     .browser-window.visible { opacity: 1; transform: translateY(0); }
+    .browser-shot { display: block; width: 100%; height: auto; }
 
     .browser-bar {
       background: #1C2E40;
@@ -666,7 +711,9 @@
 
     /* ─── RESPONSIVE ─── */
     @media (max-width: 960px) {
-      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .bento { grid-template-columns: repeat(2, 1fr); }
+      .bento-a, .bento-b, .bento-e, .bento-f { grid-column: span 2; }
+      .bento-a { grid-row: auto; }
       .steps { grid-template-columns: repeat(2, 1fr); }
       .steps::before { display: none; }
       nav { padding: 16px 24px; }
@@ -674,7 +721,8 @@
       .stats-bar { gap: 44px; }
     }
     @media (max-width: 580px) {
-      .features-grid { grid-template-columns: 1fr; }
+      .bento { grid-template-columns: 1fr; }
+      .bento-a, .bento-b, .bento-e, .bento-f { grid-column: span 1; }
       .steps { grid-template-columns: 1fr; }
       .hero-actions { flex-direction: column; width: 100%; }
       .btn-primary, .btn-secondary { justify-content: center; }
@@ -704,16 +752,16 @@
 <section class="hero">
   <div class="hero-bg"></div>
 
-  <div class="hero-eyebrow">Built on Docker Sandboxes</div>
+  <div class="hero-eyebrow">Safe YOLO for coding agents</div>
 
   <img id="heroLogo" src="resources/logo.png" alt="den" class="hero-logo">
 
   <h1 class="hero-title">
-    Your AI sandboxes,<br><em>beautifully</em> managed.
+    Let your agents<br>run <em>full YOLO.</em>
   </h1>
 
   <p class="hero-sub">
-    den is a clean, visual interface for Docker Sandboxes — spin up isolated microVM environments, launch AI agents, and watch them work. No terminal required.
+    No more being the human on the yes / no / cancel button. den drops every coding agent into a disposable, network-policed microVM — so you can turn off the guardrails, walk away, and focus on the work instead of the approvals.
   </p>
 
   <div class="hero-actions">
@@ -728,11 +776,11 @@
   </div>
 
   <div class="hero-trust">
-    <div class="hero-trust-item"><b>✦</b>&nbsp;microVM isolation</div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;Isolated by default</div>
     <div class="hero-trust-sep"></div>
-    <div class="hero-trust-item"><b>✦</b>&nbsp;No CLI needed</div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;Network policies</div>
     <div class="hero-trust-sep"></div>
-    <div class="hero-trust-item"><b>✦</b>&nbsp;Claude-ready</div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;Claude · Codex · Antigravity · OpenCode</div>
     <div class="hero-trust-sep"></div>
     <div class="hero-trust-item"><b>✦</b>&nbsp;macOS &amp; Windows</div>
   </div>
@@ -740,41 +788,67 @@
 
 <!-- ── FEATURES ── -->
 <section class="features" id="features">
-  <div class="section-eyebrow">What it does</div>
-  <h2 class="section-title">A real window into sbx</h2>
-  <p class="section-sub">Launch sandboxes, drive agents, browse files, and manage network policy — without living in the terminal.</p>
+  <div class="section-eyebrow">Why den</div>
+  <h2 class="section-title">Guardrails on the box,<br>not on the agent</h2>
+  <p class="section-sub">Lock down a disposable microVM once — its filesystem, its network — then let any agent run unattended inside it. The blast radius stops at the sandbox.</p>
 
-  <div class="features-grid" id="featGrid">
-    <div class="feature-card">
-      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></div>
-      <h3 class="feat-title">Sandbox dashboard</h3>
-      <p class="feat-desc">Every sandbox with its agent, status and uptime in one window — plus a menu-bar menu for quick access.</p>
+  <div class="bento" id="featGrid">
+
+    <!-- Centerpiece: full YOLO, safely -->
+    <div class="bento-tile bento-a">
+      <div>
+        <div class="feat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg></div>
+        <h3 class="feat-title">Full YOLO, safely</h3>
+        <p class="feat-desc">Flip on bypass-permissions and stop approving every command. The agent can install anything, run anything, touch any file — it's sealed inside a microVM it can't escape, so a bad call never reaches your machine.</p>
+      </div>
+      <img class="bento-shot" src="screenshots/app-home.png" alt="den running a Claude agent with bypass-permissions enabled inside an isolated sandbox">
     </div>
-    <div class="feature-card">
+
+    <!-- Every agent -->
+    <div class="bento-tile bento-b">
       <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-      <h3 class="feat-title">Agent &amp; shell terminals</h3>
-      <p class="feat-desc">Full agent TUIs — Claude Code, Codex, Cursor, Gemini — and an interactive shell, over a real PTY.</p>
+      <h3 class="feat-title">Every agent, first-class</h3>
+      <p class="feat-desc">Full agent TUIs over a real PTY — bring the one you already use.</p>
+      <div class="agent-chips">
+        <span class="agent-chip"><span class="dot"></span>Claude</span>
+        <span class="agent-chip"><span class="dot"></span>Codex</span>
+        <span class="agent-chip"><span class="dot"></span>Antigravity</span>
+        <span class="agent-chip"><span class="dot"></span>OpenCode</span>
+        <span class="agent-chip"><span class="dot"></span>Gemini</span>
+        <span class="agent-chip"><span class="dot"></span>Cursor</span>
+      </div>
     </div>
-    <div class="feature-card">
-      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
-      <h3 class="feat-title">Files, inline</h3>
-      <p class="feat-desc">Browse the sandbox workspace, open files in an editor, and see the agent's changes with live git status.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></div>
-      <h3 class="feat-title">Network policy</h3>
-      <p class="feat-desc">See exactly which domains a sandbox can reach, and add allow rules — without leaving the app.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg></div>
-      <h3 class="feat-title">Projects &amp; kits</h3>
-      <p class="feat-desc">Group sandboxes by workspace and layer tools, credentials and config with sbx kits and mixins.</p>
-    </div>
-    <div class="feature-card">
+
+    <!-- Isolated -->
+    <div class="bento-tile bento-c">
       <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
       <h3 class="feat-title">Isolated by default</h3>
       <p class="feat-desc">Each sandbox is its own microVM with a separate filesystem and network. Your host stays untouched.</p>
     </div>
+
+    <!-- Network policy -->
+    <div class="bento-tile bento-d">
+      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></div>
+      <h3 class="feat-title">Network policies</h3>
+      <p class="feat-desc">Decide exactly which domains an agent can reach. Everything else is blocked — no exfiltration, no surprises.</p>
+    </div>
+
+    <!-- Ephemeral & customizable -->
+    <div class="bento-tile bento-e light-shot">
+      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/><path d="M3 9l9 5 9-5"/></svg></div>
+      <h3 class="feat-title">Ephemeral, and yours to shape</h3>
+      <p class="feat-desc">Spin up a disposable sandbox in seconds, then layer in your own tools, credentials and policies with kits and mixins. Throw it away when you're done.</p>
+      <img class="bento-shot" src="screenshots/app-newsandbox.png" alt="den new-sandbox dialog: pick an agent, base image, workspace and isolation">
+    </div>
+
+    <!-- Dashboard -->
+    <div class="bento-tile bento-f light-shot">
+      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></div>
+      <h3 class="feat-title">Watch them all work</h3>
+      <p class="feat-desc">Every sandbox, its agent, status and uptime in one dashboard — run a whole fleet at once.</p>
+      <img class="bento-shot" src="screenshots/app-dashboard.png" alt="den home dashboard showing running sandboxes grouped by project">
+    </div>
+
   </div>
 </section>
 
@@ -802,8 +876,8 @@
     </div>
     <div class="step">
       <div class="step-num">4</div>
-      <h3 class="step-title">Run your agents</h3>
-      <p class="step-desc">Launch Claude or any AI agent into the sandbox. Watch it build, explore, and ship from the dashboard.</p>
+      <h3 class="step-title">Let it run</h3>
+      <p class="step-desc">Launch Claude, Codex, Antigravity or OpenCode, turn off the prompts, and let it build, explore and ship — unattended.</p>
     </div>
   </div>
 </section>
@@ -819,7 +893,7 @@
 <section class="mockup-section" id="demo">
   <div class="section-eyebrow">Preview</div>
   <h2 class="section-title">Sandboxes left, live agent right</h2>
-  <p class="section-sub" style="margin-bottom: 60px;">Your sandboxes and projects in the sidebar; the agent's terminal front and center.</p>
+  <p class="section-sub" style="margin-bottom: 60px;">Your sandboxes and projects in the sidebar; the agent running unattended, front and center.</p>
 
   <div class="browser-window" id="browserWin">
     <div class="browser-bar">
@@ -828,71 +902,9 @@
         <div class="browser-dot"></div>
         <div class="browser-dot"></div>
       </div>
-      <div class="browser-url">ancient-eclipse · Running</div>
+      <div class="browser-url">feral-cosmos · Running</div>
     </div>
-    <div class="browser-content">
-      <!-- Sidebar -->
-      <div class="ui-sidebar">
-        <div class="ui-sb-header">
-          <img src="resources/logo.png" alt="">
-          <span class="ui-sb-name">den</span>
-        </div>
-        <div class="ui-nav-section">
-          <div class="ui-nav-item"><div class="ui-nav-dot"></div>Home</div>
-        </div>
-        <div class="ui-nav-section">
-          <div class="ui-nav-section-label">Sandboxes</div>
-          <div class="ui-sb-item active">
-            <span class="ui-av">AE</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">ancient-eclipse</div><div class="ui-sb-itemsub">minipit · running</div></div>
-            <span class="ui-rundot"></span>
-          </div>
-          <div class="ui-sb-item">
-            <span class="ui-av">CM</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">crimson-meteor</div><div class="ui-sb-itemsub">minipit</div></div>
-          </div>
-          <div class="ui-sb-item">
-            <span class="ui-av">LA</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">lucid-aurora</div><div class="ui-sb-itemsub">api · stopped</div></div>
-          </div>
-        </div>
-        <div class="ui-nav-section">
-          <div class="ui-nav-section-label">Projects</div>
-          <div class="ui-sb-item">
-            <span class="ui-av ui-av-folder">▦</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">minipit</div></div>
-            <span class="ui-count">3</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Main: a sandbox + its agent terminal -->
-      <div class="ui-main2">
-        <div class="ui-detail-hdr">
-          <span class="ui-rundot"></span>
-          <span class="ui-detail-name">ancient-eclipse</span>
-          <span class="ui-chip">claude</span>
-          <span class="ui-detail-status">Running · 4m 12s</span>
-          <span class="ui-stop">■ Stop</span>
-        </div>
-        <div class="ui-termbar">
-          <div class="ui-seg"><span class="on">Agent</span><span>Shell</span></div>
-          <span class="ui-files">▦ Files</span>
-        </div>
-        <div class="ui-term">
-          <div class="tm-accent">✻ Claude Code <span class="tm-dim">v2.1 · /workspace</span></div>
-          <div>&nbsp;</div>
-          <div class="tm-prompt">&gt; refactor the auth module and add tests</div>
-          <div>&nbsp;</div>
-          <div class="tm-accent">● <span class="tm-norm">Reading the existing auth code…</span></div>
-          <div class="tm-dim">&nbsp;&nbsp;Read src/auth.ts (142 lines)</div>
-          <div class="tm-accent">● <span class="tm-norm">Updated src/auth.ts, added src/auth.test.ts</span></div>
-          <div class="tm-dim">&nbsp;&nbsp;✓ 12 tests passed</div>
-          <div>&nbsp;</div>
-          <div class="tm-prompt">&gt; <span class="tm-caret">▋</span></div>
-        </div>
-      </div>
-    </div>
+    <img class="browser-shot" src="screenshots/app-home.png" alt="den — a Claude agent running unattended in an isolated sandbox, with bypass-permissions on">
   </div>
 </section>
 
@@ -903,23 +915,23 @@
     <div class="stat-label">Sandbox spin-up</div>
   </div>
   <div class="stat-item">
+    <div class="stat-num">0</div>
+    <div class="stat-label">Approval clicks to babysit</div>
+  </div>
+  <div class="stat-item">
     <div class="stat-num">100%</div>
     <div class="stat-label">Host isolation</div>
   </div>
   <div class="stat-item">
-    <div class="stat-num">0</div>
-    <div class="stat-label">CLI commands needed</div>
-  </div>
-  <div class="stat-item">
     <div class="stat-num">∞</div>
-    <div class="stat-label">Sandboxes, one dashboard</div>
+    <div class="stat-label">Agents, one dashboard</div>
   </div>
 </div>
 
 <!-- ── CTA ── -->
 <section class="cta-section" id="cta">
-  <h2 class="cta-title">Ready to <em>dig in</em>?</h2>
-  <p class="cta-sub">den is free to try. Bring your sbx account and start building in minutes.</p>
+  <h2 class="cta-title">Ready to <em>let go of the wheel</em>?</h2>
+  <p class="cta-sub">den is free to try. Bring your sbx account and let your agents run.</p>
   <div class="cta-actions">
     <a href="#" class="btn-white">Download den</a>
     <a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener" class="btn-ghost-w">Read sbx docs →</a>
@@ -938,7 +950,7 @@
     <li><a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener">Docker Sandboxes</a></li>
     <li><a href="#">Privacy</a></li>
   </ul>
-  <span class="footer-copy">© 2025 den — Built on Docker Sandboxes</span>
+  <span class="footer-copy">© 2026 den — Built on Docker Sandboxes</span>
 </footer>
 
 <script>
@@ -957,7 +969,7 @@
   const cardObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (!entry.isIntersecting) return;
-      const cards = entry.target.querySelectorAll('.feature-card');
+      const cards = entry.target.querySelectorAll('.bento-tile');
       cards.forEach((c, i) => {
         setTimeout(() => c.classList.add('visible'), i * 90);
       });
