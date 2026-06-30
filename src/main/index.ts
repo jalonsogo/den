@@ -616,7 +616,13 @@ function hookLog(...args: unknown[]): void {
 // Install the hook config and prime the event file inside the (den-managed)
 // sandbox. Merges into ~/.claude/settings.json via the user's jq if present,
 // else writes our config directly.
-function injectClaudeHooks(name: string): void {
+// Retries for sbx-exec calls made right after `sbx run`: the sandbox needs a
+// moment before `exec` works, so the first attempts can fail with a transient
+// error. Back off and retry rather than silently giving up on the session.
+const EXEC_RETRIES = 5
+const EXEC_RETRY_MS = 1000
+
+function injectClaudeHooks(name: string, attempt = 0): void {
   const cfg = JSON.stringify(DEN_HOOKS)
   // Write den_hooks to a real file and merge two plain files with jq. Process
   // substitution (`<(…)`) is bash-only and the sandbox's /bin/sh is dash, so
@@ -630,13 +636,20 @@ function injectClaudeHooks(name: string): void {
     '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
     'else cp ~/.den/hooks.json ~/.claude/settings.json && echo wrote; fi'
   execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
-    if (err) { hookLog(`inject FAILED for ${name}:`, err.message); console.error(`hook inject failed for ${name}:`, err.message) }
+    if (err) {
+      if (attempt < EXEC_RETRIES) {
+        hookLog(`inject retry ${attempt + 1}/${EXEC_RETRIES} for ${name}: ${err.message}`)
+        setTimeout(() => injectClaudeHooks(name, attempt + 1), EXEC_RETRY_MS)
+        return
+      }
+      hookLog(`inject FAILED for ${name}:`, err.message); console.error(`hook inject failed for ${name}:`, err.message)
+    }
     else hookLog(`injected into ${name} (${stdout.trim() || 'ok'}) → ~/.claude/settings.json`)
   })
 }
 
 // Tail the in-container event file and route hook events to the renderer.
-function startEventTail(name: string): void {
+function startEventTail(name: string, attempt = 0): void {
   eventTails.get(name)?.kill()
   const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
   eventTails.set(name, proc)
@@ -670,7 +683,16 @@ function startEventTail(name: string): void {
     }
   })
   proc.stderr?.on('data', (d) => hookLog(`${name} tail stderr:`, d.toString().trim()))
-  proc.on('exit', (code) => hookLog(`tail for ${name} exited (${code})`))
+  proc.on('exit', (code) => {
+    hookLog(`tail for ${name} exited (${code})`)
+    // A non-zero early exit means `sbx exec` failed before the sandbox was
+    // ready. Retry, but only while we still intend to tail this sandbox
+    // (clearAgentActivity/stop removes it from the map) and we didn't kill it
+    // ourselves (kill exits with a signal and code === null).
+    if (code && eventTails.get(name) === proc && attempt < EXEC_RETRIES) {
+      setTimeout(() => startEventTail(name, attempt + 1), EXEC_RETRY_MS)
+    }
+  })
 }
 
 function clearAgentActivity(name: string): void {
@@ -1670,6 +1692,11 @@ function startPolling(): void {
   poll()
   pollTimer = setInterval(poll, 5000)
 }
+
+// The finalize chime resumes an AudioContext with no user gesture. The
+// per-window `autoplayPolicy` webPreference doesn't reliably ungate Web Audio
+// in Chromium, so set the global switch too. Must run before app is ready.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('studio.den.app')
