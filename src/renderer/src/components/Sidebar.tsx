@@ -249,8 +249,8 @@ export function Sidebar() {
           <>
             <div className="sb-sec-head">
               <button
-                className={`sb-sec-title${activePage === 'sandbox' ? ' active' : ''}`}
-                onClick={() => setActivePage('sandbox')}
+                className={`sb-sec-title${activePage === 'sandboxes' || activePage === 'sandbox' ? ' active' : ''}`}
+                onClick={() => setActivePage('sandboxes')}
               >
                 Sandboxes
               </button>

@@ -151,10 +151,10 @@ export function HomePage() {
         )}
 
         <div className="home-stats">
-          <div className="home-stat">
+          <button className="home-stat home-stat-btn" onClick={() => setActivePage('sandboxes')} title="View all sandboxes">
             <div className="home-stat-n">{sandboxes.length}</div>
             <div className="home-stat-l">Sandboxes</div>
-          </div>
+          </button>
           <div className="home-stat">
             <div className="home-stat-n" style={{ color: 'var(--green)' }}>{running.length}</div>
             <div className="home-stat-l">Running</div>

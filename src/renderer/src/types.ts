@@ -29,7 +29,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'shell',          label: 'Shell' }
 ]
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
-export type PageType = 'home' | 'sandbox' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings'
+export type PageType = 'home' | 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings'
 export type TabType = 'terminal' | 'info'
 export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
 

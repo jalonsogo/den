@@ -1313,7 +1313,10 @@ html, body, #root {
 .home-dash { max-width: none; --avatar-surface: var(--bg); }
 .home-stats { display: flex; gap: 12px; flex-wrap: wrap; }
 .home-stat { flex: 1 1 150px; min-width: 150px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.home-stat-btn { cursor: pointer; background: var(--bg); text-align: left; transition: all 0.1s; font: inherit; }
+.home-stat-btn:hover { background: var(--bg-subtle); border-color: var(--border-hi); }
 .home-stat-n { font-size: 26px; font-weight: 600; color: var(--t1); line-height: 1; }
+.sbx-row-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .home-stat-l { font-size: 12px; color: var(--t3); margin-top: 6px; }
 .home-row { display: flex; align-items: center; gap: 9px; padding: 9px 2px; cursor: pointer; border-radius: 6px; }
 .home-row:hover { background: var(--bg-subtle); }
