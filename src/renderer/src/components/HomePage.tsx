@@ -5,7 +5,8 @@ import type { SbxRelease, StorageUsage } from '../types'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime, formatBytes } from '../lib/utils'
-import logoUrl from '../assets/logo.png'
+import brandLight from '../assets/brand-light.svg'
+import brandDark from '../assets/brand-dark.svg'
 
 function baseSemver(v?: string | null): number[] | null {
   const m = v?.match(/(\d+)\.(\d+)\.(\d+)/)
@@ -24,6 +25,8 @@ export function HomePage() {
   const policyBlocks = useStore((s) => s.policyBlocks)
   const blocksSeenAt = useStore((s) => s.blocksSeenAt)
   const agentActivity = useStore((s) => s.agentActivity)
+  const theme = useStore((s) => s.theme)
+  const brandMark = theme === 'dark' ? brandDark : brandLight
   const running = sandboxes.filter((s) => s.status === 'running')
   const stopped = sandboxes.filter((s) => s.status !== 'running')
 
@@ -84,7 +87,7 @@ export function HomePage() {
     return (
       <div className="page">
         <div className="home-empty">
-          <img className="home-empty-mark" src={logoUrl} alt="" width={56} height={56} />
+          <img className="home-empty-mark" src={brandMark} alt="den" width={52} height={56} />
           <h1 className="home-empty-title">Welcome to den</h1>
           <p className="home-empty-sub">
             Spin up an isolated sandbox to run agents, terminals, and tools — safely, in their own space.

@@ -1283,7 +1283,7 @@ html, body, #root {
   align-items: center; justify-content: center;
   text-align: center; gap: 14px; padding: 24px;
 }
-.home-empty-mark { border-radius: 14px; opacity: 0.95; margin-bottom: 2px; }
+.home-empty-mark { opacity: 0.92; margin-bottom: 6px; }
 .home-empty-title { font-size: 21px; font-weight: 600; color: var(--t1); letter-spacing: -0.02em; margin: 0; }
 .home-empty-sub { font-size: 13px; line-height: 1.5; color: var(--t3); max-width: 380px; margin: 0 0 6px; }
 
