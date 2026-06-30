@@ -5,9 +5,9 @@ import {
   Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
   Home, FolderGit2, LayoutGrid, Layers, Package, Settings
 } from 'lucide-react'
-import { useStore } from '../store'
-import { AgentIcon } from './AgentIcon'
+import { useStore, unackedBlockCount } from '../store'
 import { ProjectAvatar } from './ProjectAvatar'
+import { SandboxAvatar } from './SandboxAvatar'
 import type { Sandbox, PageType } from '../types'
 
 // Project row/icon with a hover popover that lists the project's sandboxes
@@ -108,16 +108,13 @@ function ProjectHover({
   )
 }
 
-function initials(name: string): string {
-  const parts = name.split(/[^a-zA-Z0-9]+/).filter(Boolean)
-  return (parts.slice(0, 2).map((p) => p[0]).join('') || name[0] || '?').toUpperCase()
-}
-
 function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active: boolean; collapsed: boolean }) {
   const { setActiveSandboxId, setContextMenu } = useStore()
   const isRunning = sandbox.status === 'running'
   const isDeleting = sandbox.status === 'deleting'
   const folder = sandbox.workspace.split('/').pop() || sandbox.workspace
+  const hasBlocks = useStore((s) => unackedBlockCount(s.policyBlocks, s.blocksSeenAt, sandbox.name) > 0)
+  const activity = useStore((s) => s.agentActivity[sandbox.name] ?? null)
 
   const openMenu = (e: React.MouseEvent, anchor: 'cursor' | 'button') => {
     e.preventDefault()
@@ -138,19 +135,22 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
       onContextMenu={(e) => openMenu(e, 'cursor')}
       title={collapsed ? sandbox.name : undefined}
     >
-      <div className="sb-avatar">
-        {isDeleting
-          ? <div className="sb-avatar-spinner" />
-          : <span className="sb-avatar-txt">{initials(sandbox.name)}</span>}
-        <span className="sb-avatar-badge"><AgentIcon agent={sandbox.agent} size={11} /></span>
-      </div>
+      <SandboxAvatar sandbox={sandbox} deleting={isDeleting} alert={hasBlocks} activity={isRunning ? activity : null} />
 
       {!collapsed && (
         <>
           <div className="sb-item-body">
             <div className="sb-item-name">{sandbox.name}</div>
-            <div className="sb-item-sub">
-              {isDeleting ? 'Deleting…' : isRunning ? folder : `${folder} · stopped`}
+            <div className={`sb-item-sub${isRunning && activity === 'working' ? ' is-working' : ''}`}>
+              {isDeleting
+                ? 'Deleting…'
+                : !isRunning
+                  ? `${folder} · stopped`
+                  : activity === 'working'
+                    ? 'Working…'
+                    : activity === 'waiting'
+                      ? 'Waiting for you'
+                      : folder}
             </div>
           </div>
 
@@ -249,8 +249,8 @@ export function Sidebar() {
           <>
             <div className="sb-sec-head">
               <button
-                className={`sb-sec-title${activePage === 'sandbox' ? ' active' : ''}`}
-                onClick={() => setActivePage('sandbox')}
+                className={`sb-sec-title${activePage === 'sandboxes' || activePage === 'sandbox' ? ' active' : ''}`}
+                onClick={() => setActivePage('sandboxes')}
               >
                 Sandboxes
               </button>

@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Layers, Package, FolderOpen, Trash2, Boxes, Info, Plug, Globe, Variable, TerminalSquare, FileText } from 'lucide-react'
+import { Plus, Layers, Package, FolderOpen, Trash2, Boxes, MoreVertical, UploadCloud, DownloadCloud, Plug, Globe, Variable, TerminalSquare, FileText } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
-import { MCP_CATALOG } from '../lib/mcpCatalog'
+import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 
 interface Kit { name: string; kind: string; dir: string; hasZip: boolean }
 
@@ -33,7 +33,7 @@ function KitCaps({ p }: { p?: ReturnType<typeof parseKitSpec> }) {
           const m = MCP_CATALOG.find((x) => x.id === id)
           return (
             <div className="kit-pop-row" key={id}>
-              <img className="kit-pop-ic" src={`mcp/${id}.png`} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+              <img className="kit-pop-ic" src={mcpIcon(id)} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
               <span>{m?.name ?? id}</span>
             </div>
           )
@@ -100,7 +100,7 @@ function KitSummary({ spec }: { spec: string }) {
           <div className="ks-mcps">
             {p.mcps.map((id) => {
               const m = MCP_CATALOG.find((x) => x.id === id)
-              return <span className="ks-mcp" key={id}><img src={`mcp/${id}.png`} alt="" />{m?.name ?? id}</span>
+              return <span className="ks-mcp" key={id}><img src={mcpIcon(id)} alt="" />{m?.name ?? id}</span>
             })}
           </div>
         </div>
@@ -126,6 +126,16 @@ function KitSummary({ spec }: { spec: string }) {
       )}
     </div>
   )
+}
+
+// Map a docker.io OCI reference to its Docker Hub repo page (for "make public").
+function hubRepoUrl(ref: string): string | null {
+  const noDigest = ref.split('@')[0]
+  const slash = noDigest.lastIndexOf('/')
+  if (slash < 0) return null
+  const repoPath = `${noDigest.slice(0, slash)}/${noDigest.slice(slash + 1).split(':')[0]}`
+  const m = repoPath.match(/^(?:docker\.io\/|index\.docker\.io\/)(.+)$/)
+  return m ? `https://hub.docker.com/r/${m[1]}` : null
 }
 
 export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
@@ -161,11 +171,85 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     return () => document.removeEventListener('mousedown', onDown)
   }, [addFor])
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ ok: boolean; text: string; restart?: string } | null>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string; restart?: string; share?: string } | null>(null)
+  const [copied, setCopied] = useState(false)
   const [editFor, setEditFor] = useState<string | null>(null)
   const [spec, setSpec] = useState('')
   const [savingSpec, setSavingSpec] = useState(false)
   const [specView, setSpecView] = useState<'summary' | 'code'>('summary')
+  // Row "⋮" menu (Open in Finder / Upload to Hub / Delete).
+  const [moreFor, setMoreFor] = useState<string | null>(null)
+  const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
+  // "Upload to Hub" — push the kit as an OCI artifact to a registry.
+  const [pushFor, setPushFor] = useState<string | null>(null)
+  const [pushRef, setPushRef] = useState('')
+  const [pushing, setPushing] = useState(false)
+  const [docker, setDocker] = useState<{ loggedIn: boolean; username?: string }>({ loggedIn: false })
+  // Import a remote kit by OCI reference.
+  const [importOpen, setImportOpen] = useState(false)
+  const [importRef, setImportRef] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  const doImport = async () => {
+    const ref = importRef.trim()
+    if (!ref || importing) return
+    setImporting(true)
+    setMsg(null)
+    const res = await window.minipit?.kitImport(ref).catch(() => null)
+    setImporting(false)
+    if (res?.ok) {
+      setImportOpen(false)
+      setImportRef('')
+      load()
+      setMsg({ ok: true, text: `Imported "${res.name}" from ${ref}.` })
+    } else {
+      setMsg({ ok: false, text: res?.error || 'Import failed — check the reference and that the repo is accessible.' })
+    }
+  }
+
+  // Read the logged-in Docker Hub account once, to prefill the push namespace.
+  useEffect(() => {
+    window.minipit?.dockerAccount().then((d) => setDocker(d ?? { loggedIn: false })).catch(() => {})
+  }, [])
+
+  const toggleMore = (dir: string, e: React.MouseEvent) => {
+    if (moreFor === dir) { setMoreFor(null); return }
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setMorePos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+    setMoreFor(dir)
+  }
+
+  useEffect(() => {
+    if (!moreFor) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (!t?.closest('.kit-more-menu') && !t?.closest('.kit-more-btn')) setMoreFor(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [moreFor])
+
+  const openPush = (k: Kit) => {
+    setMoreFor(null)
+    const ns = docker.username ?? 'your-namespace'
+    setPushRef(`docker.io/${ns}/${k.name}:latest`)
+    setPushFor(k.dir)
+  }
+
+  const doPush = async (k: Kit) => {
+    const ref = pushRef.trim()
+    if (!ref || pushing) return
+    setPushing(true)
+    setMsg(null)
+    const res = await window.minipit?.kitPush(k.dir, ref).catch(() => null)
+    setPushing(false)
+    if (res?.ok) {
+      setPushFor(null)
+      setMsg({ ok: true, text: `Pushed "${k.name}" to ${ref}. Share that reference — make the repo public on Docker Hub first.`, share: ref })
+    } else {
+      setMsg({ ok: false, text: res?.error || 'Push failed — make sure you are logged in (docker login) and the reference is valid.' })
+    }
+  }
 
   const load = useCallback(async () => {
     const list = (await window.minipit?.listKits()) ?? []
@@ -234,7 +318,10 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       <div className="page-hdr">
         <span className="page-title">{title}</span>
         <span className="lib-badge" style={{ marginLeft: 8 }}>Experimental</span>
-        <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setModal('new-kit')}>
+        <button className="btn btn-default btn-sm" style={{ marginLeft: 'auto' }} onClick={() => { setImportOpen((v) => !v); setImportRef('') }}>
+          <DownloadCloud size={13} /> Add remote
+        </button>
+        <button className="btn btn-primary btn-sm" onClick={() => setModal('new-kit')}>
           <Plus size={13} /> New {variant === 'mixin' ? 'mixin kit' : 'sandbox kit'}
         </button>
       </div>
@@ -242,7 +329,59 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       <div className="page-body home-dash">
         <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>{blurb} Managed by den and packed with <code>sbx kit pack</code>.</p>
 
-        {msg && (
+        {importOpen && (
+          <div className="kit-import-box">
+            <label className="kit-push-lbl">Add a remote kit by OCI reference</label>
+            <div className="kit-push-row">
+              <input
+                className="finput kit-push-input"
+                autoFocus
+                value={importRef}
+                spellCheck={false}
+                placeholder="registry/repo:tag — e.g. docker.io/javieralonso716/my-kit:latest"
+                onChange={(e) => setImportRef(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') doImport() }}
+              />
+              <button className="btn btn-ghost btn-sm" onClick={() => setImportOpen(false)} disabled={importing}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={doImport} disabled={importing || !importRef.trim()}>
+                {importing ? 'Pulling…' : 'Import'}
+              </button>
+            </div>
+            <div className="kit-push-hint">Pulls the artifact with <code>sbx kit pull</code> into your kit library. Private repos require <code>docker login</code>.</div>
+          </div>
+        )}
+
+        {msg && msg.share ? (
+          <div className="kit-share-cta">
+            <div className="kit-share-hd">
+              <UploadCloud size={16} />
+              <span>Kit published</span>
+              <button className="kit-share-x" title="Dismiss" onClick={() => setMsg(null)}>×</button>
+            </div>
+            <div className="kit-share-ref">{msg.share}</div>
+            <p className="kit-share-desc">
+              Share this reference with anyone. They install it with one command — no files to send.
+              First <strong>make the repo public</strong> on Docker Hub (new repos are private).
+            </p>
+            <div className="kit-share-actions">
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(`sbx kit add <sandbox> ${msg.share}`).then(() => {
+                    setCopied(true); setTimeout(() => setCopied(false), 1500)
+                  }).catch(() => {})
+                }}
+              >
+                {copied ? 'Copied!' : 'Copy install command'}
+              </button>
+              {hubRepoUrl(msg.share) && (
+                <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(hubRepoUrl(msg.share!)!)}>
+                  Open on Docker Hub
+                </button>
+              )}
+            </div>
+          </div>
+        ) : msg && (
           <div className={`np-banner ${msg.ok ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>
             <span className="np-banner-txt">{msg.text}</span>
             {msg.restart && (
@@ -313,17 +452,54 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                         </div>
                       )}
                     </div>
-                    <button className={`btn btn-ghost btn-sm tpl-icon-btn${editFor === k.dir ? ' active' : ''}`} title="View / edit kit" onClick={() => openEdit(k)}>
-                      <Info size={14} />
+                    <button
+                      className={`btn btn-ghost btn-sm tpl-icon-btn kit-more-btn${moreFor === k.dir ? ' active' : ''}`}
+                      title="More…"
+                      onClick={(e) => toggleMore(k.dir, e)}
+                    >
+                      <MoreVertical size={15} />
                     </button>
-                    <button className="btn btn-ghost btn-sm tpl-icon-btn" title="Reveal in Finder" onClick={() => window.minipit?.openInFinder(k.dir)}>
-                      <FolderOpen size={14} />
-                    </button>
-                    <button className="btn btn-ghost btn-sm tpl-icon-btn" style={{ color: 'var(--destruct)' }} title="Delete kit" onClick={() => remove(k)}>
-                      <Trash2 size={14} />
-                    </button>
+                    {moreFor === k.dir && morePos && (
+                      <div className="kit-more-menu" style={{ top: morePos.top, right: morePos.right }}>
+                        <button className="kit-more-item" onClick={() => { setMoreFor(null); window.minipit?.openInFinder(k.dir) }}>
+                          <FolderOpen size={14} /> Open in Finder
+                        </button>
+                        <button className="kit-more-item" onClick={() => openPush(k)}>
+                          <UploadCloud size={14} /> Upload to Hub…
+                        </button>
+                        <div className="kit-more-sep" />
+                        <button className="kit-more-item danger" onClick={() => { setMoreFor(null); remove(k) }}>
+                          <Trash2 size={14} /> Delete kit
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
+                {pushFor === k.dir && (
+                  <div className="kit-push-box" onClick={(e) => e.stopPropagation()}>
+                    <label className="kit-push-lbl">Publish as OCI artifact</label>
+                    <div className="kit-push-row">
+                      <input
+                        className="finput kit-push-input"
+                        value={pushRef}
+                        spellCheck={false}
+                        placeholder="registry/repo:tag — e.g. docker.io/myorg/my-kit:1.0"
+                        onChange={(e) => setPushRef(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') doPush(k) }}
+                      />
+                      <button className="btn btn-ghost btn-sm" onClick={() => setPushFor(null)} disabled={pushing}>Cancel</button>
+                      <button className="btn btn-primary btn-sm" onClick={() => doPush(k)} disabled={pushing || !pushRef.trim()}>
+                        {pushing ? 'Pushing…' : 'Push'}
+                      </button>
+                    </div>
+                    <div className="kit-push-hint">
+                      Runs <code>sbx kit push</code>.{' '}
+                      {docker.loggedIn
+                        ? <>Logged in to Docker Hub as <strong>{docker.username}</strong>.</>
+                        : <>Requires <code>docker login</code> to the target registry.</>}
+                    </div>
+                  </div>
+                )}
                 {editFor === k.dir && (
                   <div className="kit-spec-edit">
                     <div className="kit-spec-tabs">

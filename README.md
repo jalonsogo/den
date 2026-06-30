@@ -18,15 +18,26 @@ Den is a beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai
 
 den wraps the `sbx` CLI in a native macOS/Windows app:
 
-- **Sandboxes** — create, run, stop, and delete agent sandboxes. Pick any agent (Claude, Codex, Cursor, Gemini, Copilot, Droid, …), a workspace, optional memory and Git‑clone isolation, and a random cosmic name.
+- **Sandboxes** — create, run, stop, and delete agent sandboxes. Pick any agent (Claude, Codex, Cursor, Gemini, Copilot, Droid, …), a workspace, optional memory and Git‑clone isolation, and a random cosmic name. Watch live progress while a sandbox is created.
 - **Agent & Shell terminals** — full‑screen agent TUIs (e.g. Claude Code) and an interactive shell, rendered with **xterm.js** over a real PTY.
 - **Files** — browse the sandbox workspace, open/edit files in a dedicated editor window, and see the agent's **changes inline** (live `git status` badges).
-- **Projects** — sandboxes grouped by workspace; open a project to see its sandboxes and files.
+- **Projects, color‑coded** — sandboxes grouped by workspace; give a project a color + icon and its sandboxes inherit the color so you can tell them apart at a glance.
+- **Network policy** — see exactly which domains a sandbox can reach, add allow rules from the UI, and get a clear warning when an org governance profile is overriding local rules.
 - **Secrets** — manage `sbx` service credentials (Anthropic, OpenAI, Google, GitHub, …), with OAuth where supported.
-- **Templates** — list, launch from, and delete sandbox template images.
-- **Kits & Mixins** — author kit artifacts from a form (no YAML required) and pack them with `sbx kit pack`.
-- **Logs** — live‑tail the `sbx` daemon logs.
-- **Theming** — light / dark (GitHub‑dark palette), custom accent colors, and an independent terminal theme.
+- **Templates & Runtime** — list/launch/delete template images; check the `sbx` version, view release notes, and update in place.
+- **Logs** — live‑tail the `sbx` daemon logs, or read a specific sandbox's kit‑startup log.
+- **Theming** — light / dark, custom accent colors that retint the whole UI, and a terminal theme that can follow the app's light/dark mode or be set independently.
+- **Menu‑bar app** — quick access to running sandboxes and projects from the tray.
+
+## Kits — compose & share agent setups
+
+Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network rules, env vars, agent memory, and startup commands onto an agent. den makes them first‑class:
+
+- **Visual composer** — build a kit from a form (no YAML): add capabilities from a dropdown — **Remote MCPs**, network policies, env variables, agent memory (attach PDFs/MD/txt), and commands.
+- **Remote‑MCP catalog** — 50+ hosted MCP servers (GitHub, Linear, Notion, Figma, Sentry, Supabase, …) with icons, search, and category filters; or add a **Custom MCP** by URL. Each becomes a one‑click allow rule + registration.
+- **Mixin vs Sandbox kits** — stack several *mixin* kits onto an agent, or define a full agent from a base image with a *sandbox* kit.
+- **Add anywhere** — attach kits at sandbox creation, or inject them into a running sandbox; the kits applied to a sandbox show in its info panel.
+- **Share via any OCI registry** — push a kit to Docker Hub / ghcr (`sbx kit push`) straight from the row's menu, with the reference prefilled from your logged‑in Docker account. Pull a friend's kit by reference — import it into your library or attach it at creation, no download step.
 
 ## Requirements
 

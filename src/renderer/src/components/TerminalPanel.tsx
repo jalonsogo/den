@@ -19,13 +19,16 @@ interface XTermProps {
   // Called once after the first fit with the real size (start/attach the session).
   onStart: (cols: number, rows: number) => void
   onDispose?: () => void
+  // If provided, the terminal accepts dropped files (e.g. images for the agent).
+  onDropFiles?: (files: File[]) => void
 }
 
 // A real VT100 terminal (xterm.js) that handles full-screen TUIs like Claude Code.
-function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose }: XTermProps) {
+function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles }: XTermProps) {
   const ref = useRef<HTMLDivElement>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
+  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     if (!ref.current) return
@@ -83,13 +86,46 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     return () => clearTimeout(t)
   }, [visible])
 
+  // A drop only fires if dragover is preventDefault'd — otherwise Electron's
+  // default file-open kicks in and the drop never reaches us.
+  const dnd = onDropFiles
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          if (![...e.dataTransfer.types].includes('Files')) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+          if (!dragging) setDragging(true)
+        },
+        onDragLeave: (e: React.DragEvent) => {
+          // Ignore leaves into child nodes; only clear when leaving the container.
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return
+          setDragging(false)
+        },
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault()
+          setDragging(false)
+          const files = [...e.dataTransfer.files]
+          if (files.length) onDropFiles(files)
+        }
+      }
+    : {}
+
   // Clicking anywhere in the container (incl. padding) focuses the terminal.
+  // The xterm mount (`ref`) is a dedicated inner div so xterm can own its DOM
+  // while React owns the wrapper (overlay + drop handlers).
   return (
     <div
-      ref={ref}
       onMouseDown={() => { if (visible) termRef.current?.focus() }}
-      style={{ flex: 1, minHeight: 0, width: '100%', height: '100%', padding: '6px 8px' }}
-    />
+      style={{ position: 'relative', flex: 1, minHeight: 0, width: '100%', height: '100%' }}
+      {...dnd}
+    >
+      <div ref={ref} style={{ width: '100%', height: '100%', padding: '6px 8px' }} />
+      {dragging && (
+        <div className="term-drop">
+          <span>Drop image to attach to the agent</span>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -127,6 +163,16 @@ function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
       onInput={(data) => window.minipit?.agentWrite(sandbox.name, data)}
       onResize={(cols, rows) => window.minipit?.agentResize(sandbox.name, cols, rows)}
       onStart={(cols, rows) => window.minipit?.agentEnsure(sandbox.name, cols, rows)}
+      onDropFiles={async (files) => {
+        // Copy each image into the sandbox, then type its in-sandbox path into
+        // the agent — TUIs like Claude Code take a file path, not raw bytes.
+        for (const file of files) {
+          if (!file.type.startsWith('image/')) continue
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          const path = await window.minipit?.agentDropFile(sandbox.name, file.name, bytes)
+          if (path) window.minipit?.agentWrite(sandbox.name, path + ' ')
+        }
+      }}
     />
   )
 }

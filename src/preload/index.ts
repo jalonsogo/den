@@ -19,6 +19,7 @@ const api = {
   generatePalette: (hex: string, size?: number) => ipcRenderer.invoke('minipit:generate-palette', hex, size),
   listTemplates: ()                     => ipcRenderer.invoke('minipit:list-templates'),
   removeTemplate:(ref: string)          => ipcRenderer.invoke('minipit:remove-template', ref),
+  storageUsage: ()                      => ipcRenderer.invoke('minipit:storage-usage'),
   createKit:     (name: string, spec: string, files?: string[]) => ipcRenderer.invoke('minipit:create-kit', name, spec, files),
   pickFiles:     ()                     => ipcRenderer.invoke('minipit:pick-files'),
   listKits:      ()                     => ipcRenderer.invoke('minipit:list-kits'),
@@ -27,6 +28,9 @@ const api = {
   readKit:       (dir: string)          => ipcRenderer.invoke('minipit:read-kit', dir),
   updateKit:     (dir: string, spec: string) => ipcRenderer.invoke('minipit:update-kit', dir, spec),
   removeKit:     (dir: string)          => ipcRenderer.invoke('minipit:remove-kit', dir),
+  kitPush:       (dir: string, ref: string) => ipcRenderer.invoke('minipit:kit-push', dir, ref),
+  kitImport:     (ref: string)          => ipcRenderer.invoke('minipit:kit-import', ref),
+  dockerAccount: ()                     => ipcRenderer.invoke('minipit:docker-account'),
   listSecrets:   ()                     => ipcRenderer.invoke('minipit:list-secrets'),
   setSecret:     (service: string, value: string) => ipcRenderer.invoke('minipit:set-secret', service, value),
   removeSecret:  (service: string)      => ipcRenderer.invoke('minipit:remove-secret', service),
@@ -50,6 +54,7 @@ const api = {
   sbxInstallInfo: ()                    => ipcRenderer.invoke('minipit:sbx-install-info'),
   sbxUpdate:     (action: string)       => ipcRenderer.invoke('minipit:sbx-update', action),
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
+  policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
   policyAllow:   (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-allow', name, resources),
   onRuntimeOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
@@ -76,6 +81,21 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, name: string, line: unknown) => cb(name, line)
     ipcRenderer.on('minipit:log-line', handler)
     return () => ipcRenderer.removeListener('minipit:log-line', handler)
+  },
+  onPolicyBlock: (cb: (block: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, block: unknown) => cb(block)
+    ipcRenderer.on('minipit:policy-block', handler)
+    return () => ipcRenderer.removeListener('minipit:policy-block', handler)
+  },
+  onAgentActivity: (cb: (name: string, state: 'working' | 'waiting' | null) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string, state: 'working' | 'waiting' | null) => cb(name, state)
+    ipcRenderer.on('minipit:agent-activity', handler)
+    return () => ipcRenderer.removeListener('minipit:agent-activity', handler)
+  },
+  onFilesChanged: (cb: (name: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string) => cb(name)
+    ipcRenderer.on('minipit:files-changed', handler)
+    return () => ipcRenderer.removeListener('minipit:files-changed', handler)
   },
   onNavigate: (cb: (page: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, page: string) => cb(page)
@@ -109,6 +129,8 @@ const api = {
   },
 
   agentWrite: (name: string, data: string) => ipcRenderer.invoke('minipit:agent-write', name, data),
+  agentDropFile: (name: string, fileName: string, bytes: Uint8Array): Promise<string | null> =>
+    ipcRenderer.invoke('minipit:agent-drop-file', name, fileName, bytes),
   agentResize: (name: string, cols: number, rows: number) => ipcRenderer.invoke('minipit:agent-resize', name, cols, rows),
   agentEnsure: (name: string, cols: number, rows: number) => ipcRenderer.invoke('minipit:agent-ensure', name, cols, rows),
   onAgentOutput: (cb: (name: string, data: string) => void) => {

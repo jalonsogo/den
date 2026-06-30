@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import { applyAccent, ensureRamp, savedAccents, writeSavedAccents, type SavedAccent } from './lib/accent'
-import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService } from './types'
+import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState } from './types'
+
+type ThemePref = 'light' | 'dark' | 'system'
+const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+const resolveTheme = (pref: ThemePref): 'light' | 'dark' => (pref === 'system' ? (prefersDark() ? 'dark' : 'light') : pref)
+const initialThemePref = (localStorage.getItem('minipit:themePref') as ThemePref) ?? 'system'
 
 interface ContextMenuState {
   visible: boolean
@@ -22,7 +27,8 @@ interface AppState {
   newSandboxWorkspace: string | null
   newSandboxTemplate: string | null
   activeProject: string | null
-  theme: 'light' | 'dark'
+  themePref: 'light' | 'dark' | 'system'
+  theme: 'light' | 'dark'   // resolved from themePref (system → OS preference)
   sidebarCollapsed: boolean
   accent: string
   accentColor: string
@@ -32,13 +38,20 @@ interface AppState {
   projectIcons: Record<string, string>
   pickerOpen: boolean
   customProjects: string[]
+  // Network-policy denials, newest-first per sandbox name, with a per-sandbox
+  // "seen" watermark so attention badges clear once the user looks.
+  policyBlocks: Record<string, PolicyBlock[]>
+  blocksSeenAt: Record<string, number>
+  toasts: PolicyBlock[]
+  // Per-sandbox agent state (working / waiting); absent = unknown/stopped.
+  agentActivity: Record<string, AgentState>
 
   setSandboxes:       (sandboxes: Sandbox[]) => void
   setSecretTarget:    (service: SecretService | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
   setNewSandboxTemplate: (ref: string | null) => void
   setActiveProject:   (workspace: string | null) => void
-  toggleTheme:        () => void
+  setThemePref:       (pref: 'light' | 'dark' | 'system') => void
   toggleSidebar:      () => void
   setAccent:          (id: string) => void
   setCustomAccent:    (hex: string) => void
@@ -60,6 +73,10 @@ interface AppState {
   appendLog:          (sandboxId: string, line: LogLine) => void
   setContextMenu:     (state: Partial<ContextMenuState>) => void
   setFiles:           (sandboxId: string, files: FileEntry[]) => void
+  addPolicyBlock:     (block: PolicyBlock) => void
+  ackPolicyBlocks:    (sandboxName: string) => void
+  dismissToast:       (block: PolicyBlock) => void
+  setAgentActivity:   (name: string, state: AgentState | null) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -75,9 +92,10 @@ export const useStore = create<AppState>((set) => ({
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
   activeProject: null,
-  theme: (localStorage.getItem('minipit:theme') === 'dark' ? 'dark' : 'light'),
+  themePref: initialThemePref,
+  theme: resolveTheme(initialThemePref),
   sidebarCollapsed: localStorage.getItem('minipit:sidebarCollapsed') === '1',
-  accent: localStorage.getItem('minipit:accent') ?? 'graphite',
+  accent: localStorage.getItem('minipit:accent') ?? 'blue',
   accentColor: localStorage.getItem('minipit:accentColor') ?? '#3b82f6',
   customAccents: savedAccents(),
   termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
@@ -89,6 +107,10 @@ export const useStore = create<AppState>((set) => ({
   })(),
   pickerOpen: false,
   customProjects: [],
+  policyBlocks: {},
+  blocksSeenAt: {},
+  toasts: [],
+  agentActivity: {},
 
   setSecretTarget: (service) => set({ secretTarget: service }),
 
@@ -137,11 +159,11 @@ export const useStore = create<AppState>((set) => ({
     set((state) => {
       const list = state.customAccents.filter((s) => s.id !== id)
       writeSavedAccents(list)
-      // If the removed swatch was active, fall back to graphite.
+      // If the removed swatch was active, fall back to the default accent.
       if (state.accent === id) {
-        localStorage.setItem('minipit:accent', 'graphite')
-        applyAccent('graphite')
-        return { customAccents: list, accent: 'graphite' }
+        localStorage.setItem('minipit:accent', 'blue')
+        applyAccent('blue')
+        return { customAccents: list, accent: 'blue' }
       }
       return { customAccents: list }
     }),
@@ -190,14 +212,14 @@ export const useStore = create<AppState>((set) => ({
     set((s) => ({ customProjects: s.customProjects.filter((d) => d !== dir) }))
   },
 
-  toggleTheme: () =>
+  setThemePref: (pref) =>
     set((state) => {
-      const theme = state.theme === 'dark' ? 'light' : 'dark'
-      localStorage.setItem('minipit:theme', theme)
+      localStorage.setItem('minipit:themePref', pref)
+      const theme = resolveTheme(pref)
       document.documentElement.setAttribute('data-theme', theme)
       // Re-apply the accent so any GUI tint matches the new mode.
       applyAccent(state.accent, state.accentColor)
-      return { theme }
+      return { themePref: pref, theme }
     }),
 
   toggleSidebar: () =>
@@ -265,5 +287,60 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({ contextMenu: { ...state.contextMenu, ...ctx } })),
 
   setFiles: (sandboxId, files) =>
-    set((state) => ({ files: { ...state.files, [sandboxId]: files } }))
+    set((state) => ({ files: { ...state.files, [sandboxId]: files } })),
+
+  addPolicyBlock: (block) =>
+    set((state) => {
+      if (!block.sandbox || !block.host) return {}
+      const list = state.policyBlocks[block.sandbox] ?? []
+      // Collapse repeats of the same host within a minute (both detectors can
+      // report the same denial); otherwise prepend, newest-first.
+      const recent = list.find((b) => b.host === block.host && Math.abs(b.at - block.at) < 60_000)
+      const nextList = recent
+        ? list.map((b) => (b === recent ? { ...b, at: Math.max(b.at, block.at) } : b))
+        : [block, ...list].slice(0, 50)
+      // Toast only for genuinely new denials, not collapsed repeats.
+      const toasts = recent
+        ? state.toasts
+        : [block, ...state.toasts.filter((t) => !(t.sandbox === block.sandbox && t.host === block.host))].slice(0, 4)
+      return { policyBlocks: { ...state.policyBlocks, [block.sandbox]: nextList }, toasts }
+    }),
+
+  ackPolicyBlocks: (sandboxName) =>
+    set((state) => ({ blocksSeenAt: { ...state.blocksSeenAt, [sandboxName]: Date.now() } })),
+
+  dismissToast: (block) =>
+    set((state) => ({
+      toasts: state.toasts.filter(
+        (t) => !(t.sandbox === block.sandbox && t.host === block.host && t.at === block.at)
+      )
+    })),
+
+  setAgentActivity: (name, state) =>
+    set((s) => {
+      const next = { ...s.agentActivity }
+      if (state === null) delete next[name]
+      else next[name] = state
+      return { agentActivity: next }
+    })
 }))
+
+// When the theme preference is "system", follow the OS appearance live.
+window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  const { themePref, accent, accentColor } = useStore.getState()
+  if (themePref !== 'system') return
+  const theme = resolveTheme('system')
+  document.documentElement.setAttribute('data-theme', theme)
+  applyAccent(accent, accentColor)
+  useStore.setState({ theme })
+})
+
+// Denials for a sandbox the user hasn't looked at yet — drives attention badges.
+export function unackedBlockCount(
+  blocks: Record<string, PolicyBlock[]>,
+  seenAt: Record<string, number>,
+  name: string
+): number {
+  const seen = seenAt[name] ?? 0
+  return (blocks[name] ?? []).filter((b) => b.at > seen).length
+}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut, Sun, Moon } from 'lucide-react'
+import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut } from 'lucide-react'
 import { useStore } from '../store'
 import { formatUptime } from '../lib/utils'
 
@@ -7,8 +7,10 @@ const ACCOUNT_EMAIL = 'javier.alonso@docker.com'
 const ORGS = ['Docker', 'Personal']
 
 export function Toolbar() {
-  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useStore()
+  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
+  const activity = useStore((s) => (sandbox ? s.agentActivity[sandbox.name] ?? null : null))
+  const showStatus = !!sandbox && activePage === 'sandbox' && sandbox.status === 'running' && !!activity
 
   const [acctOpen, setAcctOpen] = useState(false)
   const [org, setOrg] = useState(ORGS[0])
@@ -38,8 +40,9 @@ export function Toolbar() {
     if (activePage === 'settings')   return { title: 'Settings', sub: 'den preferences' }
     if (!sandbox) return { title: 'den', sub: 'No sandbox selected' }
     const uptime = sandbox.uptimeSeconds ? formatUptime(sandbox.uptimeSeconds) : ''
-    const sub = sandbox.status === 'running' ? `Running · ${uptime}` : 'Stopped'
-    return { title: sandbox.name, sub }
+    if (sandbox.status !== 'running') return { title: sandbox.name, sub: 'Stopped' }
+    const verb = activity === 'working' ? 'Working…' : activity === 'waiting' ? 'Waiting for you' : 'Running'
+    return { title: sandbox.name, sub: uptime ? `${verb} · ${uptime}` : verb }
   }
 
   const { title, sub } = getTitle()
@@ -55,7 +58,10 @@ export function Toolbar() {
       </button>
 
       <div className="tb-center">
-        <div className="tb-title">{title}</div>
+        <div className="tb-title">
+          {showStatus && <span className={`tb-status-dot ${activity}`} />}
+          {title}
+        </div>
         <div className="tb-sub">{sub}</div>
       </div>
 
@@ -86,22 +92,6 @@ export function Toolbar() {
                 {org === o && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent, var(--primary))' }} />}
               </div>
             ))}
-            <div className="tb-acct-divider" />
-            <div className="tb-acct-label">Appearance</div>
-            <div className="tb-acct-theme">
-              <button
-                className={`tb-theme-opt${theme === 'light' ? ' on' : ''}`}
-                onClick={() => { if (theme !== 'light') toggleTheme() }}
-              >
-                <Sun size={13} /> Light
-              </button>
-              <button
-                className={`tb-theme-opt${theme === 'dark' ? ' on' : ''}`}
-                onClick={() => { if (theme !== 'dark') toggleTheme() }}
-              >
-                <Moon size={13} /> Dark
-              </button>
-            </div>
             <div className="tb-acct-divider" />
             <button className="tb-acct-signout" onClick={handleSignOut}>
               <LogOut size={13} />

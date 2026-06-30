@@ -5,12 +5,15 @@ import './styles/main.css'
 import { applyAccent } from './lib/accent'
 
 // Apply the persisted theme + accent before first paint to avoid a flash.
-document.documentElement.setAttribute(
-  'data-theme',
-  localStorage.getItem('minipit:theme') === 'dark' ? 'dark' : 'light'
-)
+const themePref = localStorage.getItem('minipit:themePref') ?? 'system'
+const resolvedTheme =
+  themePref === 'dark' ||
+  (themePref === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+    ? 'dark'
+    : 'light'
+document.documentElement.setAttribute('data-theme', resolvedTheme)
 applyAccent(
-  localStorage.getItem('minipit:accent') ?? 'graphite',
+  localStorage.getItem('minipit:accent') ?? 'blue',
   localStorage.getItem('minipit:accentColor') ?? '#3b82f6'
 )
 

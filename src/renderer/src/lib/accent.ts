@@ -5,8 +5,8 @@ export interface Accent {
 }
 
 export const ACCENTS: Accent[] = [
-  { id: 'graphite', label: 'Graphite', color: null },
   { id: 'blue',     label: 'Blue',     color: '#3b82f6' },
+  { id: 'graphite', label: 'Graphite', color: null },
   { id: 'green',    label: 'Green',    color: '#22c55e' },
   { id: 'violet',   label: 'Violet',   color: '#8b5cf6' },
   { id: 'orange',   label: 'Orange',   color: '#f97316' },

@@ -1,12 +1,49 @@
 import { useEffect, useState } from 'react'
-import { X, Layers, AlertTriangle } from 'lucide-react'
+import { X, Layers, AlertTriangle, ShieldAlert, ChevronRight, ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
 import { formatUptime } from '../lib/utils'
 import { PortsPanel } from './PortsPanel'
-import { AGENTS, type Sandbox, type NetworkPolicy } from '../types'
+import { AGENTS, type Sandbox, type NetworkPolicy, type PolicyBlock } from '../types'
+
+const NO_BLOCKS: PolicyBlock[] = []
+
+// Collapsible section with a badge that stays visible when collapsed (so
+// attention items like network blocks aren't hidden). Open state persists.
+function AccordionSection({ id, title, badge, alert = false, defaultOpen = false, children }: {
+  id: string
+  title: string
+  badge?: React.ReactNode
+  alert?: boolean
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const key = `minipit:info-acc:${id}`
+  const [open, setOpen] = useState(() => {
+    const v = localStorage.getItem(key)
+    return v === null ? defaultOpen : v === '1'
+  })
+  const toggle = () => { const n = !open; setOpen(n); localStorage.setItem(key, n ? '1' : '0') }
+  return (
+    <div className={`info-acc${open ? ' open' : ''}`}>
+      <button className="info-acc-hd" onClick={toggle}>
+        {open ? <ChevronDown size={14} className="info-acc-chev" /> : <ChevronRight size={14} className="info-acc-chev" />}
+        <span className="info-acc-title">{title}</span>
+        {badge != null && <span className={`info-acc-badge${alert ? ' alert' : ''}`}>{badge}</span>}
+      </button>
+      {open && <div className="info-acc-body">{children}</div>}
+    </div>
+  )
+}
 
 export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: () => void }) {
-  const { updateSandbox } = useStore()
+  const { updateSandbox, ackPolicyBlocks } = useStore()
+  // Select the stored array directly (a stable ref) and fall back to a shared
+  // constant — `?? []` inside the selector returns a new array each render and
+  // sends zustand into an infinite re-render loop.
+  const blocks = useStore((s) => s.policyBlocks[sandbox.name]) ?? NO_BLOCKS
+
+  // Looking at the panel counts as seeing the blocks → clears the badge.
+  useEffect(() => { ackPolicyBlocks(sandbox.name) }, [sandbox.name, blocks.length])
 
   const [policy, setPolicy] = useState<NetworkPolicy | null>(null)
   const [polLoading, setPolLoading] = useState(true)
@@ -42,6 +79,21 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       loadPolicy()
     } else {
       setAllowMsg({ ok: false, text: res?.error || 'Failed to add rule.' })
+    }
+  }
+
+  // One-click allow straight from a recent block.
+  const allowHost = async (host: string) => {
+    if (allowBusy) return
+    setAllowBusy(true)
+    setAllowMsg(null)
+    const res = await window.minipit?.policyAllow(sandbox.name, host).catch(() => null)
+    setAllowBusy(false)
+    if (res?.ok) {
+      setAllowMsg({ ok: true, text: `Allowed ${host}.`, offerRestart: true })
+      loadPolicy()
+    } else {
+      setAllowMsg({ ok: false, text: res?.error || `Failed to allow ${host}.` })
     }
   }
 
@@ -93,8 +145,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
         </div>
       </div>
 
-      <div className="info-block">
-        <div className="info-block-title">Workspaces</div>
+      <AccordionSection id="workspaces" title="Workspaces" defaultOpen>
         <div className="info-row">
           <span className="ir-label">Primary (read-write)</span>
           <span className="ir-val">{sandbox.workspace}</span>
@@ -105,25 +156,28 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
             <span className="ir-val">{ws.path}</span>
           </div>
         ))}
-      </div>
+      </AccordionSection>
 
-      <div className="info-block">
-        <div className="info-block-title">Ports</div>
+      <AccordionSection id="ports" title="Ports" badge={sandbox.ports.length || undefined} defaultOpen>
         <PortsPanel sandbox={sandbox} />
-      </div>
+      </AccordionSection>
 
       {kits.length > 0 && (
-        <div className="info-block">
-          <div className="info-block-title">Kits</div>
+        <AccordionSection id="kits" title="Kits" badge={kits.length}>
           <div className="info-kits">
             {kits.map((k) => <span className="info-kit" key={k}><Layers size={12} />{k}</span>)}
           </div>
-        </div>
+        </AccordionSection>
       )}
 
-      <div className="info-block">
-        <div className="info-block-title" style={{ display: 'flex', alignItems: 'center' }}>
-          Network policy
+      <AccordionSection
+        id="network"
+        title="Network policy"
+        badge={blocks.length || undefined}
+        alert={blocks.length > 0}
+        defaultOpen={blocks.length > 0}
+      >
+        <div style={{ display: 'flex', marginBottom: 8 }}>
           <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={loadPolicy} disabled={polLoading}>
             {polLoading ? 'Checking…' : 'Refresh'}
           </button>
@@ -176,6 +230,28 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
           </>
         )}
 
+        {blocks.length > 0 && (
+          <div className="np-blocks">
+            <div className="np-blocks-hd">
+              <ShieldAlert size={13} className="np-blocks-ic" />
+              Recent blocks
+            </div>
+            {blocks.slice(0, 6).map((b, i) => (
+              <div className="np-block" key={`${b.host}|${b.at}|${i}`}>
+                <div className="np-block-body">
+                  <span className="np-block-host">{b.host}</span>
+                  <span className="np-block-meta">
+                    {b.rule ? `${b.rule} · ` : ''}{new Date(b.at).toLocaleTimeString()}
+                  </span>
+                </div>
+                <button className="btn btn-default btn-sm" onClick={() => allowHost(b.host)} disabled={allowBusy}>
+                  Allow
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {!polLoading && (
           <div className="np-add-box">
             <label className="np-add-lbl">Add allow rule</label>
@@ -207,7 +283,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
 
           </div>
         )}
-      </div>
+      </AccordionSection>
       </div>
     </div>
   )
