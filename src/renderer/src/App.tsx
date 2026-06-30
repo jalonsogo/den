@@ -11,7 +11,7 @@ import { KitsPage } from './components/KitsPage'
 import { SettingsPage } from './components/SettingsPage'
 import { ContextMenu } from './components/ContextMenu'
 import { PolicyBlockToaster } from './components/PolicyBlockToaster'
-import { playFinalizeSound } from './lib/sound'
+import { playFinalizeSound, playAskSound } from './lib/sound'
 import { NewSandboxModal } from './components/modals/NewSandboxModal'
 import { NewSecretModal } from './components/modals/NewSecretModal'
 import { NewKitModal } from './components/modals/NewKitModal'
@@ -39,11 +39,25 @@ export function App() {
 
     const unsubBlock = window.minipit?.onPolicyBlock?.((b) => addPolicyBlock(b as PolicyBlock))
 
-    // Agent activity: track state and chime on every working → waiting finalize.
+    // The agent needs the user (question / permission / idle): play the distinct
+    // "ask" cue. This event is sent just before the matching activity→waiting, so
+    // we note it and let the activity handler skip the finish cue for it.
+    const askedAt: Record<string, number> = {}
+    const unsubAttn = window.minipit?.onAgentAttention?.((name) => {
+      askedAt[name] = Date.now()
+      playAskSound()
+    })
+
+    // Agent activity: track state and chime on every working → waiting finalize,
+    // unless an attention cue just fired for this sandbox (it's a question, not a
+    // finished turn).
     const unsubAct = window.minipit?.onAgentActivity?.((name, state) => {
       const prev = useStore.getState().agentActivity[name]
       setAgentActivity(name, state)
-      if (state === 'waiting' && prev === 'working') playFinalizeSound()
+      if (state === 'waiting' && prev === 'working') {
+        if (Date.now() - (askedAt[name] ?? 0) < 1500) return
+        playFinalizeSound()
+      }
     })
 
     const unsub3 = window.minipit?.onNavigate((page) =>
@@ -66,6 +80,7 @@ export function App() {
       unsub1?.()
       unsub2?.()
       unsubBlock?.()
+      unsubAttn?.()
       unsubAct?.()
       unsub3?.()
       unsub4?.()

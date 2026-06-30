@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { PanelRight, Info, Play } from 'lucide-react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { PanelRight, Info, Play, RefreshCw } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -21,14 +21,50 @@ interface XTermProps {
   onDispose?: () => void
   // If provided, the terminal accepts dropped files (e.g. images for the agent).
   onDropFiles?: (files: File[]) => void
+  // Bumping this number forces a redraw (refit + repaint the attached TUI).
+  redraw?: number
 }
 
 // A real VT100 terminal (xterm.js) that handles full-screen TUIs like Claude Code.
-function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles }: XTermProps) {
+function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles, redraw }: XTermProps) {
   const ref = useRef<HTMLDivElement>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
+  // Size last pushed to the PTY, shared so the visibility effect can tell whether
+  // it needs to resync the backend (a hidden tab is laid out at a different size
+  // than the visible one — see the visibility effect below).
+  const sentColsRef = useRef(0)
+  const sentRowsRef = useRef(0)
+  // onResize identity changes each render; keep it in a ref so forceRedraw can be
+  // a stable callback (otherwise effects depending on it would re-fire endlessly).
+  const onResizeRef = useRef(onResize)
+  onResizeRef.current = onResize
   const [dragging, setDragging] = useState(false)
+
+  // Force the attached agent to repaint. Refit, then push the size to the PTY:
+  // if it changed that's a real SIGWINCH (the TUI redraws); if it's unchanged —
+  // e.g. a fresh terminal after a sandbox switch reattaching to a running agent,
+  // where the grid matches but our buffer is empty — do a brief resize round-trip
+  // so the agent still redraws its full frame. This is the redraw "toggling a
+  // side panel" used to trigger, now done deliberately.
+  const forceRedraw = useCallback(() => {
+    const term = termRef.current
+    const fit = fitRef.current
+    if (!term || !fit) return
+    try {
+      fit.fit()
+      if (term.rows <= 0) return
+      const resize = onResizeRef.current
+      if (term.cols !== sentColsRef.current || term.rows !== sentRowsRef.current) {
+        sentColsRef.current = term.cols; sentRowsRef.current = term.rows
+        resize(term.cols, term.rows)
+      } else {
+        resize(term.cols, Math.max(1, term.rows - 1))
+        requestAnimationFrame(() => { try { resize(term.cols, term.rows) } catch { /* ignore */ } })
+      }
+      term.refresh(0, term.rows - 1)
+    } catch { /* ignore */ }
+  }, [])
 
   useEffect(() => {
     if (!ref.current) return
@@ -51,6 +87,7 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     // if it was sized before layout settled (navigation, font load, dock width),
     // so refit across a couple of frames + a delayed fallback — otherwise the
     // screen stays empty until some resize (e.g. toggling a dock) forces a fit.
+    let disposed = false
     const refit = () => {
       try {
         fit.fit()
@@ -58,10 +95,31 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       } catch { /* container not sized yet */ }
     }
 
+    // Track the size last pushed to the PTY. A full-screen TUI (Claude Code)
+    // only repaints on a real SIGWINCH, so if the agent attaches before layout
+    // and fonts settle it can sit blank until something resizes it — the
+    // "toggle a panel to fix the white screen" symptom. Once the grid settles we
+    // push the corrected size, which makes the agent redraw on its own.
+    const syncSize = () => {
+      if (disposed) return
+      if (term.cols !== sentColsRef.current || term.rows !== sentRowsRef.current) {
+        sentColsRef.current = term.cols; sentRowsRef.current = term.rows
+        onResize(term.cols, term.rows)
+      }
+    }
+    const kick = () => { if (disposed) return; refit(); syncSize() }
+
     refit()
+    sentColsRef.current = term.cols; sentRowsRef.current = term.rows
     onStart(term.cols, term.rows)
-    requestAnimationFrame(() => { refit(); requestAnimationFrame(refit) })
-    const settleT = setTimeout(refit, 150)
+    requestAnimationFrame(() => { kick(); requestAnimationFrame(kick) })
+    // After layout settles, force a repaint — covers a fresh terminal reattaching
+    // to an already-running agent (sandbox switch), where the size won't change so
+    // syncSize alone wouldn't trigger a redraw and the view would stay blank.
+    const settleT = setTimeout(() => { if (!disposed) forceRedraw() }, 150)
+    // Monospace metrics are sometimes measured before the web font loads, giving
+    // a mis-sized (occasionally blank) grid; refit + redraw once fonts are ready.
+    document.fonts?.ready?.then(() => { if (!disposed) forceRedraw() }).catch(() => {})
     if (visible) setTimeout(() => { try { term.focus() } catch { /* ignore */ } }, 0)
 
     const unsub = subscribe((data) => term.write(data))
@@ -85,13 +143,11 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       return true
     })
 
-    const ro = new ResizeObserver(() => {
-      refit()
-      onResize(term.cols, term.rows)
-    })
+    const ro = new ResizeObserver(() => { kick() })
     ro.observe(ref.current)
 
     return () => {
+      disposed = true
       clearTimeout(settleT)
       ro.disconnect()
       dataDisp.dispose()
@@ -109,20 +165,24 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     if (termRef.current) termRef.current.options.theme = theme
   }, [theme])
 
-  // Refit + focus when this tab becomes visible so keystrokes go to the
-  // visible terminal (and not the hidden, still-mounted sibling).
+  // Force a repaint when this tab becomes visible (the inactive tab is laid out
+  // at a different size than the active one, so the agent's last frame won't match
+  // the now-visible grid) and refocus it.
   useEffect(() => {
     if (!visible) { termRef.current?.blur(); return }
     const raf = requestAnimationFrame(() => {
-      try {
-        fitRef.current?.fit()
-        const term = termRef.current
-        if (term && term.rows > 0) term.refresh(0, term.rows - 1)
-        term?.focus()
-      } catch { /* ignore */ }
+      forceRedraw()
+      try { termRef.current?.focus() } catch { /* ignore */ }
     })
     return () => cancelAnimationFrame(raf)
-  }, [visible])
+  }, [visible, forceRedraw])
+
+  // Explicit redraw trigger (the toolbar "Redraw" control). Only the visible
+  // terminal needs it; the hidden sibling repaints when it's shown.
+  useEffect(() => {
+    if (redraw && visible) forceRedraw()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [redraw])
 
   // A drop only fires if dragover is preventDefault'd — otherwise Electron's
   // default file-open kicks in and the drop never reaches us.
@@ -160,7 +220,7 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       <div ref={ref} style={{ width: '100%', height: '100%', padding: '6px 8px' }} />
       {dragging && (
         <div className="term-drop">
-          <span>Drop image to attach to the agent</span>
+          <span>Drop files to attach to the agent</span>
         </div>
       )}
     </div>
@@ -188,7 +248,7 @@ function StoppedView({ theme, label, status, onStart }: { theme: ITheme; label: 
 
 // ── Agent tab ─────────────────────────────────────────────────────────────
 
-function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void }) {
+function AgentTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void; redraw: number }) {
   if (sandbox.status !== 'running') {
     return <StoppedView theme={theme} label="Start the sandbox to launch the agent." status={sandbox.status} onStart={onStart} />
   }
@@ -197,19 +257,25 @@ function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
       sandboxId={sandbox.id}
       visible={visible}
       theme={theme}
+      redraw={redraw}
       subscribe={(write) => window.minipit?.onAgentOutput((name, data) => { if (name === sandbox.name) write(data) })}
       onInput={(data) => window.minipit?.agentWrite(sandbox.name, data)}
       onResize={(cols, rows) => window.minipit?.agentResize(sandbox.name, cols, rows)}
       onStart={(cols, rows) => window.minipit?.agentEnsure(sandbox.name, cols, rows)}
       onDropFiles={async (files) => {
-        // Copy each image into the sandbox, then type its in-sandbox path into
-        // the agent — TUIs like Claude Code take a file path, not raw bytes.
+        // Copy each dropped file into the sandbox, then type its in-sandbox path
+        // into the agent — TUIs like Claude Code take a file path, not raw bytes.
+        // Any file type works (images, PDFs, docs, spreadsheets, text, …); the
+        // agent decides how to read it. Skip directories (no type, zero size).
+        const paths: string[] = []
         for (const file of files) {
-          if (!file.type.startsWith('image/')) continue
+          if (!file.type && file.size === 0) continue
           const bytes = new Uint8Array(await file.arrayBuffer())
           const path = await window.minipit?.agentDropFile(sandbox.name, file.name, bytes)
-          if (path) window.minipit?.agentWrite(sandbox.name, path + ' ')
+          if (path) paths.push(path)
         }
+        // One write with space-separated paths so multiple files land as args.
+        if (paths.length) window.minipit?.agentWrite(sandbox.name, paths.join(' ') + ' ')
       }}
     />
   )
@@ -217,7 +283,7 @@ function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
 
 // ── Shell tab ─────────────────────────────────────────────────────────────
 
-function ShellTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void }) {
+function ShellTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void; redraw: number }) {
   if (sandbox.status !== 'running') {
     return <StoppedView theme={theme} label="Start the sandbox to open a shell." status={sandbox.status} onStart={onStart} />
   }
@@ -226,6 +292,7 @@ function ShellTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
       sandboxId={sandbox.id}
       visible={visible}
       theme={theme}
+      redraw={redraw}
       subscribe={(write) => window.minipit?.onPtyOutput((name, data) => { if (name === sandbox.name) write(data) })}
       onInput={(data) => window.minipit?.ptyWrite(sandbox.name, data)}
       onResize={(cols, rows) => window.minipit?.ptyResize(sandbox.name, cols, rows)}
@@ -245,6 +312,9 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
   onStart?: () => void
 }) {
   const [segment, setSegment] = useState<'agent' | 'shell'>('agent')
+  // Bumped by the Redraw control to force the visible terminal to repaint — an
+  // escape hatch for the occasional blank/stale agent view.
+  const [redrawNonce, setRedrawNonce] = useState(0)
   const termThemeId = useStore((s) => s.termTheme)
   const appTheme = useStore((s) => s.theme)
   const theme = resolveTermTheme(termThemeId, appTheme).theme
@@ -265,6 +335,13 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
           </div>
         </div>
         <div className="term-right">
+          <button
+            className="term-files"
+            onClick={() => setRedrawNonce((n) => n + 1)}
+            title="Redraw terminal (force a repaint)"
+          >
+            <RefreshCw size={13} />
+          </button>
           {onShowInfo && (
             <button
               className={`term-files${dock === 'info' ? ' active' : ''}`}
@@ -299,7 +376,7 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
         position: segment === 'agent' ? 'relative' : 'absolute',
         inset: segment === 'agent' ? undefined : 0
       }}>
-        <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} onStart={onStart} />
+        <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} onStart={onStart} redraw={redrawNonce} />
       </div>
 
       <div style={{
@@ -310,7 +387,7 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
         position: segment === 'shell' ? 'relative' : 'absolute',
         inset: segment === 'shell' ? undefined : 0
       }}>
-        <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} />
+        <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} redraw={redrawNonce} />
       </div>
     </div>
   )

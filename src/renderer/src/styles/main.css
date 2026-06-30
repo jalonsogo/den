@@ -1145,6 +1145,9 @@ html, body, #root {
   flex-shrink: 0; font-size: 9px; font-weight: 700; min-width: 14px; text-align: center;
   border-radius: 3px; padding: 0 3px; margin-left: 4px;
 }
+/* Folder roll-up count: a pill, so it reads as "N changes in here" rather than
+   a single-letter file status. */
+.frow-badge-count { border-radius: 100px; min-width: 16px; padding: 0 5px; }
 
 /* File editor window (#/editor) */
 .few { display: flex; flex-direction: column; height: 100vh; background: var(--bg); }
@@ -2477,7 +2480,18 @@ html, body, #root {
 }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* Slim, subtle thumb. The track is wider than the visible thumb (transparent
+   border + background-clip) so there's a comfortable hit area without a chunky
+   bar. NB: don't add `scrollbar-width` — in Chromium it disables these
+   ::-webkit pseudo rules entirely. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--t4); }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-hi);
+  border-radius: 100px;
+  border: 3px solid transparent;   /* shrinks the visible thumb to ~4px */
+  background-clip: padding-box;
+  min-height: 28px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--t3); }

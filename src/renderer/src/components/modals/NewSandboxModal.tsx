@@ -231,6 +231,23 @@ export function NewSandboxModal() {
             <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
           </div>
 
+          {/* Isolation — primary toggle (clone vs. direct mount changes how your
+              working tree is exposed, so surface it rather than bury it). */}
+          <div className="fg">
+            <label className="flabel">Isolation</label>
+            <div className="tog-row">
+              <button
+                className={`s-toggle${clone ? ' on' : ''}`}
+                onClick={() => setClone(!clone)}
+              />
+              Git clone isolation{' '}
+              <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
+                --clone
+              </code>
+            </div>
+            <div className="fhint">Work in a standalone clone; your changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.</div>
+          </div>
+
           {/* Mixin kits — stacked onto the agent at creation (--kit). Accepts
               local kits and remote OCI references (pulled by sbx at creation). */}
           <div className="fg">
@@ -344,18 +361,6 @@ export function NewSandboxModal() {
                     </div>
                   </div>
                 </div>
-
-                <div className="tog-row">
-                  <button
-                    className={`s-toggle${clone ? ' on' : ''}`}
-                    onClick={() => setClone(!clone)}
-                  />
-                  Git clone isolation{' '}
-                  <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
-                    --clone
-                  </code>
-                </div>
-
               </div>
             )}
           </div>

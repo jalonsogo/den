@@ -1,17 +1,24 @@
-// Finalize cues. Built-ins are synthesized with the Web Audio API so we don't
-// ship binary assets; the user can also point at their own audio file (stored
-// as a data URL in localStorage). Settings live alongside the other
+// Notification cues. Built-ins are synthesized with the Web Audio API so we
+// don't ship binary assets; the user can also point at their own audio file
+// (stored as a data URL in localStorage). Settings live alongside the other
 // `minipit:*` prefs.
+//
+// Two independent cues:
+//   • finalize — the agent finished a turn (Stop)
+//   • ask      — the agent needs you: a question, permission, or idle input
 
-export type SoundId = 'chime' | 'ding' | 'blip' | 'custom'
+export type SoundId = 'chime' | 'ding' | 'blip' | 'question' | 'knock' | 'custom'
 
 export const SOUND_OPTIONS: { id: SoundId; label: string }[] = [
   { id: 'chime', label: 'Chime' },
   { id: 'ding', label: 'Ding' },
   { id: 'blip', label: 'Blip' },
+  { id: 'question', label: 'Question' },
+  { id: 'knock', label: 'Knock' },
   { id: 'custom', label: 'Custom file…' }
 ]
 
+// ── Finalize cue (agent finished) ──
 const KEY_ENABLED = 'minipit:soundEnabled'
 const KEY_SOUND = 'minipit:finalizeSound'
 const KEY_CUSTOM = 'minipit:finalizeSoundData'
@@ -22,6 +29,18 @@ export const getSoundId = (): SoundId => (localStorage.getItem(KEY_SOUND) as Sou
 export const setSoundId = (id: SoundId): void => localStorage.setItem(KEY_SOUND, id)
 export const getCustomSound = (): string | null => localStorage.getItem(KEY_CUSTOM)
 export const setCustomSound = (dataUrl: string): void => localStorage.setItem(KEY_CUSTOM, dataUrl)
+
+// ── Ask cue (agent needs your input) ──
+const KEY_ASK_ENABLED = 'minipit:askSoundEnabled'
+const KEY_ASK_SOUND = 'minipit:askSound'
+const KEY_ASK_CUSTOM = 'minipit:askSoundData'
+
+export const isAskSoundEnabled = (): boolean => localStorage.getItem(KEY_ASK_ENABLED) !== '0'
+export const setAskSoundEnabled = (on: boolean): void => localStorage.setItem(KEY_ASK_ENABLED, on ? '1' : '0')
+export const getAskSoundId = (): SoundId => (localStorage.getItem(KEY_ASK_SOUND) as SoundId) || 'question'
+export const setAskSoundId = (id: SoundId): void => localStorage.setItem(KEY_ASK_SOUND, id)
+export const getAskCustomSound = (): string | null => localStorage.getItem(KEY_ASK_CUSTOM)
+export const setAskCustomSound = (dataUrl: string): void => localStorage.setItem(KEY_ASK_CUSTOM, dataUrl)
 
 let ctx: AudioContext | null = null
 function audioCtx(): AudioContext {
@@ -49,23 +68,32 @@ function tones(freqs: number[], step = 0.13): void {
 }
 
 const BUILTINS: Record<Exclude<SoundId, 'custom'>, () => void> = {
-  chime: () => tones([880, 1318.51]),          // A5 → E6, gentle rise
+  chime: () => tones([880, 1318.51]),          // A5 → E6, gentle rise (finish)
   ding: () => tones([1568]),                   // single high G6
-  blip: () => tones([587.33, 880], 0.09)       // quick two-note
+  blip: () => tones([587.33, 880], 0.09),      // quick two-note
+  question: () => tones([659.25, 880, 1108.73], 0.11), // E5 → A5 → C#6, rising "?" intonation
+  knock: () => tones([392, 392], 0.12)         // two equal low taps (G4) — "knock knock"
 }
 
-// Preview a specific sound (used by the Settings test button).
-export function previewSound(id: SoundId): void {
+// Preview a sound. `customUrl` lets a caller preview the cue-specific custom file
+// (the finalize and ask cues store their custom audio separately).
+export function previewSound(id: SoundId, customUrl?: string | null): void {
   if (id === 'custom') {
-    const url = getCustomSound()
+    const url = customUrl ?? getCustomSound()
     if (url) { const a = new Audio(url); a.volume = 0.7; a.play().catch(() => {}) }
     return
   }
   BUILTINS[id]()
 }
 
-// Play the configured finalize cue, honoring the enabled toggle.
+// Play the configured finalize cue (agent finished), honoring its toggle.
 export function playFinalizeSound(): void {
   if (!isSoundEnabled()) return
-  previewSound(getSoundId())
+  previewSound(getSoundId(), getCustomSound())
+}
+
+// Play the configured ask cue (agent needs your input), honoring its toggle.
+export function playAskSound(): void {
+  if (!isAskSoundEnabled()) return
+  previewSound(getAskSoundId(), getAskCustomSound())
 }
