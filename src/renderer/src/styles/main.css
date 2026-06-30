@@ -1405,8 +1405,8 @@ html, body, #root {
 
 /* New Kit — remote-MCP catalog as small cards */
 .mcp-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-  gap: 8px; max-height: 196px; overflow-y: auto; padding: 2px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px; max-height: 56vh; overflow-y: auto; padding: 2px;
 }
 .mcp-card {
   display: flex; flex-direction: column; align-items: center; gap: 7px;
@@ -1422,6 +1422,9 @@ html, body, #root {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mcp-card-custom { border-style: dashed; }
+/* It's an "add" action, not a selectable server — never show the selected/focus ring. */
+.mcp-card-custom:focus, .mcp-card-custom:focus-visible { outline: none; box-shadow: none; border-color: var(--border); }
+.mcp-card-custom:hover { border-color: var(--border-hi); }
 
 /* MCP picker: search + category filter */
 .mcp-filter { display: flex; gap: 7px; margin-bottom: 8px; }
@@ -1442,9 +1445,32 @@ html, body, #root {
   background-repeat: no-repeat; background-position: right 7px center;
 }
 .mcp-empty { grid-column: 1 / -1; font-size: 12px; color: var(--t3); padding: 12px; text-align: center; }
-.mcp-custom-row { display: flex; gap: 6px; margin-top: 6px; }
-.mcp-custom-name { flex: 0 0 110px; font-size: 12px; }
-.mcp-custom-url { flex: 1; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+/* Custom MCP: one big card spanning the whole grid row, inputs live inside it. */
+.mcp-custom-card {
+  grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px;
+  padding: 11px; border: 1px dashed var(--border-hi); border-radius: 10px; background: var(--bg-subtle);
+}
+.mcp-custom-card-hd {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--t3);
+}
+.mcp-custom-add {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--t2);
+  background: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; cursor: pointer;
+}
+.mcp-custom-add:hover { border-color: var(--border-hi); color: var(--t1); }
+.mcp-custom-row {
+  display: flex; align-items: stretch; gap: 0;
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg);
+}
+.mcp-custom-row:focus-within { border-color: var(--border-hi); }
+.mcp-custom-row .finput { border: none; border-radius: 0; background: none; padding: 9px 11px; }
+.mcp-custom-row .finput:focus { border: none; }
+.mcp-custom-row .mcp-custom-name { flex: 0 0 150px; font-size: 12px; border-right: 1px solid var(--border); }
+.mcp-custom-row .mcp-custom-url { flex: 1; min-width: 0; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+.mcp-custom-row .kit-list-rm { border-radius: 0; padding: 0 11px; color: var(--t3); }
+.mcp-custom-row .kit-list-rm:hover { color: var(--destruct); background: var(--bg-subtle); }
 
 /* Kit visual summary (the info panel) */
 .kit-info-toggle {
@@ -1982,13 +2008,17 @@ html, body, #root {
   justify-content: center;
   z-index: 300;
   backdrop-filter: blur(2px);
+  /* Always keep breathing room around the modal, at any window size. */
+  padding: clamp(20px, 5vh, 48px) clamp(20px, 4vw, 48px);
+  box-sizing: border-box;
 }
 
 .modal {
   background: var(--bg);
   border-radius: 10px;
   width: 548px;
-  max-height: 86%;
+  max-width: 100%;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   box-shadow: 0 0 0 1px var(--border), 0 20px 60px rgba(0,0,0,0.18);

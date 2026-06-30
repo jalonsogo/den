@@ -118,6 +118,11 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const isRunning = sandbox.status === 'running'
   const isDeleting = sandbox.status === 'deleting'
   const folder = sandbox.workspace.split('/').pop() || sandbox.workspace
+  // Tint the avatar with its project's color so sandboxes are grouped visually.
+  const projColor = useStore((s) => s.projectColors[sandbox.workspace])
+  const avatarStyle = projColor
+    ? { background: `color-mix(in srgb, ${projColor} 22%, transparent)`, color: projColor }
+    : undefined
 
   const openMenu = (e: React.MouseEvent, anchor: 'cursor' | 'button') => {
     e.preventDefault()
@@ -138,7 +143,7 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
       onContextMenu={(e) => openMenu(e, 'cursor')}
       title={collapsed ? sandbox.name : undefined}
     >
-      <div className="sb-avatar">
+      <div className="sb-avatar" style={avatarStyle}>
         {isDeleting
           ? <div className="sb-avatar-spinner" />
           : <span className="sb-avatar-txt">{initials(sandbox.name)}</span>}

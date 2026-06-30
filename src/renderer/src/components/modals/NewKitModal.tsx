@@ -214,7 +214,7 @@ export function NewKitModal() {
 
   return (
     <div className="overlay" onClick={() => !saving && setModal(null)}>
-      <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-adaptive" style={{ width: 'min(1200px, 100%)' }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
           <div className="m-title">New {kind === 'sandbox' ? 'Sandbox' : 'Mixin'} Kit</div>
           <div className="m-sub">
@@ -315,10 +315,30 @@ export function NewKitModal() {
                       </select>
                     </div>
                     <div className="mcp-grid">
-                      <button className="mcp-card mcp-card-custom" onClick={addCustomMcp} title="Add a custom MCP by URL">
-                        <span className="mcp-card-ic"><Plus size={18} /></span>
-                        <span className="mcp-card-name">Custom MCP</span>
-                      </button>
+                      {f.customMcps.length === 0 ? (
+                        <button
+                          className="mcp-card mcp-card-custom"
+                          onClick={(e) => { addCustomMcp(); (e.currentTarget as HTMLButtonElement).blur() }}
+                          title="Add a custom MCP by URL"
+                        >
+                          <span className="mcp-card-ic"><Plus size={18} /></span>
+                          <span className="mcp-card-name">Custom MCP</span>
+                        </button>
+                      ) : (
+                        <div className="mcp-custom-card">
+                          <div className="mcp-custom-card-hd">
+                            <span>Custom MCP</span>
+                            <button className="mcp-custom-add" onClick={addCustomMcp}><Plus size={12} /> Add another</button>
+                          </div>
+                          {f.customMcps.map((c, i) => (
+                            <div className="mcp-custom-row" key={`custom-${i}`}>
+                              <input className="finput mcp-custom-name" value={c.name} placeholder="name" onChange={(e) => updateCustomMcp(i, 'name', e.target.value)} />
+                              <input className="finput mcp-custom-url" value={c.url} placeholder="https://mcp.example.com/mcp" onChange={(e) => updateCustomMcp(i, 'url', e.target.value)} />
+                              <button className="kit-list-rm btn btn-ghost btn-sm" onClick={() => removeCustomMcp(i)} title="Remove"><X size={13} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {shown.map((m) => (
                         <button
                           key={m.id}
@@ -332,13 +352,6 @@ export function NewKitModal() {
                       ))}
                       {shown.length === 0 && <div className="mcp-empty">No servers match.</div>}
                     </div>
-                    {f.customMcps.map((c, i) => (
-                      <div className="mcp-custom-row" key={i}>
-                        <input className="finput mcp-custom-name" value={c.name} placeholder="name" onChange={(e) => updateCustomMcp(i, 'name', e.target.value)} />
-                        <input className="finput mcp-custom-url" value={c.url} placeholder="https://mcp.example.com/mcp" onChange={(e) => updateCustomMcp(i, 'url', e.target.value)} />
-                        <button className="kit-list-rm btn btn-ghost btn-sm" onClick={() => removeCustomMcp(i)} title="Remove"><X size={13} /></button>
-                      </div>
-                    ))}
                     <div className="fhint">{f.mcps.length + f.customMcps.length || 'No'} selected — each adds an allow rule + <code>claude mcp add</code>.</div>
                   </>
                 )
