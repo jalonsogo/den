@@ -51,6 +51,22 @@ export function ContextMenu() {
     window.minipit?.openInFinder(sandbox.workspace)
   }
 
+  // Restart = stop (if running) then start again, so a fresh agent session picks
+  // up new kits/policy.
+  const handleRestart = async () => {
+    setContextMenu({ visible: false })
+    try {
+      if (sandbox.status === 'running') {
+        updateSandbox(sandbox.id, { status: 'stopping' })
+        await window.minipit?.stopSandbox(sandbox.id)
+      }
+      await window.minipit?.runSandbox(sandbox.name)
+      updateSandbox(sandbox.id, { status: 'running' })
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   const pickTheme = (id: string) => {
     setTermTheme(id)
     setContextMenu({ visible: false })
@@ -89,7 +105,7 @@ export function ContextMenu() {
       <div className="ctx-item">Copy Path</div>
       <div className="ctx-sep" />
       <div className="ctx-item">Save Snapshot…</div>
-      <div className="ctx-item">Reset…</div>
+      <div className="ctx-item" onClick={handleRestart}>Restart</div>
       <div className="ctx-sep" />
       <div
         className="ctx-item ctx-has-sub"
