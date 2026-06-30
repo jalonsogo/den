@@ -54,6 +54,24 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     const unsub = subscribe((data) => term.write(data))
     const dataDisp = term.onData(onInput)
 
+    // Copy-on-select: xterm draws its selection on a canvas (not a DOM
+    // selection), so the menu Copy role can't see it. Mirror the selection to
+    // the clipboard ourselves so text can be copied out of the terminal.
+    const selDisp = term.onSelectionChange(() => {
+      const sel = term.getSelection()
+      if (sel) navigator.clipboard?.writeText(sel).catch(() => {})
+    })
+
+    // Cmd/Ctrl+Shift+V → paste from the clipboard into the PTY (a reliable
+    // in-terminal paste that doesn't depend on the menu reaching xterm).
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && (e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyV') {
+        navigator.clipboard?.readText().then((t) => { if (t) onInput(t) }).catch(() => {})
+        return false
+      }
+      return true
+    })
+
     const ro = new ResizeObserver(() => {
       try { fit.fit() } catch { /* ignore */ }
       onResize(term.cols, term.rows)
@@ -63,6 +81,7 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     return () => {
       ro.disconnect()
       dataDisp.dispose()
+      selDisp.dispose()
       unsub?.()
       term.dispose()
       onDispose?.()

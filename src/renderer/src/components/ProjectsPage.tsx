@@ -1,12 +1,17 @@
 import { useState } from 'react'
 import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
-import { useStore } from '../store'
+import { useStore, unackedBlockCount } from '../store'
 import { AgentIcon } from './AgentIcon'
+import { SandboxAvatar } from './SandboxAvatar'
 import { FilesPanel } from './FilesPanel'
 import { ProjectAvatar } from './ProjectAvatar'
+import { formatUptime } from '../lib/utils'
 
 export function ProjectsPage() {
   const { sandboxes, activeProject, setActiveProject, setActiveSandboxId, setActivePage, setModal, setNewSandboxWorkspace, customProjects, addProject, removeProject } = useStore()
+  const policyBlocks = useStore((s) => s.policyBlocks)
+  const blocksSeenAt = useStore((s) => s.blocksSeenAt)
+  const agentActivity = useStore((s) => s.agentActivity)
   const [delFor, setDelFor] = useState<string | null>(null)
   const [delFolder, setDelFolder] = useState(false)
 
@@ -134,16 +139,34 @@ export function ProjectsPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="proj-boxes">
+                  <div className="proj-sbxs">
+                    {list.length === 0 && (
+                      <div className="proj-sbx-empty">No sandboxes yet</div>
+                    )}
                     {list.map((s) => (
-                      <button key={s.id} className="proj-box" onClick={() => setActiveSandboxId(s.id)}>
-                        <AgentIcon agent={s.agent} size={13} />
-                        <span>{s.name}</span>
-                        <span className={`proj-dot ${s.status === 'running' ? 'running' : 'stopped'}`} />
+                      <button key={s.id} className="proj-sbx" onClick={() => setActiveSandboxId(s.id)}>
+                        <SandboxAvatar
+                          sandbox={s}
+                          size={28}
+                          alert={unackedBlockCount(policyBlocks, blocksSeenAt, s.name) > 0}
+                          activity={s.status === 'running' ? (agentActivity[s.name] ?? null) : null}
+                        />
+                        <span className="proj-sbx-name">{s.name}</span>
+                        <span className="proj-sbx-meta">
+                          {s.agent}{s.branch ? ` · ${s.branch}` : ''}{s.memory ? ` · ${s.memory}` : ''}
+                        </span>
+                        <span className="proj-sbx-right">
+                          {s.status === 'running' && s.uptimeSeconds ? (
+                            <span className="home-row-up">{formatUptime(s.uptimeSeconds)}</span>
+                          ) : null}
+                          <span className={`proj-sbx-status ${s.status === 'running' ? 'running' : 'stopped'}`}>
+                            {s.status === 'running' ? 'Running' : 'Stopped'}
+                          </span>
+                        </span>
                       </button>
                     ))}
-                    <button className="proj-box proj-box-new" onClick={() => openNew(workspace)} title="New sandbox in this project">
-                      <Plus size={13} /> New sandbox
+                    <button className="proj-sbx proj-sbx-new" onClick={() => openNew(workspace)} title="New sandbox in this project">
+                      <Plus size={14} /> New sandbox
                     </button>
                   </div>
                 )}
