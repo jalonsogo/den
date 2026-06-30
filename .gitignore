@@ -5,3 +5,6 @@ dist-electron/
 *.log
 .DS_Store
 .claude/settings.local.json
+
+# TypeScript incremental build info
+*.tsbuildinfo

@@ -9,13 +9,15 @@ import { TemplatesPage } from './components/TemplatesPage'
 import { KitsPage } from './components/KitsPage'
 import { SettingsPage } from './components/SettingsPage'
 import { ContextMenu } from './components/ContextMenu'
+import { PolicyBlockToaster } from './components/PolicyBlockToaster'
+import { playFinalizeSound } from './lib/sound'
 import { NewSandboxModal } from './components/modals/NewSandboxModal'
 import { NewSecretModal } from './components/modals/NewSecretModal'
 import { NewKitModal } from './components/modals/NewKitModal'
-import type { Sandbox, LogLine } from './types'
+import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects, addPolicyBlock, setAgentActivity } = useStore()
 
   useEffect(() => {
     // Initial load
@@ -32,6 +34,15 @@ export function App() {
       appendLog(name, line)
       // If we got a log line, the sandbox must be running
       updateSandbox(name, { status: 'running' })
+    })
+
+    const unsubBlock = window.minipit?.onPolicyBlock?.((b) => addPolicyBlock(b as PolicyBlock))
+
+    // Agent activity: track state and chime on every working → waiting finalize.
+    const unsubAct = window.minipit?.onAgentActivity?.((name, state) => {
+      const prev = useStore.getState().agentActivity[name]
+      setAgentActivity(name, state)
+      if (state === 'waiting' && prev === 'working') playFinalizeSound()
     })
 
     const unsub3 = window.minipit?.onNavigate((page) =>
@@ -53,6 +64,8 @@ export function App() {
     return () => {
       unsub1?.()
       unsub2?.()
+      unsubBlock?.()
+      unsubAct?.()
       unsub3?.()
       unsub4?.()
       unsub5?.()
@@ -81,6 +94,7 @@ export function App() {
         </div>
       </div>
       <ContextMenu />
+      <PolicyBlockToaster />
     </div>
   )
 }

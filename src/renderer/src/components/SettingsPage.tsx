@@ -1,10 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { Sun, Moon, Monitor } from 'lucide-react'
 import { useStore } from '../store'
 import { ACCENTS } from '../lib/accent'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
 import { LogsPanel } from './LogsPanel'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
+import {
+  SOUND_OPTIONS, type SoundId, isSoundEnabled, setSoundEnabled,
+  getSoundId, setSoundId, setCustomSound, previewSound
+} from '../lib/sound'
 import type { AppSettings } from '../types'
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -19,7 +24,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export function SettingsPage() {
   const {
-    theme, toggleTheme, accent, accentColor, customAccents,
+    themePref, setThemePref, accent, accentColor, customAccents,
     setAccent, setCustomAccent, saveCustomAccent, removeCustomAccent,
     termTheme, setTermTheme
   } = useStore()
@@ -27,6 +32,24 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
   const [palette, setPalette] = useState<string[]>([])
+
+  // Finalize-sound prefs (stored in localStorage via lib/sound).
+  const [soundOn, setSoundOn] = useState(isSoundEnabled())
+  const [soundId, setSound] = useState<SoundId>(getSoundId())
+  const [customName, setCustomName] = useState<string | null>(null)
+
+  const onPickCustom = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setCustomSound(reader.result as string)
+      setCustomName(file.name)
+      setSound('custom'); setSoundId('custom')
+      previewSound('custom')
+    }
+    reader.readAsDataURL(file)
+  }
 
   // The active custom hex: the live picker color, or a saved swatch's color.
   const activeHex =
@@ -40,15 +63,32 @@ export function SettingsPage() {
     window.minipit?.generatePalette(activeHex).then((p) => setPalette(p ?? [])).catch(() => setPalette([]))
   }, [activeHex])
 
+  // Snapshot of the last-persisted settings, so the auto-save effect can tell a
+  // real edit from the initial load (and skip no-op saves).
+  const savedSnapshot = useRef('')
+
   useEffect(() => {
-    window.minipit?.getSettings().then((s) => setSettings(s ?? DEFAULT_SETTINGS)).catch(() => {})
+    window.minipit?.getSettings()
+      .then((s) => {
+        const v = s ?? DEFAULT_SETTINGS
+        savedSnapshot.current = JSON.stringify(v)
+        setSettings(v)
+      })
+      .catch(() => { savedSnapshot.current = JSON.stringify(DEFAULT_SETTINGS) })
   }, [])
 
-  const handleSave = async () => {
-    await window.minipit?.saveSettings(settings).catch(() => {})
-    setSaved(true)
-    setTimeout(() => setSaved(false), 1500)
-  }
+  // Auto-save: persist on change (debounced). No Save button needed.
+  useEffect(() => {
+    const cur = JSON.stringify(settings)
+    if (!savedSnapshot.current || cur === savedSnapshot.current) return
+    const t = setTimeout(() => {
+      window.minipit?.saveSettings(settings).catch(() => {})
+      savedSnapshot.current = cur
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1200)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [settings])
 
   const toggle = (key: keyof AppSettings) =>
     setSettings((s) => ({ ...s, [key]: !s[key as keyof AppSettings] }))
@@ -58,9 +98,9 @@ export function SettingsPage() {
       <div className="page-hdr">
         <span className="page-title">Settings</span>
         {(tab === 'general' || tab === 'runtime') && (
-          <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={handleSave}>
-            {saved ? '✓ Saved' : 'Save'}
-          </button>
+          <span className="ss-autosave" style={{ marginLeft: 'auto' }}>
+            {saved ? '✓ Saved' : 'Changes save automatically'}
+          </span>
         )}
       </div>
 
@@ -89,11 +129,23 @@ export function SettingsPage() {
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Theme</div>
-              <div className="ss-sub">Light or dark interface.</div>
+              <div className="ss-sub">Light, dark, or follow your computer.</div>
             </div>
-            <button className="btn btn-default btn-sm" onClick={toggleTheme}>
-              {theme === 'dark' ? 'Dark' : 'Light'}
-            </button>
+            <div className="seg" role="group" aria-label="Theme">
+              {([
+                { id: 'light', label: 'Light', Icon: Sun },
+                { id: 'dark', label: 'Dark', Icon: Moon },
+                { id: 'system', label: 'Computer', Icon: Monitor }
+              ] as const).map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  className={`seg-opt${themePref === id ? ' on' : ''}`}
+                  onClick={() => setThemePref(id)}
+                >
+                  <Icon size={13} /> {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="ss-row">
             <div>
@@ -174,6 +226,49 @@ export function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+
+        <div className="ss">
+          <div className="ss-hdr">Notifications</div>
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Sound when an agent finishes</div>
+              <div className="ss-sub">Play a cue when an agent hands a task back to you.</div>
+            </div>
+            <button
+              className={`s-toggle${soundOn ? ' on' : ''}`}
+              onClick={() => { const v = !soundOn; setSoundOn(v); setSoundEnabled(v) }}
+            />
+          </div>
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Finish sound</div>
+              <div className="ss-sub">
+                {soundId === 'custom' && customName ? `Custom: ${customName}` : 'Pick a built-in cue or your own audio file.'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <select
+                className="s-input"
+                style={{ width: 150, cursor: 'pointer' }}
+                value={soundId}
+                disabled={!soundOn}
+                onChange={(e) => { const id = e.target.value as SoundId; setSound(id); setSoundId(id) }}
+              >
+                {SOUND_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              {soundId === 'custom' ? (
+                <label className="btn btn-default btn-sm" style={{ cursor: 'pointer' }}>
+                  Choose…
+                  <input type="file" accept="audio/*" style={{ display: 'none' }} onChange={onPickCustom} />
+                </label>
+              ) : (
+                <button className="btn btn-default btn-sm" disabled={!soundOn} onClick={() => previewSound(soundId)}>
+                  Test
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="ss">

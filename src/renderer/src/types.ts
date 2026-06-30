@@ -125,6 +125,33 @@ export interface Template {
   createdAt: string
 }
 
+// Whether an agent is mid-task or waiting on the user. `null` clears it (agent
+// process exited).
+export type AgentState = 'working' | 'waiting'
+
+// A network-policy denial — an agent's request that was blocked. Surfaced so
+// the user can allow the host in one click.
+export interface PolicyBlock {
+  sandbox: string
+  host: string
+  rule?: string
+  reason?: string
+  at: number
+  source: 'log' | 'output'
+}
+
+export interface StorageSection {
+  count: number
+  bytes: number | null
+}
+
+export interface StorageUsage {
+  ok: boolean
+  sandboxes: StorageSection
+  templates: StorageSection
+  error?: string
+}
+
 export interface SbxRelease {
   version: string
   name: string
@@ -216,6 +243,7 @@ declare global {
       onLogTail(cb: (chunk: string) => void): () => void
       getSettings(): Promise<AppSettings>
       saveSettings(settings: Partial<AppSettings>): Promise<void>
+      storageUsage(): Promise<StorageUsage>
       sbxVersion(path?: string): Promise<{ ok: boolean; raw?: string; version?: string; error?: string }>
       sbxReleases(): Promise<SbxRelease[]>
       sbxInstallInfo(): Promise<SbxInstallInfo>
@@ -223,6 +251,7 @@ declare global {
       onRuntimeOutput(cb: (chunk: string) => void): () => void
       onCreateOutput(cb: (chunk: string) => void): () => void
       networkPolicy(name?: string): Promise<NetworkPolicy>
+      policyLog(name?: string): Promise<PolicyBlock[]>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>
       listProjects(): Promise<string[]>
@@ -231,6 +260,9 @@ declare global {
       defaultWorkspace(): Promise<string>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
+      onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
+      onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
+      onFilesChanged(cb: (name: string) => void): () => void
       onNavigate(cb: (page: string) => void): () => void
       onOpenSandbox(cb: (name: string) => void): () => void
       onOpenProject(cb: (workspace: string) => void): () => void
@@ -238,6 +270,7 @@ declare global {
       onSetTab(cb: (tab: string) => void): () => void
       onStopActive(cb: () => void): () => void
       agentWrite(name: string, data: string): Promise<void>
+      agentDropFile(name: string, fileName: string, bytes: Uint8Array): Promise<string | null>
       agentResize(name: string, cols: number, rows: number): Promise<void>
       agentEnsure(name: string, cols: number, rows: number): Promise<void>
       onAgentOutput(cb: (name: string, data: string) => void): () => void

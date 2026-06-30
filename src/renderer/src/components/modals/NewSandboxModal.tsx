@@ -16,6 +16,8 @@ export function NewSandboxModal() {
   const [name, setName]               = useState(randomName())
   const [agent, setAgent]             = useState<AgentType>('claude')
   const [workspace, setWorkspace]     = useState(newSandboxWorkspace ?? '')
+  const [wsBase, setWsBase]           = useState('')     // ~/den base for the default path
+  const [wsEdited, setWsEdited]       = useState(false)  // user picked their own folder
   const [memIdx, setMemIdx]           = useState(0)
   const [clone, setClone]             = useState(false)
   const [advancedOpen, setAdvanced]   = useState(false)
@@ -67,17 +69,23 @@ export function NewSandboxModal() {
     return () => document.removeEventListener('mousedown', handler)
   }, [kitDdOpen])
 
-  // Default the workspace to the shared ~/minipit folder unless a project was chosen.
+  // Fetch the ~/den base once, unless this creation is scoped to a project folder.
   useEffect(() => {
     if (newSandboxWorkspace) return
-    window.minipit?.defaultWorkspace().then((dir) => {
-      if (dir) setWorkspace((w) => w || dir)
-    }).catch(() => {})
+    window.minipit?.defaultWorkspace().then((dir) => { if (dir) setWsBase(dir) }).catch(() => {})
   }, [newSandboxWorkspace])
+
+  // Default the workspace to ~/den/<name>, tracking the name field until the
+  // user picks their own folder (Browse or manual edit).
+  useEffect(() => {
+    if (newSandboxWorkspace || wsEdited || !wsBase) return
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+    setWorkspace(slug ? `${wsBase}/${slug}` : wsBase)
+  }, [name, wsBase, wsEdited, newSandboxWorkspace])
 
   const handleBrowse = async () => {
     const path = await window.minipit?.showOpenDialog()
-    if (path) setWorkspace(path)
+    if (path) { setWorkspace(path); setWsEdited(true) }
   }
 
   const handleLaunch = async () => {
@@ -215,7 +223,7 @@ export function NewSandboxModal() {
                 className="finput"
                 value={workspace}
                 placeholder="/Users/you/Code/my-project"
-                onChange={(e) => setWorkspace(e.target.value)}
+                onChange={(e) => { setWorkspace(e.target.value); setWsEdited(true) }}
                 autoFocus
               />
               <button className="btn btn-default btn-sm" onClick={handleBrowse}>Browse…</button>

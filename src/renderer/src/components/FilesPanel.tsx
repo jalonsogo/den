@@ -131,7 +131,9 @@ export function FilesPanel({ sandbox }: { sandbox: Sandbox }) {
 
   const openFile = (path: string, name: string) => window.minipit?.openFileWindow(sandbox.name, path, name)
 
-  // Poll git status so changed files are badged live in the tree.
+  // Keep changed files badged live. Claude Code's PostToolUse hook pushes a
+  // files-changed event for instant refresh; a slow poll covers shell edits and
+  // non-Claude agents.
   useEffect(() => {
     if (sandbox.status !== 'running') { setChanges([]); return }
     let alive = true
@@ -141,8 +143,9 @@ export function FilesPanel({ sandbox }: { sandbox: Sandbox }) {
       }).catch(() => {})
     }
     fetchChanges()
-    const id = setInterval(fetchChanges, 3000)
-    return () => { alive = false; clearInterval(id) }
+    const id = setInterval(fetchChanges, 10000)
+    const unsub = window.minipit?.onFilesChanged?.((name) => { if (name === sandbox.name) fetchChanges() })
+    return () => { alive = false; clearInterval(id); unsub?.() }
   }, [sandbox.name, sandbox.workspace, sandbox.status])
 
   // Map a file's absolute path to its git change status (paths are repo-relative).
@@ -173,6 +176,12 @@ export function FilesPanel({ sandbox }: { sandbox: Sandbox }) {
     setTree([])
     load()
   }, [sandbox.id, sandbox.status, load])
+
+  // Reload the tree when the agent writes files (so new files appear at once).
+  useEffect(() => {
+    const unsub = window.minipit?.onFilesChanged?.((name) => { if (name === sandbox.name) load() })
+    return () => unsub?.()
+  }, [sandbox.name, load])
 
   const stopped = sandbox.status !== 'running'
 

@@ -413,6 +413,269 @@ async function listTemplates() {
   }
 }
 
+// Parse a human-readable size like "1.2 GB", "512MB", "1.5GiB", "900 kB" into
+// bytes. Returns null if it doesn't look like a size.
+function parseHumanSize(s: string): number | null {
+  const m = s.trim().match(/^([\d.]+)\s*([kKmMgGtT]?)i?[bB]?$/)
+  if (!m) return null
+  const n = parseFloat(m[1])
+  if (!isFinite(n)) return null
+  const mult: Record<string, number> = { '': 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 }
+  return Math.round(n * (mult[m[2].toLowerCase()] ?? 1))
+}
+
+// Pull a byte count out of an sbx JSON object, tolerating both numeric-byte and
+// human-readable size fields (sbx's exact key isn't guaranteed across versions).
+function pickBytes(o: Record<string, unknown>): number | null {
+  for (const k of ['size_bytes', 'sizeBytes', 'disk_usage', 'diskUsage', 'disk_bytes', 'size', 'disk']) {
+    const v = o?.[k]
+    if (typeof v === 'number' && isFinite(v)) return v
+    if (typeof v === 'string') { const n = parseHumanSize(v); if (n != null) return n }
+  }
+  return null
+}
+
+interface StorageSection { count: number; bytes: number | null }
+
+// sbx is Docker-backed, so query Docker's own accounting for real byte counts —
+// `sbx ls`/`template ls` JSON don't carry sizes. Maps Docker's categories onto
+// our two buckets: images → templates, containers + local volumes → sandboxes.
+function dockerDf(): Promise<{ images: number | null; containers: number | null }> {
+  return new Promise((resolve) => {
+    execFile(
+      'docker', ['system', 'df', '--format', '{{json .}}'],
+      { timeout: 15000, env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` } },
+      (err, stdout) => {
+        if (err) return resolve({ images: null, containers: null })
+        let images: number | null = null
+        let containers: number | null = null
+        for (const line of stdout.trim().split('\n')) {
+          try {
+            const row = JSON.parse(line) as { Type?: string; Size?: string }
+            const bytes = row.Size ? parseHumanSize(row.Size) : null
+            if (bytes == null) continue
+            if (row.Type === 'Images') images = (images ?? 0) + bytes
+            else if (row.Type === 'Containers' || row.Type === 'Local Volumes') containers = (containers ?? 0) + bytes
+          } catch { /* skip the occasional non-JSON line */ }
+        }
+        resolve({ images, containers })
+      }
+    )
+  })
+}
+
+// Aggregate disk usage for sandboxes and templates. Counts come from sbx; byte
+// sizes come from sbx when it reports them, else from Docker (the backing store).
+// `bytes` stays null only when neither source has a number, so the UI never
+// invents one.
+async function storageUsage(): Promise<{ ok: boolean; sandboxes: StorageSection; templates: StorageSection; error?: string }> {
+  const sumSection = (list: Array<Record<string, unknown>>): StorageSection => {
+    let bytes = 0, known = false
+    for (const o of list) { const b = pickBytes(o); if (b != null) { bytes += b; known = true } }
+    return { count: list.length, bytes: known ? bytes : null }
+  }
+  try {
+    let sandboxes: StorageSection = { count: 0, bytes: null }
+    let templates: StorageSection = { count: 0, bytes: null }
+    try {
+      const data = JSON.parse(await sbx(['ls', '--json'], { timeout: 12000 }))
+      sandboxes = sumSection(data.sandboxes ?? data ?? [])
+    } catch (e) { console.error('storage: sbx ls failed:', e) }
+    try {
+      const data = JSON.parse(await sbx(['template', 'ls', '--json'], { timeout: 12000 }))
+      templates = sumSection(data.images ?? [])
+    } catch (e) { console.error('storage: sbx template ls failed:', e) }
+    // Fill any missing sizes from Docker's disk accounting.
+    if (sandboxes.bytes == null || templates.bytes == null) {
+      const df = await dockerDf()
+      if (sandboxes.bytes == null) sandboxes.bytes = df.containers
+      if (templates.bytes == null) templates.bytes = df.images
+    }
+    return { ok: true, sandboxes, templates }
+  } catch (err) {
+    return { ok: false, sandboxes: { count: 0, bytes: null }, templates: { count: 0, bytes: null }, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
+// ── Network-policy block events ──────────────────────────────────────────────
+// A single "an agent's request was denied" event, surfaced so the user can
+// allow the host in one click. Detected two ways: polling `sbx policy log`
+// (canonical) and scanning agent output for the proxy's 403 marker (instant).
+interface PolicyBlock {
+  sandbox: string
+  host: string
+  rule?: string
+  reason?: string
+  at: number          // epoch ms when observed
+  source: 'log' | 'output'
+}
+
+// Keys we've already pushed to the renderer, so polling doesn't re-emit the
+// same entry every tick. A re-block updates last-seen → new key → re-emitted.
+const emittedBlocks = new Set<string>()
+const blockKey = (b: PolicyBlock): string => `${b.sandbox}|${b.host}|${b.at}`
+
+function emitBlock(b: PolicyBlock): void {
+  const k = blockKey(b)
+  if (emittedBlocks.has(k)) return
+  emittedBlocks.add(k)
+  if (emittedBlocks.size > 500) emittedBlocks.delete(emittedBlocks.values().next().value as string)
+  mainWindow?.webContents.send('minipit:policy-block', b)
+}
+
+// Best-effort parse of `sbx policy log --json`. The exact schema isn't pinned
+// across sbx versions, so tolerate several field names and both array/object
+// envelopes. Returns only denials.
+function parsePolicyLogJson(raw: string, fallbackSandbox?: string): PolicyBlock[] {
+  let data: unknown
+  try { data = JSON.parse(raw) } catch { return [] }
+  const env = data as { entries?: unknown; log?: unknown; events?: unknown }
+  const rows = (Array.isArray(data) ? data : env?.entries ?? env?.log ?? env?.events ?? []) as Array<Record<string, unknown>>
+  const pick = (o: Record<string, unknown>, keys: string[]): string | undefined => {
+    for (const k of keys) { const v = o[k]; if (typeof v === 'string' && v.trim()) return v.trim() }
+    return undefined
+  }
+  const out: PolicyBlock[] = []
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue
+    const decision = pick(r, ['decision', 'action', 'verdict'])?.toLowerCase()
+    if (decision && !/deny|denied|block/.test(decision)) continue   // skip allows
+    const host = pick(r, ['host', 'domain', 'hostname', 'target'])
+    if (!host) continue
+    const tsStr = pick(r, ['last_seen', 'lastSeen', 'timestamp', 'time', 'at', 'seen_at'])
+    const ts = tsStr ? Date.parse(tsStr) : NaN
+    out.push({
+      sandbox: pick(r, ['sandbox', 'sandbox_name', 'sandboxName']) ?? fallbackSandbox ?? '',
+      host,
+      rule: pick(r, ['rule', 'rule_name', 'ruleName']),
+      reason: pick(r, ['reason', 'detail', 'message']),
+      at: isFinite(ts) ? ts : Date.now(),
+      source: 'log'
+    })
+  }
+  return out
+}
+
+function fetchPolicyLog(name?: string): Promise<PolicyBlock[]> {
+  const args = ['policy', 'log', '--json']
+  if (name) args.push('--sandbox', name)
+  return sbx(args, { timeout: 12000 })
+    .then((out) => parsePolicyLogJson(out, name))
+    .catch(() => [])
+}
+
+// Rolling tail of agent output per sandbox, so a block marker split across PTY
+// chunks still matches. The proxy prints: "Blocked by network policy: domain <host>".
+const blockScanBuf = new Map<string, string>()
+const BLOCK_RE = /Blocked by network policy:\s*domain\s+([^\s,]+)/gi
+
+function scanOutputForBlocks(name: string, data: string): void {
+  const stripped = data.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')   // drop ANSI
+  const buf = (blockScanBuf.get(name) ?? '') + stripped
+  let m: RegExpExecArray | null
+  BLOCK_RE.lastIndex = 0
+  while ((m = BLOCK_RE.exec(buf)) !== null) {
+    emitBlock({ sandbox: name, host: m[1], at: Date.now(), source: 'output' })
+  }
+  // Keep only the tail so the buffer can't grow unbounded.
+  blockScanBuf.set(name, buf.slice(-2048))
+}
+
+// ── Agent activity & file changes (Claude Code hooks) ────────────────────────
+// Rather than guess turn boundaries from the PTY stream, we install Claude Code
+// hooks inside the sandbox that append each event as JSON to ~/.den/events.jsonl,
+// then tail that file. `Stop` = finished (waiting); `UserPromptSubmit`/`PreToolUse`
+// = working; `PostToolUse` on a file tool = the workspace changed → refresh.
+type AgentState = 'working' | 'waiting'
+const agentState = new Map<string, AgentState>()
+const eventTails = new Map<string, ReturnType<typeof spawn>>()
+
+const DEN_HOOKS = {
+  hooks: {
+    UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
+    PreToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
+    PostToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
+    Stop: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }]
+  }
+}
+const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+function setAgentState(name: string, state: AgentState): void {
+  if (agentState.get(name) === state) return
+  agentState.set(name, state)
+  hookLog(`${name} state → ${state}`)
+  mainWindow?.webContents.send('minipit:agent-activity', name, state)
+}
+
+// Dev-only trace for verifying the Claude Code hook pipeline. Logs to the den
+// console (the terminal running `npm run dev`); silent in packaged builds.
+function hookLog(...args: unknown[]): void {
+  if (!app.isPackaged) console.log('[den:hooks]', ...args)
+}
+
+// Install the hook config and prime the event file inside the (den-managed)
+// sandbox. Merges into ~/.claude/settings.json via the user's jq if present,
+// else writes our config directly.
+function injectClaudeHooks(name: string): void {
+  const cfg = JSON.stringify(DEN_HOOKS)
+  const script =
+    'mkdir -p ~/.claude ~/.den && touch ~/.den/events.jsonl && ' +
+    `den_hooks='${cfg.replace(/'/g, `'\\''`)}' && ` +
+    'if command -v jq >/dev/null 2>&1 && [ -s ~/.claude/settings.json ]; then ' +
+    '  jq -s ".[0] * .[1]" ~/.claude/settings.json <(printf %s "$den_hooks") > ~/.claude/settings.json.tmp ' +
+    '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
+    'else printf %s "$den_hooks" > ~/.claude/settings.json && echo wrote; fi'
+  execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
+    if (err) { hookLog(`inject FAILED for ${name}:`, err.message); console.error(`hook inject failed for ${name}:`, err.message) }
+    else hookLog(`injected into ${name} (${stdout.trim() || 'ok'}) → ~/.claude/settings.json`)
+  })
+}
+
+// Tail the in-container event file and route hook events to the renderer.
+function startEventTail(name: string): void {
+  eventTails.get(name)?.kill()
+  const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
+  eventTails.set(name, proc)
+  hookLog(`tailing events for ${name}`)
+  let buf = ''
+  proc.stdout?.on('data', (d) => {
+    buf += d.toString()
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let ev: { hook_event_name?: string; tool_name?: string }
+      try { ev = JSON.parse(line) } catch { hookLog(`${name} unparsable line:`, line.slice(0, 120)); continue }
+      hookLog(`${name} ▸`, ev.hook_event_name, ev.tool_name ?? '')
+      switch (ev.hook_event_name) {
+        case 'Stop':
+          setAgentState(name, 'waiting')
+          break
+        case 'UserPromptSubmit':
+        case 'PreToolUse':
+          setAgentState(name, 'working')
+          break
+        case 'PostToolUse':
+          setAgentState(name, 'working')
+          if (ev.tool_name && FILE_TOOLS.has(ev.tool_name)) {
+            hookLog(`${name} → files-changed (${ev.tool_name})`)
+            mainWindow?.webContents.send('minipit:files-changed', name)
+          }
+          break
+      }
+    }
+  })
+  proc.stderr?.on('data', (d) => hookLog(`${name} tail stderr:`, d.toString().trim()))
+  proc.on('exit', (code) => hookLog(`tail for ${name} exited (${code})`))
+}
+
+function clearAgentActivity(name: string): void {
+  eventTails.get(name)?.kill()
+  eventTails.delete(name)
+  agentState.delete(name)
+  mainWindow?.webContents.send('minipit:agent-activity', name, null)
+}
+
 interface FileEntry {
   name: string
   type: 'file' | 'dir'
@@ -516,13 +779,19 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24) {
   uptimeMap.set(name, Date.now())
   sbxProcesses.set(name, proc)
 
+  setAgentState(name, 'working')
+  // Claude Code hooks drive activity + file-change events (see startEventTail).
+  injectClaudeHooks(name)
+  startEventTail(name)
   proc.onData((data) => {
     mainWindow?.webContents.send('minipit:agent-output', name, data)
+    scanOutputForBlocks(name, data)
   })
 
   proc.onExit(() => {
     sbxProcesses.delete(name)
     uptimeMap.delete(name)
+    clearAgentActivity(name)
     mainWindow?.webContents.send('minipit:agent-exit', name)
     // Trigger a sandbox list refresh
     setTimeout(async () => {
@@ -727,6 +996,10 @@ function setupIPC(): void {
     template?: string
     kits?: string[]
   }) => {
+    // Ensure the target workspace folder exists — defaults like ~/den/<name>
+    // won't have been created yet (no-op for existing project/clone folders).
+    try { require('fs').mkdirSync(config.workspace, { recursive: true }) }
+    catch (err) { console.error('could not create workspace folder:', err) }
     const args = ['create']
     if (config.name) args.push('--name', config.name)
     if (config.memory) args.push('-m', config.memory)
@@ -794,6 +1067,8 @@ function setupIPC(): void {
   ipcMain.handle('minipit:remove-template', async (_, ref: string) => {
     await sbx(['template', 'rm', ref], { timeout: 30000 })
   })
+
+  ipcMain.handle('minipit:storage-usage', () => storageUsage())
 
   // ── Kits ───────────────────────────────────────────────────────────────
   // Kit artifacts authored under <userData>/kits/<name>/ (spec.yaml + files/).
@@ -1206,6 +1481,8 @@ function setupIPC(): void {
     }
   })
 
+  ipcMain.handle('minipit:policy-log', (_, name?: string) => fetchPolicyLog(name))
+
   ipcMain.handle('minipit:policy-allow', async (_, name: string, resources: string) => {
     try {
       const args = ['policy', 'allow', 'network']
@@ -1219,12 +1496,12 @@ function setupIPC(): void {
   })
 
   ipcMain.handle('minipit:default-workspace', () => {
-    // Shared default workspace folder for new sandboxes, created on first use.
-    const dir = join(app.getPath('home'), 'minipit')
+    // Base folder for new sandboxes; each one gets its own ~/den/<name> subfolder.
+    const dir = join(app.getPath('home'), 'den')
     try {
       require('fs').mkdirSync(dir, { recursive: true })
     } catch (err) {
-      console.error('could not create default workspace:', err)
+      console.error('could not create default workspace base:', err)
     }
     return dir
   })
@@ -1306,6 +1583,33 @@ function setupIPC(): void {
     sbxProcesses.get(name)?.write(data)
   })
 
+  // Copy a dropped file's bytes into the sandbox (under /tmp/den-dropped) and
+  // return its absolute in-sandbox path. The agent is a terminal TUI that takes
+  // a file path, not raw bytes, so the renderer types this path into the PTY.
+  ipcMain.handle('minipit:agent-drop-file', async (_, name: string, fileName: string, bytes: Uint8Array): Promise<string | null> => {
+    if (!sbxProcesses.get(name)) return null
+    if (!bytes?.byteLength || bytes.byteLength > 25 * 1024 * 1024) return null // cap at 25 MB
+    // Strip path components and shell-hostile chars; keep it short.
+    const safe = ((fileName.split(/[\\/]/).pop() || 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(-120)) || 'file'
+    return new Promise((resolve) => {
+      const proc = spawn(getSbxPath(), [
+        'exec', name, 'sh', '-c',
+        'd=/tmp/den-dropped; mkdir -p "$d" && cat > "$d/$1" && printf %s "$d/$1"',
+        'sh', safe
+      ])
+      let out = '', err = ''
+      proc.stdout.on('data', (d) => { out += d.toString() })
+      proc.stderr.on('data', (d) => { err += d.toString() })
+      proc.on('error', () => resolve(null))
+      proc.on('close', (code) => {
+        if (code === 0 && out.trim()) resolve(out.trim())
+        else { console.error('agent-drop-file failed:', err.trim() || `exit ${code}`); resolve(null) }
+      })
+      proc.stdin.write(Buffer.from(bytes))
+      proc.stdin.end()
+    })
+  })
+
   ipcMain.handle('minipit:agent-resize', (_, name: string, cols: number, rows: number) => {
     sbxProcesses.get(name)?.resize(cols, rows)
   })
@@ -1337,6 +1641,8 @@ function startPolling(): void {
       mainWindow?.webContents.send('minipit:sandboxes-updated', sandboxes)
       updateTrayMenu(sandboxes)
     } catch { /* silent */ }
+    // Canonical block detection: diff `sbx policy log` and push new denials.
+    try { for (const b of await fetchPolicyLog()) emitBlock(b) } catch { /* silent */ }
   }
   poll()
   pollTimer = setInterval(poll, 5000)
