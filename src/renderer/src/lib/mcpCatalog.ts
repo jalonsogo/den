@@ -1,5 +1,18 @@
 // Curated remote (hosted) MCP servers. Source: https://mcpservers.org/remote-mcp-servers
 // Each becomes a one-click mixin kit: allow the host + register via `claude mcp add`.
+
+// Bundle the server icons through Vite so they get hashed asset URLs that load
+// the same way the app's JS/CSS do (relative `./assets/…`). Referencing them as
+// loose public files (`mcp/<id>.png`) breaks under file:// inside the packaged
+// asar, leaving broken images.
+const ICON_URLS = import.meta.glob('../assets/mcp/*.png', {
+  eager: true, query: '?url', import: 'default'
+}) as Record<string, string>
+
+export function mcpIcon(id: string): string {
+  return ICON_URLS[`../assets/mcp/${id}.png`] ?? ''
+}
+
 export interface McpServer {
   id: string
   name: string

@@ -199,6 +199,9 @@ declare global {
       readKit(dir: string): Promise<string>
       updateKit(dir: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       removeKit(dir: string): Promise<void>
+      kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
+      dockerAccount(): Promise<{ loggedIn: boolean; username?: string }>
       listSecrets(): Promise<StoredSecret[]>
       setSecret(service: string, value: string): Promise<void>
       removeSecret(service: string): Promise<void>

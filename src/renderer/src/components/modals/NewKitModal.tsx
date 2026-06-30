@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, X, Paperclip, Info, Search, ChevronDown, Check } from 'lucide-react'
 import { useStore } from '../../store'
-import { MCP_CATALOG, mcpHost } from '../../lib/mcpCatalog'
+import { MCP_CATALOG, mcpHost, mcpIcon } from '../../lib/mcpCatalog'
 import { AgentIcon } from '../AgentIcon'
 import { AGENTS, type AgentType } from '../../types'
 
@@ -326,7 +326,7 @@ export function NewKitModal() {
                           onClick={() => toggleMcp(m.id)}
                           title={`${m.name} — ${m.description}`}
                         >
-                          <img src={`mcp/${m.id}.png`} alt="" />
+                          <img src={mcpIcon(m.id)} alt="" />
                           <span className="mcp-card-name">{m.name}</span>
                         </button>
                       ))}
@@ -417,7 +417,7 @@ export function NewKitModal() {
                     <span className="ks-k">Remote MCPs · {mcpServers.length + custom.length}</span>
                     <div className="ks-mcps">
                       {mcpServers.map((m) => (
-                        <span className="ks-mcp" key={m.id}><img src={`mcp/${m.id}.png`} alt="" />{m.name}</span>
+                        <span className="ks-mcp" key={m.id}><img src={mcpIcon(m.id)} alt="" />{m.name}</span>
                       ))}
                       {custom.map((c, i) => (
                         <span className="ks-mcp" key={`c${i}`}>{c.name.trim() || mcpHost(c.url.trim())}</span>

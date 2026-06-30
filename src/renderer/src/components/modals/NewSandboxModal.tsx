@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Check, Plus, RefreshCw, Search, Layers, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { randomName } from '../../lib/names'
@@ -223,67 +223,92 @@ export function NewSandboxModal() {
             <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
           </div>
 
-          {/* Mixin kits — stacked onto the agent at creation (--kit) */}
-          {availKits.length > 0 && (
-            <div className="fg">
-              <label className="flabel">Mixin kits <span className="flabel-hint">layered onto the agent</span></label>
+          {/* Mixin kits — stacked onto the agent at creation (--kit). Accepts
+              local kits and remote OCI references (pulled by sbx at creation). */}
+          <div className="fg">
+            <label className="flabel">Mixin kits <span className="flabel-hint">layered onto the agent</span></label>
 
-              {/* Selected kits as removable items */}
-              {selKits.length > 0 && (
-                <div className="kit-sel-list">
-                  {selKits.map((dir) => {
-                    const k = availKits.find((a) => a.dir === dir)
-                    return (
-                      <div key={dir} className="kit-sel-item">
-                        <Layers size={13} />
-                        <span className="kit-sel-name">{k?.name ?? dir}</span>
-                        <button className="kit-sel-rm" title="Remove" onClick={() => setSelKits((s) => s.filter((d) => d !== dir))}>
-                          <X size={13} />
-                        </button>
-                      </div>
-                    )
-                  })}
+            {/* Selected kits as removable items */}
+            {selKits.length > 0 && (
+              <div className="kit-sel-list">
+                {selKits.map((entry) => {
+                  const k = availKits.find((a) => a.dir === entry)
+                  const remote = !k && entry.includes('/')
+                  return (
+                    <div key={entry} className="kit-sel-item">
+                      {remote ? <DownloadCloud size={13} /> : <Layers size={13} />}
+                      <span className="kit-sel-name">{k?.name ?? entry}</span>
+                      {remote && <span className="kit-sel-tag">remote</span>}
+                      <button className="kit-sel-rm" title="Remove" onClick={() => setSelKits((s) => s.filter((d) => d !== entry))}>
+                        <X size={13} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Searchable dropdown to add a local kit or paste an OCI reference */}
+            <div className="kit-dd" ref={kitDdRef}>
+              <button type="button" className="kit-dd-trigger" onClick={() => setKitDdOpen((v) => !v)}>
+                <Plus size={13} /> Add a mixin kit
+                <ChevronDown size={13} style={{ marginLeft: 'auto', color: 'var(--t3)' }} />
+              </button>
+              {kitDdOpen && (
+                <div className="kit-dd-menu">
+                  <div className="kit-dd-search">
+                    <Search size={13} className="kit-dd-search-ic" />
+                    <input
+                      autoFocus
+                      value={kitQuery}
+                      placeholder="Search local kits or paste an OCI reference…"
+                      onChange={(e) => setKitQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        const q = kitQuery.trim()
+                        if (e.key === 'Enter' && q.includes('/') && !selKits.includes(q)) {
+                          setSelKits((s) => [...s, q]); setKitQuery(''); setKitDdOpen(false)
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="kit-dd-options">
+                    {(() => {
+                      const raw = kitQuery.trim()
+                      const q = raw.toLowerCase()
+                      const opts = availKits.filter((k) => !selKits.includes(k.dir) && (!q || k.name.toLowerCase().includes(q)))
+                      const isRef = raw.includes('/') && !selKits.includes(raw)
+                      return (
+                        <>
+                          {isRef && (
+                            <button
+                              className="kit-dd-opt kit-dd-ref"
+                              onClick={() => { setSelKits((s) => [...s, raw]); setKitQuery(''); setKitDdOpen(false) }}
+                            >
+                              <DownloadCloud size={13} /> Add remote kit: <span className="kit-dd-ref-v">{raw}</span>
+                            </button>
+                          )}
+                          {opts.map((k) => (
+                            <button
+                              key={k.dir}
+                              className="kit-dd-opt"
+                              onClick={() => { setSelKits((s) => [...s, k.dir]); setKitQuery(''); setKitDdOpen(false) }}
+                            >
+                              <Layers size={13} /> {k.name}
+                            </button>
+                          ))}
+                          {!isRef && opts.length === 0 && (
+                            <div className="kit-dd-empty">
+                              {raw ? 'No local match — paste a full OCI reference to add a remote kit' : 'No local kits — paste an OCI reference to add a remote kit'}
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
                 </div>
               )}
-
-              {/* Searchable dropdown to add a kit */}
-              <div className="kit-dd" ref={kitDdRef}>
-                <button type="button" className="kit-dd-trigger" onClick={() => setKitDdOpen((v) => !v)}>
-                  <Plus size={13} /> Add a mixin kit
-                  <ChevronDown size={13} style={{ marginLeft: 'auto', color: 'var(--t3)' }} />
-                </button>
-                {kitDdOpen && (
-                  <div className="kit-dd-menu">
-                    <div className="kit-dd-search">
-                      <Search size={13} className="kit-dd-search-ic" />
-                      <input
-                        autoFocus
-                        value={kitQuery}
-                        placeholder="Search kits…"
-                        onChange={(e) => setKitQuery(e.target.value)}
-                      />
-                    </div>
-                    <div className="kit-dd-options">
-                      {(() => {
-                        const q = kitQuery.trim().toLowerCase()
-                        const opts = availKits.filter((k) => !selKits.includes(k.dir) && (!q || k.name.toLowerCase().includes(q)))
-                        if (opts.length === 0) return <div className="kit-dd-empty">{availKits.every((k) => selKits.includes(k.dir)) ? 'All kits added' : 'No matches'}</div>
-                        return opts.map((k) => (
-                          <button
-                            key={k.dir}
-                            className="kit-dd-opt"
-                            onClick={() => { setSelKits((s) => [...s, k.dir]); setKitQuery(''); setKitDdOpen(false) }}
-                          >
-                            <Layers size={13} /> {k.name}
-                          </button>
-                        ))
-                      })()}
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
-          )}
+          </div>
 
           {/* Advanced — collapsible */}
           <div className="adv">

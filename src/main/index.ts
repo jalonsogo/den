@@ -905,6 +905,88 @@ function setupIPC(): void {
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch (err) { console.error(err) }
   })
 
+  // The logged-in Docker Hub account, read from the Docker credential helper
+  // (config.json `credsStore` → `docker-credential-<store> list`). Used to
+  // prefill the push reference with the user's namespace.
+  ipcMain.handle('minipit:docker-account', async () => {
+    try {
+      const fs = require('fs')
+      const cfg = JSON.parse(fs.readFileSync(join(app.getPath('home'), '.docker/config.json'), 'utf8'))
+      const store = cfg.credsStore || cfg.credStore
+      if (!store) return { loggedIn: false }
+      const out = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(`docker-credential-${store}`, ['list'], {
+          env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` }
+        })
+        let buf = ''
+        proc.stdout?.on('data', (d) => { buf += d.toString() })
+        proc.on('error', reject)
+        proc.on('close', () => resolve(buf))
+      })
+      const map = JSON.parse(out || '{}') as Record<string, string>
+      const username = map['https://index.docker.io/v1/'] || Object.values(map)[0]
+      return username ? { loggedIn: true, username } : { loggedIn: false }
+    } catch {
+      return { loggedIn: false }
+    }
+  })
+
+  // Publish a kit as an OCI artifact to a registry (Docker Hub, ghcr, …).
+  // Auth uses the Docker credential store (the user must `docker login` first).
+  ipcMain.handle('minipit:kit-push', async (_, dir: string, ref: string) => {
+    try {
+      const output = await sbx(['kit', 'push', dir, ref], { timeout: 180000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Import a remote kit by OCI reference: pull the artifact, then extract it
+  // into the local kit library so it shows up like any locally-authored kit.
+  ipcMain.handle('minipit:kit-import', async (_, ref: string) => {
+    const fs = require('fs')
+    const r = ref.trim()
+    if (!r) return { ok: false, error: 'Reference is required.' }
+    // Derive a kit name from the reference (last path segment, sans tag/digest).
+    const last = r.split('@')[0].split('/').pop() ?? r
+    const name = (last.split(':')[0] || 'kit').replace(/[^A-Za-z0-9._-]/g, '-')
+    const root = kitsRoot()
+    const zip = join(root, `${name}.zip`)
+    const dir = join(root, name)
+    const run = (bin: string, args: string[]) => new Promise<number>((resolve, reject) => {
+      const p = spawn(bin, args, { env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` } })
+      let err = ''
+      p.stderr?.on('data', (d) => { err += d.toString() })
+      p.on('error', reject)
+      p.on('close', (code) => (code === 0 ? resolve(0) : reject(new Error(err.trim() || `${bin} exited ${code}`))))
+    })
+    try {
+      await sbx(['kit', 'pull', r, '-o', zip], { timeout: 120000 })
+      fs.rmSync(dir, { recursive: true, force: true })
+      fs.mkdirSync(dir, { recursive: true })
+      // schemaVersion 1 → zip; schemaVersion 2 → tar.gz. Try zip, fall back to tar.
+      try { await run('unzip', ['-o', zip, '-d', dir]) }
+      catch { await run('tar', ['xzf', zip, '-C', dir]) }
+      // Some artifacts wrap contents in a single top-level folder — flatten it.
+      if (!fs.existsSync(join(dir, 'spec.yaml'))) {
+        const entries = fs.readdirSync(dir)
+        if (entries.length === 1 && fs.statSync(join(dir, entries[0])).isDirectory()) {
+          const inner = join(dir, entries[0])
+          for (const f of fs.readdirSync(inner)) fs.renameSync(join(inner, f), join(dir, f))
+          fs.rmdirSync(inner)
+        }
+      }
+      if (!fs.existsSync(join(dir, 'spec.yaml'))) {
+        fs.rmSync(dir, { recursive: true, force: true })
+        return { ok: false, error: 'Pulled artifact has no spec.yaml — not a valid kit.' }
+      }
+      return { ok: true, name }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   ipcMain.handle('minipit:git-status', (_, name: string, workspace: string) => gitStatus(name, workspace))
 
   // Read a file's contents (untrimmed, up to 10 MB) via `sbx exec cat`.
