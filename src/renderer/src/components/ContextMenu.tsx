@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { TERM_THEMES, TERM_THEME_GROUPS } from '../lib/termThemes'
+import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 
 export function ContextMenu() {
   const { contextMenu, setContextMenu, sandboxes, updateSandbox, setDeleting, setSandboxes } = useStore()
@@ -92,9 +92,12 @@ export function ContextMenu() {
           value={termTheme}
           onChange={(e) => setTermTheme(e.target.value)}
         >
+          {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
+            <option key={t.id} value={t.id}>{t.label}</option>
+          ))}
           {TERM_THEME_GROUPS.map((g) => (
             <optgroup key={g.mode} label={g.label}>
-              {TERM_THEMES.filter((t) => t.mode === g.mode).map((t) => (
+              {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => (
                 <option key={t.id} value={t.id}>{t.label}</option>
               ))}
             </optgroup>

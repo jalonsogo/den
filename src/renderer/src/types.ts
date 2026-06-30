@@ -191,9 +191,13 @@ declare global {
       generatePalette(hex: string, size?: number): Promise<string[]>
       listTemplates(): Promise<Template[]>
       removeTemplate(ref: string): Promise<void>
-      createKit(name: string, spec: string): Promise<{ dir: string; zip: string; output: string }>
+      createKit(name: string, spec: string, files?: string[]): Promise<{ dir: string; zip: string; output: string }>
+      pickFiles(): Promise<string[]>
       listKits(): Promise<{ name: string; kind: string; dir: string; hasZip: boolean }[]>
       kitAdd(sandbox: string, dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      appliedKits(sandbox: string): Promise<string[]>
+      readKit(dir: string): Promise<string>
+      updateKit(dir: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       removeKit(dir: string): Promise<void>
       listSecrets(): Promise<StoredSecret[]>
       setSecret(service: string, value: string): Promise<void>
@@ -205,6 +209,7 @@ declare global {
       listLogs(): Promise<{ name: string; path: string }[]>
       startLogTail(path: string): Promise<void>
       stopLogTail(): Promise<void>
+      sandboxKitLog(name: string): Promise<{ ok: boolean; text: string; error?: string }>
       onLogTail(cb: (chunk: string) => void): () => void
       getSettings(): Promise<AppSettings>
       saveSettings(settings: Partial<AppSettings>): Promise<void>
@@ -213,6 +218,7 @@ declare global {
       sbxInstallInfo(): Promise<SbxInstallInfo>
       sbxUpdate(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
       onRuntimeOutput(cb: (chunk: string) => void): () => void
+      onCreateOutput(cb: (chunk: string) => void): () => void
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>

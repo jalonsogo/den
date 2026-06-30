@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelRight, Info } from 'lucide-react'
+import { PanelRight, Info, Play } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -93,19 +93,30 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
   )
 }
 
+// Placeholder with an inline Start button (so you don't reach for the header).
+function StoppedView({ theme, label, status, onStart }: { theme: ITheme; label: string; status: string; onStart?: () => void }) {
+  const busy = status !== 'stopped'
+  return (
+    <div style={{
+      flex: 1, background: theme.background, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 16
+    }}>
+      <span style={{ color: theme.foreground, opacity: 0.4, fontSize: 12 }}>{label}</span>
+      {onStart && (
+        <button className="btn btn-primary btn-sm" onClick={onStart} disabled={busy}>
+          <Play size={11} fill="currentColor" strokeWidth={0} />
+          {status === 'starting' ? 'Starting…' : 'Start sandbox'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Agent tab ─────────────────────────────────────────────────────────────
 
-function AgentTerminal({ sandbox, visible, theme }: { sandbox: Sandbox; visible: boolean; theme: ITheme }) {
+function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void }) {
   if (sandbox.status !== 'running') {
-    return (
-      <div style={{
-        flex: 1, background: theme.background, display: 'flex',
-        alignItems: 'center', justifyContent: 'center',
-        color: theme.foreground, opacity: 0.4, fontSize: 12
-      }}>
-        Start the sandbox to launch the agent.
-      </div>
-    )
+    return <StoppedView theme={theme} label="Start the sandbox to launch the agent." status={sandbox.status} onStart={onStart} />
   }
   return (
     <XTerm
@@ -122,17 +133,9 @@ function AgentTerminal({ sandbox, visible, theme }: { sandbox: Sandbox; visible:
 
 // ── Shell tab ─────────────────────────────────────────────────────────────
 
-function ShellTerminal({ sandbox, visible, theme }: { sandbox: Sandbox; visible: boolean; theme: ITheme }) {
+function ShellTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void }) {
   if (sandbox.status !== 'running') {
-    return (
-      <div style={{
-        flex: 1, background: theme.background, display: 'flex',
-        alignItems: 'center', justifyContent: 'center',
-        color: theme.foreground, opacity: 0.4, fontSize: 12
-      }}>
-        Start the sandbox to open a shell.
-      </div>
-    )
+    return <StoppedView theme={theme} label="Start the sandbox to open a shell." status={sandbox.status} onStart={onStart} />
   }
   return (
     <XTerm
@@ -150,15 +153,17 @@ function ShellTerminal({ sandbox, visible, theme }: { sandbox: Sandbox; visible:
 
 // ── Panel ─────────────────────────────────────────────────────────────────
 
-export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo }: {
+export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStart }: {
   sandbox: Sandbox
   dock?: 'files' | 'info' | null
   onToggleFiles?: () => void
   onShowInfo?: () => void
+  onStart?: () => void
 }) {
   const [segment, setSegment] = useState<'agent' | 'shell'>('agent')
   const termThemeId = useStore((s) => s.termTheme)
-  const theme = resolveTermTheme(termThemeId).theme
+  const appTheme = useStore((s) => s.theme)
+  const theme = resolveTermTheme(termThemeId, appTheme).theme
   const bg = theme.background ?? '#0a0a0a'
 
   return (
@@ -210,7 +215,7 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo }: {
         position: segment === 'agent' ? 'relative' : 'absolute',
         inset: segment === 'agent' ? undefined : 0
       }}>
-        <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} />
+        <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} onStart={onStart} />
       </div>
 
       <div style={{
@@ -221,7 +226,7 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo }: {
         position: segment === 'shell' ? 'relative' : 'absolute',
         inset: segment === 'shell' ? undefined : 0
       }}>
-        <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} />
+        <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} />
       </div>
     </div>
   )

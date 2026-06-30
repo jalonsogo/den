@@ -4,35 +4,42 @@ import { useStore } from '../store'
 import { termTheme as resolveTermTheme } from '../lib/termThemes'
 
 const CAP = 200_000 // keep the last ~200 KB of log text
+const KIT_PREFIX = 'kit:' // sentinel for in-sandbox kit/startup log sources
 
 export function LogsPanel() {
   const [logs, setLogs] = useState<{ name: string; path: string }[]>([])
-  const [path, setPath] = useState('')
+  const [source, setSource] = useState('') // a host file path, or `kit:<sandbox>`
   const [text, setText] = useState('')
   const [follow, setFollow] = useState(true)
   const [query, setQuery] = useState('')
   const bodyRef = useRef<HTMLDivElement>(null)
 
+  const sandboxes = useStore((s) => s.sandboxes)
+  const running = sandboxes.filter((s) => s.status === 'running')
+  const isKit = source.startsWith(KIT_PREFIX)
+  const kitName = isKit ? source.slice(KIT_PREFIX.length) : ''
+
   // Match the Logs viewer to the terminal theme picked in settings.
   const termThemeId = useStore((s) => s.termTheme)
-  const theme = resolveTermTheme(termThemeId).theme
+  const appTheme = useStore((s) => s.theme)
+  const theme = resolveTermTheme(termThemeId, appTheme).theme
   const bg = theme.background ?? '#0a0a0a'
   const fg = theme.foreground ?? '#d4d4d4'
 
-  // Discover available log files.
+  // Discover available host log files.
   useEffect(() => {
     window.minipit?.listLogs().then((l) => {
       setLogs(l ?? [])
       if (l && l.length) {
         const preferred = l.find((x) => x.name === 'daemon.log') ?? l[0]
-        setPath((p) => p || preferred.path)
+        setSource((p) => p || preferred.path)
       }
     }).catch(() => {})
   }, [])
 
-  // Tail the selected log.
+  // Host file source: tail it live.
   useEffect(() => {
-    if (!path) return
+    if (!source || isKit) return
     setText('')
     const unsub = window.minipit?.onLogTail((chunk) => {
       setText((t) => {
@@ -40,12 +47,28 @@ export function LogsPanel() {
         return next.length > CAP ? next.slice(-CAP) : next
       })
     })
-    window.minipit?.startLogTail(path)
+    window.minipit?.startLogTail(source)
     return () => {
       unsub?.()
       window.minipit?.stopLogTail()
     }
-  }, [path])
+  }, [source, isKit])
+
+  // Kit/startup log source: in-sandbox, so fetch on demand and poll while following.
+  useEffect(() => {
+    if (!isKit || !kitName) return
+    let alive = true
+    const fetchOnce = () =>
+      window.minipit?.sandboxKitLog(kitName).then((r) => {
+        if (!alive) return
+        setText(r?.ok ? (r.text || '(kit startup log is empty — no startup commands have run yet)')
+          : `Couldn’t read kit startup log${r?.error ? `: ${r.error}` : '.'}`)
+      }).catch(() => {})
+    setText('Reading kit startup log…')
+    fetchOnce()
+    const id = follow ? setInterval(fetchOnce, 3000) : null
+    return () => { alive = false; if (id) clearInterval(id) }
+  }, [isKit, kitName, follow])
 
   // Filter lines by the search query (case-insensitive substring).
   const q = query.trim().toLowerCase()
@@ -62,9 +85,18 @@ export function LogsPanel() {
   return (
     <div className="logs">
       <div className="logs-bar">
-        <select className="finput" style={{ width: 200, cursor: 'pointer' }} value={path} onChange={(e) => setPath(e.target.value)}>
-          {logs.length === 0 && <option value="">No logs found</option>}
-          {logs.map((l) => <option key={l.path} value={l.path}>{l.name}</option>)}
+        <select className="finput" style={{ width: 220, cursor: 'pointer' }} value={source} onChange={(e) => setSource(e.target.value)}>
+          {logs.length === 0 && running.length === 0 && <option value="">No logs found</option>}
+          {logs.length > 0 && (
+            <optgroup label="Daemon logs">
+              {logs.map((l) => <option key={l.path} value={l.path}>{l.name}</option>)}
+            </optgroup>
+          )}
+          {running.length > 0 && (
+            <optgroup label="Sandbox · kit startup">
+              {running.map((s) => <option key={s.name} value={`${KIT_PREFIX}${s.name}`}>{s.name} · kit log</option>)}
+            </optgroup>
+          )}
         </select>
         <div className="logs-search">
           <Search size={13} className="logs-search-ic" />
@@ -79,11 +111,13 @@ export function LogsPanel() {
         </div>
         <label className="logs-follow">
           <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          Follow
+          {isKit ? 'Auto-refresh' : 'Follow'}
         </label>
         <div style={{ flex: 1 }} />
         <button className="btn btn-ghost btn-sm" onClick={() => setText('')}>Clear</button>
-        <button className="btn btn-ghost btn-sm" onClick={() => path && window.minipit?.openInFinder(path)}>Reveal</button>
+        {!isKit && (
+          <button className="btn btn-ghost btn-sm" onClick={() => source && window.minipit?.openInFinder(source)}>Reveal</button>
+        )}
       </div>
       <div className="logs-body" ref={bodyRef} onWheel={() => setFollow(false)} style={{ background: bg }}>
         {shown

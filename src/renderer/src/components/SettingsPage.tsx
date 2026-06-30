@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { ACCENTS } from '../lib/accent'
-import { TERM_THEMES, TERM_THEME_GROUPS } from '../lib/termThemes'
+import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
 import { LogsPanel } from './LogsPanel'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
@@ -100,10 +100,11 @@ export function SettingsPage() {
               <div className="ss-lbl">Terminal theme</div>
               <div className="ss-sub">Colors for the agent & shell terminals.</div>
             </div>
-            <select className="s-input" style={{ width: 160, cursor: 'pointer' }} value={termTheme} onChange={(e) => setTermTheme(e.target.value)}>
+            <select className="s-input" style={{ width: 200, cursor: 'pointer' }} value={termTheme} onChange={(e) => setTermTheme(e.target.value)}>
+              {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               {TERM_THEME_GROUPS.map((g) => (
                 <optgroup key={g.mode} label={g.label}>
-                  {TERM_THEMES.filter((t) => t.mode === g.mode).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                 </optgroup>
               ))}
             </select>

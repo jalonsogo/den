@@ -19,9 +19,13 @@ const api = {
   generatePalette: (hex: string, size?: number) => ipcRenderer.invoke('minipit:generate-palette', hex, size),
   listTemplates: ()                     => ipcRenderer.invoke('minipit:list-templates'),
   removeTemplate:(ref: string)          => ipcRenderer.invoke('minipit:remove-template', ref),
-  createKit:     (name: string, spec: string) => ipcRenderer.invoke('minipit:create-kit', name, spec),
+  createKit:     (name: string, spec: string, files?: string[]) => ipcRenderer.invoke('minipit:create-kit', name, spec, files),
+  pickFiles:     ()                     => ipcRenderer.invoke('minipit:pick-files'),
   listKits:      ()                     => ipcRenderer.invoke('minipit:list-kits'),
   kitAdd:        (sandbox: string, dir: string) => ipcRenderer.invoke('minipit:kit-add', sandbox, dir),
+  appliedKits:   (sandbox: string)      => ipcRenderer.invoke('minipit:applied-kits', sandbox),
+  readKit:       (dir: string)          => ipcRenderer.invoke('minipit:read-kit', dir),
+  updateKit:     (dir: string, spec: string) => ipcRenderer.invoke('minipit:update-kit', dir, spec),
   removeKit:     (dir: string)          => ipcRenderer.invoke('minipit:remove-kit', dir),
   listSecrets:   ()                     => ipcRenderer.invoke('minipit:list-secrets'),
   setSecret:     (service: string, value: string) => ipcRenderer.invoke('minipit:set-secret', service, value),
@@ -33,6 +37,7 @@ const api = {
   listLogs:      ()                     => ipcRenderer.invoke('minipit:list-logs'),
   startLogTail:  (path: string)         => ipcRenderer.invoke('minipit:start-log-tail', path),
   stopLogTail:   ()                     => ipcRenderer.invoke('minipit:stop-log-tail'),
+  sandboxKitLog: (name: string)         => ipcRenderer.invoke('minipit:sandbox-kit-log', name),
   onLogTail: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:log-tail', handler)
@@ -50,6 +55,11 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:runtime-output', handler)
     return () => ipcRenderer.removeListener('minipit:runtime-output', handler)
+  },
+  onCreateOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:create-output', handler)
+    return () => ipcRenderer.removeListener('minipit:create-output', handler)
   },
   showOpenDialog:()                     => ipcRenderer.invoke('minipit:show-open-dialog'),
   listProjects:  ()                     => ipcRenderer.invoke('minipit:list-projects'),
