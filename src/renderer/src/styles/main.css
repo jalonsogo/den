@@ -2473,6 +2473,21 @@ html, body, #root {
 .ctx-kbd { font-size: 11.5px; color: var(--t3); }
 .ctx-sep { height: 1px; background: var(--border); margin: 3px 0; }
 
+/* Inline tag entry for "Save Snapshot…" (Electron has no window.prompt). */
+.ctx-snap { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
+.ctx-snap-input {
+  flex: 1; min-width: 0; font-family: inherit; font-size: 12.5px;
+  padding: 4px 8px; border-radius: 5px; border: 1px solid var(--border);
+  background: var(--bg-subtle); color: var(--t1);
+}
+.ctx-snap-input:focus { outline: none; border-color: var(--border-hi); }
+.ctx-snap-go {
+  font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
+  padding: 4px 10px; border-radius: 5px; border: none;
+  background: var(--primary); color: var(--prim-fg, white);
+}
+.ctx-snap-go:disabled { opacity: 0.5; cursor: default; }
+
 /* Terminal theme submenu (flyout) inside the options menu */
 .ctx-has-sub { position: relative; }
 .ctx-sub-arrow { color: var(--t3); font-size: 15px; line-height: 1; }
