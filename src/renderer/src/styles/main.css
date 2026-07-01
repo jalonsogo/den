@@ -2781,7 +2781,9 @@ html, body, #root {
   padding: 6px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; font-size: 13px;
 }
 .ctx-sub-item:hover { background: var(--bg-subtle); }
+.ctx-sub-item .ctx-kbd { margin-left: auto; padding-left: 16px; }
 .ctx-sub-check { width: 12px; color: var(--accent, var(--primary)); flex-shrink: 0; }
+.ctx-sub-sep { height: 1px; background: var(--border); margin: 3px 6px; }
 
 /* ── Animations ── */
 @keyframes pulse {

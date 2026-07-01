@@ -1,6 +1,43 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useStore, projectDisplayName } from '../store'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
+
+// A hover-triggered flyout item for a context menu. Defaults to opening
+// rightward and flips left (nudging up) when it would overflow the viewport.
+function SubMenu({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const subRef = useRef<HTMLDivElement>(null)
+  const [flip, setFlip] = useState(false)
+  const [top, setTop] = useState<number | undefined>(undefined)
+  useLayoutEffect(() => {
+    if (!open) { setFlip(false); setTop(undefined); return }
+    if (!subRef.current) return
+    const M = 8
+    const r = subRef.current.getBoundingClientRect()
+    setFlip(r.right > window.innerWidth - M)
+    setTop(r.bottom > window.innerHeight - M ? -5 + (window.innerHeight - M - r.bottom) : undefined)
+  }, [open])
+  return (
+    <div
+      className="ctx-item ctx-has-sub"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      {label}
+      <span className="ctx-sub-arrow">›</span>
+      {open && (
+        <div
+          ref={subRef}
+          className={`ctx-submenu${flip ? ' flip-left' : ''}`}
+          style={top !== undefined ? { top } : undefined}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function ContextMenu() {
   const { contextMenu, setContextMenu, sandboxes, updateSandbox, setDeleting, setSandboxes } = useStore()
@@ -18,13 +55,7 @@ export function ContextMenu() {
   const gitInfoMap = useStore((s) => s.gitInfo)
   const loadGitInfo = useStore((s) => s.loadGitInfo)
   const ref = useRef<HTMLDivElement>(null)
-  const subRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
-  const [themeOpen, setThemeOpen] = useState(false)
-  // The theme flyout defaults to opening rightward; flip it left (and nudge it
-  // up) when that would overflow the viewport near the window edge.
-  const [subFlip, setSubFlip] = useState(false)
-  const [subTop, setSubTop] = useState<number | undefined>(undefined)
 
   const sandbox = sandboxes.find((s) => s.id === contextMenu.sandboxId)
 
@@ -47,16 +78,6 @@ export function ContextMenu() {
     const top = Math.max(M, Math.min(contextMenu.y, window.innerHeight - r.height - M))
     setPos({ top, left })
   }, [contextMenu.x, contextMenu.y, contextMenu.visible])
-
-  // Decide the flyout side/offset once it's rendered, based on real geometry.
-  useLayoutEffect(() => {
-    if (!themeOpen) { setSubFlip(false); setSubTop(undefined); return }
-    if (!subRef.current) return
-    const M = 8
-    const r = subRef.current.getBoundingClientRect()
-    setSubFlip(r.right > window.innerWidth - M)
-    setSubTop(r.bottom > window.innerHeight - M ? -5 + (window.innerHeight - M - r.bottom) : undefined)
-  }, [themeOpen])
 
   if (!contextMenu.visible) return null
 
@@ -129,26 +150,32 @@ export function ContextMenu() {
         <div className="ctx-item" onClick={openProject}>Open project</div>
         <div className="ctx-item" onClick={newSandbox}>New sandbox…</div>
         <div className="ctx-sep" />
-        <div className="ctx-item" onClick={rename}>Rename…</div>
-        <div className="ctx-item" onClick={customize}>Customize…</div>
-        <div className="ctx-item" onClick={reveal}>Reveal in Finder <span className="ctx-kbd">⇧⌘F</span></div>
-        <div className="ctx-item" onClick={copyPath}>Copy path</div>
-        <div className="ctx-sep" />
+        <SubMenu label="Manage">
+          <div className="ctx-sub-item" onClick={rename}>Rename…</div>
+          <div className="ctx-sub-item" onClick={customize}>Customize…</div>
+          <div className="ctx-sub-sep" />
+          <div className="ctx-sub-item" onClick={reveal}>Reveal in Finder <span className="ctx-kbd">⇧⌘F</span></div>
+          <div className="ctx-sub-item" onClick={copyPath}>Copy path</div>
+        </SubMenu>
         {git?.isRepo ? (
-          <>
-            {git.remoteUrl && <div className="ctx-item" onClick={openRemote}>Open remote…</div>}
-            {git.remote && <div className="ctx-item" onClick={copyRemote}>Copy remote URL</div>}
-            {!git.remote && <div className="ctx-item" style={{ color: 'var(--t3)', pointerEvents: 'none' }}>Git repo · {git.branch || 'detached'}</div>}
-          </>
+          <SubMenu label="Git">
+            <div className="ctx-sub-label">On branch {git.branch || 'detached'}</div>
+            {git.remoteUrl && <div className="ctx-sub-item" onClick={openRemote}>Open remote…</div>}
+            {git.remote && <div className="ctx-sub-item" onClick={copyRemote}>Copy remote URL</div>}
+            {!git.remote && <div className="ctx-sub-item" style={{ color: 'var(--t3)', pointerEvents: 'none' }}>No remote</div>}
+          </SubMenu>
         ) : (
           <div className="ctx-item" onClick={initGit}>Initialize Git repository</div>
         )}
-        {(running.length > 0 || stopped.length > 0) && <div className="ctx-sep" />}
-        {running.length > 0 && (
-          <div className="ctx-item" onClick={stopAll}>Stop {running.length} sandbox{running.length > 1 ? 'es' : ''}</div>
-        )}
-        {stopped.length > 0 && (
-          <div className="ctx-item" onClick={startAll}>Start {stopped.length} sandbox{stopped.length > 1 ? 'es' : ''}</div>
+        {(running.length > 0 || stopped.length > 0) && (
+          <SubMenu label="Sandboxes">
+            {running.length > 0 && (
+              <div className="ctx-sub-item" onClick={stopAll}>Stop {running.length} sandbox{running.length > 1 ? 'es' : ''}</div>
+            )}
+            {stopped.length > 0 && (
+              <div className="ctx-sub-item" onClick={startAll}>Start {stopped.length} sandbox{stopped.length > 1 ? 'es' : ''}</div>
+            )}
+          </SubMenu>
         )}
         <div className="ctx-sep" />
         <div className="ctx-item destructive" onClick={remove}>Remove project…</div>
@@ -254,37 +281,23 @@ export function ContextMenu() {
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
       <div className="ctx-item" onClick={handleRestart}>Restart</div>
       <div className="ctx-sep" />
-      <div
-        className="ctx-item ctx-has-sub"
-        onMouseEnter={() => setThemeOpen(true)}
-        onMouseLeave={() => setThemeOpen(false)}
-      >
-        Terminal theme
-        <span className="ctx-sub-arrow">›</span>
-        {themeOpen && (
-          <div
-            ref={subRef}
-            className={`ctx-submenu${subFlip ? ' flip-left' : ''}`}
-            style={subTop !== undefined ? { top: subTop } : undefined}
-          >
-            {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
+      <SubMenu label="Terminal theme">
+        {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
+          <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
+            <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
+          </div>
+        ))}
+        {TERM_THEME_GROUPS.map((g) => (
+          <div key={g.mode}>
+            <div className="ctx-sub-label">{g.label}</div>
+            {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => (
               <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
                 <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
               </div>
             ))}
-            {TERM_THEME_GROUPS.map((g) => (
-              <div key={g.mode}>
-                <div className="ctx-sub-label">{g.label}</div>
-                {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => (
-                  <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
-                    <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
-                  </div>
-                ))}
-              </div>
-            ))}
           </div>
-        )}
-      </div>
+        ))}
+      </SubMenu>
       <div className="ctx-sep" />
       <div className="ctx-item destructive" onClick={handleDelete}>
         Delete Sandbox…
