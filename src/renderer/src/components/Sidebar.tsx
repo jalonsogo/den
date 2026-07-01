@@ -182,7 +182,7 @@ export function Sidebar() {
     () => (localStorage.getItem('minipit:sbxGroupBy') as 'none' | 'project' | 'agent') ?? 'none'
   )
   // Fixed-position coords for the dropdown so it escapes the sidebar's overflow.
-  const [filterPos, setFilterPos] = useState<{ top: number; right: number } | null>(null)
+  const [filterPos, setFilterPos] = useState<{ top: number; left: number } | null>(null)
   const filterRef = useRef<HTMLDivElement>(null)
   const [libOpen, setLibOpen] = useState(() => localStorage.getItem('minipit:libraryOpen') === '1')
 
@@ -299,7 +299,10 @@ export function Sidebar() {
                   onClick={(e) => {
                     if (filterOpen) { setFilterOpen(false); return }
                     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    setFilterPos({ top: r.bottom + 5, right: window.innerWidth - r.right })
+                    const W = 208
+                    // Right-align to the icon, but clamp so it never runs off either edge.
+                    const left = Math.max(8, Math.min(r.right - W, window.innerWidth - W - 8))
+                    setFilterPos({ top: r.bottom + 5, left })
                     setFilterOpen(true)
                   }}
                   title="Filter & group sandboxes"
@@ -307,7 +310,7 @@ export function Sidebar() {
                   <Filter size={15} />
                 </button>
                 {filterOpen && filterPos && (
-                  <div className="sb-filter-pop" style={{ top: filterPos.top, right: filterPos.right }}>
+                  <div className="sb-filter-pop" style={{ top: filterPos.top, left: filterPos.left }}>
                     <div className="sb-filter-row">
                       <Search size={13} className="sb-filter-row-ic" />
                       <input
