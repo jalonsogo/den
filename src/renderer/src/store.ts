@@ -29,6 +29,11 @@ interface AppState {
   contextMenu: ContextMenuState
   files: Record<string, FileEntry[]>
   deletingIds: string[]
+  // Sandboxes the user just stopped, id → timestamp. `sbx stop` can return
+  // before the runtime finishes transitioning, so a poll may still report the
+  // sandbox as running; we hold it "stopped" for a short grace window so it
+  // doesn't flicker back on (see setSandboxes).
+  stopHolds: Record<string, number>
   secretTarget: SecretService | null
   newSandboxWorkspace: string | null
   newSandboxTemplate: string | null
@@ -128,6 +133,7 @@ export const useStore = create<AppState>((set) => ({
   contextMenu: { visible: false, x: 0, y: 0, sandboxId: null, workspace: null },
   files: {},
   deletingIds: [],
+  stopHolds: {},
   secretTarget: null,
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
@@ -346,11 +352,26 @@ export const useStore = create<AppState>((set) => ({
       const presentIds = new Set(incoming.map((s) => s.id))
       const deletingIds = state.deletingIds.filter((id) => presentIds.has(id))
 
-      const sandboxes = incoming.map((s) => ({
-        ...s,
-        logs: logsById[s.id] ?? [],
-        status: deletingIds.includes(s.id) ? ('deleting' as const) : s.status
-      }))
+      // Hold a just-stopped sandbox as "stopped" for a short grace window: `sbx
+      // stop` can return before the runtime settles, so an in-flight poll may
+      // still list it as running and flip it back on. Release the hold as soon
+      // as a poll agrees it's down, or once the window lapses (so an external
+      // restart still surfaces).
+      const STOP_GRACE_MS = 15000
+      const now = Date.now()
+      const stopHolds = { ...state.stopHolds }
+
+      const sandboxes = incoming.map((s) => {
+        let status = deletingIds.includes(s.id) ? ('deleting' as const) : s.status
+        const heldAt = stopHolds[s.id]
+        if (heldAt !== undefined) {
+          if (s.status !== 'running') delete stopHolds[s.id]            // confirmed down
+          else if (now - heldAt < STOP_GRACE_MS) status = 'stopped'     // stale running → keep stopped
+          else delete stopHolds[s.id]                                   // grace lapsed → trust poll
+        }
+        return { ...s, logs: logsById[s.id] ?? [], status }
+      })
+      for (const id of Object.keys(stopHolds)) if (!presentIds.has(id)) delete stopHolds[id]
 
       // Keep optimistic "creating" placeholders visible across polls until the
       // real sandbox (same name) shows up in the incoming list.
@@ -373,7 +394,7 @@ export const useStore = create<AppState>((set) => ({
         Object.entries(state.agentActivity).filter(([name]) => runningNames.has(name))
       )
 
-      return { sandboxes: merged, activeSandboxId, deletingIds, agentActivity }
+      return { sandboxes: merged, activeSandboxId, deletingIds, agentActivity, stopHolds }
     }),
 
   addCreatingSandbox: (sandbox) =>
@@ -416,7 +437,16 @@ export const useStore = create<AppState>((set) => ({
           delete agentActivity[sb.name]
         }
       }
-      return { sandboxes, agentActivity }
+      // Track a user-initiated stop so a stale poll can't flip it back to
+      // running; a start/run clears the hold immediately.
+      let stopHolds = state.stopHolds
+      if (updates.status === 'stopping' || updates.status === 'stopped') {
+        stopHolds = { ...stopHolds, [id]: Date.now() }
+      } else if ((updates.status === 'running' || updates.status === 'starting') && stopHolds[id] !== undefined) {
+        stopHolds = { ...stopHolds }
+        delete stopHolds[id]
+      }
+      return { sandboxes, agentActivity, stopHolds }
     }),
 
   setActiveSandboxId: (id) => set({ activeSandboxId: id, activePage: 'sandbox', activeTab: 'terminal' }),
