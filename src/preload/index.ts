@@ -29,6 +29,7 @@ const api = {
   updateKit:     (dir: string, spec: string, files?: string[]) => ipcRenderer.invoke('minipit:update-kit', dir, spec, files),
   removeKit:     (dir: string)          => ipcRenderer.invoke('minipit:remove-kit', dir),
   kitPush:       (dir: string, ref: string) => ipcRenderer.invoke('minipit:kit-push', dir, ref),
+  saveSnapshot:  (name: string, tag: string) => ipcRenderer.invoke('minipit:save-snapshot', name, tag),
   kitImport:     (ref: string)          => ipcRenderer.invoke('minipit:kit-import', ref),
   dockerAccount: ()                     => ipcRenderer.invoke('minipit:docker-account'),
   listSecrets:   ()                     => ipcRenderer.invoke('minipit:list-secrets'),

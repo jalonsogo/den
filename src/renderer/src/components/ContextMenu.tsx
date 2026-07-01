@@ -87,6 +87,15 @@ export function ContextMenu() {
     setContextMenu({ visible: false })
   }
 
+  // Save the sandbox's current state as a reusable template via `sbx template save`.
+  const handleSaveSnapshot = async () => {
+    const tag = prompt(`Save "${sandbox.name}" as a template. Tag:`, `${sandbox.name}-snapshot`)
+    setContextMenu({ visible: false })
+    if (!tag?.trim()) return
+    const res = await window.minipit?.saveSnapshot(sandbox.name, tag.trim()).catch(() => null)
+    if (!res?.ok) alert(`Snapshot failed: ${res?.error ?? 'unknown error'}`)
+  }
+
 
   const handleDelete = async () => {
     setContextMenu({ visible: false })
@@ -119,7 +128,7 @@ export function ContextMenu() {
       </div>
       <div className="ctx-item">Copy Path</div>
       <div className="ctx-sep" />
-      <div className="ctx-item">Save Snapshot…</div>
+      <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
       <div className="ctx-item" onClick={handleRestart}>Restart</div>
       <div className="ctx-sep" />
       <div

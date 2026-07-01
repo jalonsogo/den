@@ -1305,6 +1305,16 @@ function setupIPC(): void {
     }
   })
 
+  // Save a sandbox's current state as a reusable template (image) under a tag.
+  ipcMain.handle('minipit:save-snapshot', async (_, name: string, tag: string) => {
+    try {
+      const output = await sbx(['template', 'save', name, tag], { timeout: 180000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Import a remote kit by OCI reference: pull the artifact, then extract it
   // into the local kit library so it shows up like any locally-authored kit.
   ipcMain.handle('minipit:kit-import', async (_, ref: string) => {

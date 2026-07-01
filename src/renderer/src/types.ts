@@ -227,6 +227,7 @@ declare global {
       updateKit(dir: string, spec: string, files?: string[]): Promise<{ ok: boolean; output?: string; error?: string }>
       removeKit(dir: string): Promise<void>
       kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
       dockerAccount(): Promise<{ loggedIn: boolean; username?: string }>
       listSecrets(): Promise<StoredSecret[]>
