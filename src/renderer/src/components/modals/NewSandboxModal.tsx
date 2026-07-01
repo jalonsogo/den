@@ -41,6 +41,9 @@ export function NewSandboxModal() {
   // A session inside a project shares that one folder, so isolate by default to
   // keep concurrent sandboxes from stomping the same working tree (toggleable).
   const [clone, setClone]             = useState(!!newSandboxWorkspace)
+  // For --clone: whether the workspace is a Git repo (null = unknown/checking).
+  const [wsIsRepo, setWsIsRepo]       = useState<boolean | null>(null)
+  const [gitIniting, setGitIniting]   = useState(false)
   const [advancedOpen, setAdvanced]   = useState(false)
   // Command preview lives in its own accordion; remember the user's show/hide choice.
   const [cmdOpen, setCmdOpen]         = useState(localStorage.getItem('minipit:showCreateCmd') === '1')
@@ -123,6 +126,29 @@ export function NewSandboxModal() {
     const n = deriveName(agent, workspace)
     if (n) setName(n)
   }, [agent, workspace, nameEdited, pinnedWs, wsEdited])
+
+  // --clone clones the host repo, so when it's on, check (debounced) whether the
+  // workspace is a Git repo — if not, we offer to initialize one.
+  useEffect(() => {
+    if (!clone || !workspace) { setWsIsRepo(null); return }
+    let cancelled = false
+    setWsIsRepo(null)
+    const t = setTimeout(() => {
+      window.minipit?.isGitRepo(workspace)
+        .then((r) => { if (!cancelled) setWsIsRepo(!!r) })
+        .catch(() => { if (!cancelled) setWsIsRepo(null) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [clone, workspace])
+
+  const handleGitInit = async () => {
+    setGitIniting(true)
+    setError('')
+    const res = await window.minipit?.gitInit(workspace).catch(() => null)
+    setGitIniting(false)
+    if (res?.ok) setWsIsRepo(true)
+    else setError(res?.error || 'Could not initialize a Git repository.')
+  }
 
   const handleBrowse = async () => {
     const path = await window.minipit?.showOpenDialog()
@@ -350,6 +376,17 @@ export function NewSandboxModal() {
               Work in a standalone clone; your changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.
               {newSandboxWorkspace && ' On by default here because sessions in a project share its folder.'}
             </div>
+
+            {clone && wsIsRepo === false && (
+              <div className="clone-warn">
+                <span>
+                  This folder isn't a Git repository, so <code>--clone</code> has nothing to clone.
+                </span>
+                <button className="btn btn-default btn-sm" onClick={handleGitInit} disabled={gitIniting}>
+                  {gitIniting ? 'Initializing…' : 'Initialize repository'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Advanced — collapsible */}

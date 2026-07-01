@@ -1375,6 +1375,36 @@ function setupIPC(): void {
 
   ipcMain.handle('minipit:git-status', (_, name: string, workspace: string) => gitStatus(name, workspace))
 
+  // Host-side check: is this workspace folder a Git repo? `--clone` sandboxes
+  // clone the host repo, so this gates the "initialize a repo" offer.
+  ipcMain.handle('minipit:is-git-repo', (_, dir: string) => new Promise<boolean>((resolve) => {
+    if (!dir) return resolve(false)
+    execFile('git', ['-C', dir, 'rev-parse', '--is-inside-work-tree'], { timeout: 5000, env: guiEnv() },
+      (err, stdout) => resolve(!err && stdout.trim() === 'true'))
+  }))
+
+  // Initialize a Git repo in a host folder and commit its current contents, so a
+  // `--clone` sandbox has a repo (with the folder's files) to clone.
+  ipcMain.handle('minipit:git-init', async (_, dir: string) => {
+    const runGit = (args: string[]) => new Promise<string>((resolve, reject) => {
+      execFile('git', args, { cwd: dir, timeout: 60000, env: guiEnv() },
+        (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).trim())) : resolve(stdout.trim())))
+    })
+    try {
+      require('fs').mkdirSync(dir, { recursive: true })
+      await runGit(['init'])
+      await runGit(['add', '-A'])
+      // Commit so the clone isn't empty; tolerate an empty folder (nothing to commit).
+      // -c keeps this working even if the user has no global git identity set.
+      try {
+        await runGit(['-c', 'user.name=den', '-c', 'user.email=den@localhost', 'commit', '-m', 'Initial commit'])
+      } catch { /* nothing to commit — an empty repo is still valid */ }
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Read a file's contents (untrimmed, up to 10 MB) via `sbx exec cat`.
   ipcMain.handle('minipit:read-file', (_, name: string, path: string) => new Promise<string>((resolve, reject) => {
     execFile(getSbxPath(), ['exec', name, 'cat', path], { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {

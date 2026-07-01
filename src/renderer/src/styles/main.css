@@ -1764,6 +1764,17 @@ html, body, #root {
 .proj-dot.stopped { background: var(--t4); }
 .proj-dot.creating { background: var(--amber, #f59e0b); animation: pulse 1.4s infinite; }
 
+/* --clone on a non-repo folder: warn + offer to initialize one. */
+.clone-warn {
+  display: flex; align-items: center; gap: 10px; margin-top: 8px;
+  padding: 9px 11px; border-radius: 6px; font-size: 12px; color: var(--t2);
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+}
+.clone-warn span { flex: 1; }
+.clone-warn code { font-size: 11px; background: var(--bg-subtle); padding: 1px 5px; border-radius: 4px; }
+.clone-warn .btn { flex-shrink: 0; }
+
 /* ── Library (Templates / Kits / Mixins) ── */
 .lib-tbl { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .lib-hdr, .lib-row {

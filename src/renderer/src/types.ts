@@ -221,6 +221,8 @@ declare global {
       getPorts(name: string): Promise<Port[]>
       listFiles(name: string, relPath: string): Promise<FileEntry[]>
       gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }>
+      isGitRepo(dir: string): Promise<boolean>
+      gitInit(dir: string): Promise<{ ok: boolean; error?: string }>
       readFile(name: string, path: string): Promise<string>
       writeFile(name: string, path: string, content: string): Promise<void>
       openPath(path: string): Promise<string>
