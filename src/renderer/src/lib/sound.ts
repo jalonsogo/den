@@ -47,6 +47,20 @@ function audioCtx(): AudioContext {
   return (ctx ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)())
 }
 
+// Browsers/Electron start an AudioContext "suspended" until a user gesture, so
+// cues triggered by background events (agent finished / needs you) would be
+// silent. Unlock the context on the first user interaction so later
+// event-driven sounds actually play.
+if (typeof window !== 'undefined') {
+  const unlock = () => {
+    try { audioCtx().resume().catch(() => {}) } catch { /* no Web Audio */ }
+    window.removeEventListener('pointerdown', unlock)
+    window.removeEventListener('keydown', unlock)
+  }
+  window.addEventListener('pointerdown', unlock)
+  window.addEventListener('keydown', unlock)
+}
+
 // Play a short sequence of sine "notes" with a quick attack/decay envelope.
 function tones(freqs: number[], step = 0.13): void {
   const ac = audioCtx()
