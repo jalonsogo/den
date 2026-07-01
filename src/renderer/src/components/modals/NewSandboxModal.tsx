@@ -44,6 +44,12 @@ export function NewSandboxModal() {
   // For --clone: whether the workspace is a Git repo (null = unknown/checking).
   const [wsIsRepo, setWsIsRepo]       = useState<boolean | null>(null)
   const [gitIniting, setGitIniting]   = useState(false)
+  // Creation streams its output into an in-modal terminal; it also runs in the
+  // background (creating row) so the modal can be dismissed while it finishes.
+  const [creating, setCreating]       = useState(false)
+  const [progress, setProgress]       = useState('')
+  const progRef = useRef<HTMLPreElement>(null)
+  const unsubRef = useRef<(() => void) | null>(null)
   const [advancedOpen, setAdvanced]   = useState(false)
   // Command preview lives in its own accordion; remember the user's show/hide choice.
   const [cmdOpen, setCmdOpen]         = useState(localStorage.getItem('minipit:showCreateCmd') === '1')
@@ -155,18 +161,33 @@ export function NewSandboxModal() {
     if (path) { setWorkspace(path); setWsEdited(true) }
   }
 
-  // Creation runs in the background: close the modal immediately, show a
-  // "Creating…" row in the sandbox list, and flip it to running when sbx finishes.
+  // Close the modal but let creation keep running (it's tracked by the creating
+  // row and the async below completes regardless of mount state).
+  const dismiss = () => {
+    unsubRef.current?.()
+    unsubRef.current = null
+    setModal(null)
+  }
+
+  // Creation streams its output into the in-modal terminal and also registers a
+  // background "creating" row, so the modal can be dismissed while it finishes.
   const handleLaunch = () => {
     if (!workspace) { setError('Workspace is required'); return }
     const finalName = (name.trim() || deriveName(agent, workspace) || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
     localStorage.setItem('minipit:lastWorkspace', workspace)
+    setError('')
+    setProgress('')
+    setCreating(true)
     addCreatingSandbox({
       id: `creating-${finalName}`, name: finalName, status: 'creating',
       agent, workspace, ports: [], logs: []
     })
-    setModal(null)
+    const unsub = window.minipit?.onCreateOutput((chunk) => {
+      setProgress((p) => p + chunk)
+      requestAnimationFrame(() => { if (progRef.current) progRef.current.scrollTop = progRef.current.scrollHeight })
+    })
+    unsubRef.current = unsub ?? null
     ;(async () => {
       try {
         await window.minipit?.createSandbox({
@@ -181,9 +202,13 @@ export function NewSandboxModal() {
         const sandboxes = await window.minipit?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
         removeCreatingSandbox(finalName)
+        unsub?.()
+        setModal(null)
       } catch (e) {
         removeCreatingSandbox(finalName)
-        alert(`Sandbox "${finalName}" failed to create: ${e instanceof Error ? e.message : String(e)}`)
+        unsub?.()
+        setCreating(false)
+        setError(e instanceof Error ? e.message : String(e))
       }
     })()
   }
@@ -200,7 +225,7 @@ export function NewSandboxModal() {
   ].filter(Boolean).join(' ')
 
   return (
-    <div className="overlay" onClick={() => setModal(null)}>
+    <div className="overlay" onClick={dismiss}>
       <div className="modal" style={{ width: 'clamp(460px, 52vw, 760px)' }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
           <div className="m-title">New Sandbox</div>
@@ -456,27 +481,33 @@ export function NewSandboxModal() {
             )}
           </div>
 
-          <div className="adv">
-            <button
-              className="adv-toggle"
-              onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
-            >
-              <ChevronRight size={13} style={{ transform: cmdOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
-              Command
-            </button>
-            {cmdOpen && (
-              <div className="adv-body">
-                <div className="cmd-blk">
-                  {cmdParts.split(' ').map((word, i) => {
-                    if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
-                    if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
-                    if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
-                    return <span key={i} className="cm-v">{word} </span>
-                  })}
+          {creating ? (
+            <div className="cmd-blk create-log">
+              <pre ref={progRef} className="create-log-pre">{progress || 'Starting…'}</pre>
+            </div>
+          ) : (
+            <div className="adv">
+              <button
+                className="adv-toggle"
+                onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
+              >
+                <ChevronRight size={13} style={{ transform: cmdOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
+                Command
+              </button>
+              {cmdOpen && (
+                <div className="adv-body">
+                  <div className="cmd-blk">
+                    {cmdParts.split(' ').map((word, i) => {
+                      if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
+                      if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
+                      if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
+                      return <span key={i} className="cm-v">{word} </span>
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <div style={{ color: 'var(--destruct)', fontSize: 12, marginTop: 10, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: 6 }}>
@@ -486,8 +517,17 @@ export function NewSandboxModal() {
         </div>
 
         <div className="m-ftr">
-          <button className="btn btn-ghost" onClick={() => setModal(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleLaunch}>Create Sandbox</button>
+          {creating ? (
+            <>
+              <button className="btn btn-ghost" onClick={dismiss}>Run in background</button>
+              <button className="btn btn-primary" disabled>Creating…</button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-ghost" onClick={dismiss}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleLaunch}>Create Sandbox</button>
+            </>
+          )}
         </div>
       </div>
     </div>
