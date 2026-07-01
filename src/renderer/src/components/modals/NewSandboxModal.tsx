@@ -226,7 +226,7 @@ export function NewSandboxModal() {
   ].filter(Boolean).join(' ')
 
   return (
-    <div className="overlay" onClick={dismiss}>
+    <div className="overlay">{/* No close-on-outside-click: use Cancel / Run in background. */}
       <div className="modal" style={{ width: 'clamp(460px, 52vw, 760px)' }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
           <div className="m-title">{creating ? 'Creating Sandbox' : 'New Sandbox'}</div>
