@@ -26,6 +26,9 @@ interface AppState {
   secretTarget: SecretService | null
   newSandboxWorkspace: string | null
   newSandboxTemplate: string | null
+  // When set, the kit modal ('new-kit') opens as a visual EDITOR for this kit
+  // instead of creating a new one. Cleared when the modal closes.
+  editKit: { dir: string; name: string } | null
   activeProject: string | null
   themePref: 'light' | 'dark' | 'system'
   theme: 'light' | 'dark'   // resolved from themePref (system → OS preference)
@@ -45,11 +48,15 @@ interface AppState {
   toasts: PolicyBlock[]
   // Per-sandbox agent state (working / waiting); absent = unknown/stopped.
   agentActivity: Record<string, AgentState>
+  // Mixin-kit names auto-added to every new sandbox (marked in the Kits page).
+  defaultKits: string[]
 
   setSandboxes:       (sandboxes: Sandbox[]) => void
+  toggleDefaultKit:   (name: string) => void
   setSecretTarget:    (service: SecretService | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
   setNewSandboxTemplate: (ref: string | null) => void
+  setEditKit: (kit: { dir: string; name: string } | null) => void
   setActiveProject:   (workspace: string | null) => void
   setThemePref:       (pref: 'light' | 'dark' | 'system') => void
   toggleSidebar:      () => void
@@ -91,6 +98,7 @@ export const useStore = create<AppState>((set) => ({
   secretTarget: null,
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
+  editKit: null,
   activeProject: null,
   themePref: initialThemePref,
   theme: resolveTheme(initialThemePref),
@@ -111,12 +119,27 @@ export const useStore = create<AppState>((set) => ({
   blocksSeenAt: {},
   toasts: [],
   agentActivity: {},
+  defaultKits: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:defaultKits') ?? '[]') ?? [] } catch { return [] }
+  })(),
 
   setSecretTarget: (service) => set({ secretTarget: service }),
+
+  // Star/unstar a mixin kit as a "default" — new sandboxes pre-select these.
+  toggleDefaultKit: (name) =>
+    set((state) => {
+      const next = state.defaultKits.includes(name)
+        ? state.defaultKits.filter((n) => n !== name)
+        : [...state.defaultKits, name]
+      localStorage.setItem('minipit:defaultKits', JSON.stringify(next))
+      return { defaultKits: next }
+    }),
 
   setNewSandboxWorkspace: (path) => set({ newSandboxWorkspace: path }),
 
   setNewSandboxTemplate: (ref) => set({ newSandboxTemplate: ref }),
+
+  setEditKit: (kit) => set({ editKit: kit }),
 
   setActiveProject: (workspace) => set({ activeProject: workspace }),
 

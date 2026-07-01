@@ -1,90 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Layers, Package, FolderOpen, Trash2, Boxes, MoreVertical, UploadCloud, DownloadCloud, Plug, Globe, Variable, TerminalSquare, FileText } from 'lucide-react'
+import { Plus, Layers, Package, FolderOpen, Trash2, Boxes, MoreVertical, UploadCloud, DownloadCloud, Star } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
+import { KitCaps } from './KitCaps'
 
 interface Kit { name: string; kind: string; dir: string; hasZip: boolean }
-
-// Visual representation of a kit's spec.yaml (the default view when editing).
-// Left-aligned capability icons; hovering one shows its detailed contents in a
-// fixed-position popover (escapes the table's overflow:hidden clip).
-function KitCaps({ p }: { p?: ReturnType<typeof parseKitSpec> }) {
-  const [hover, setHover] = useState<{ key: string; top: number; left: number } | null>(null)
-  if (!p) return <div className="kit-caps"><span className="kit-cap-empty">—</span></div>
-  const domains = p.allowedDomains.length + p.deniedDomains.length
-  const items: { key: string; icon: typeof Plug; label: string; count?: number }[] = []
-  if (p.mcps.length) items.push({ key: 'mcp', icon: Plug, label: 'Remote MCP', count: p.mcps.length })
-  if (domains) items.push({ key: 'net', icon: Globe, label: 'Policies', count: domains })
-  if (p.envVars.length) items.push({ key: 'env', icon: Variable, label: 'Env vars', count: p.envVars.length })
-  if (p.installCmds.length) items.push({ key: 'cmd', icon: TerminalSquare, label: 'Commands', count: p.installCmds.length })
-  if (p.agentContext) items.push({ key: 'mem', icon: FileText, label: 'Memory' })
-  if (items.length === 0) return <div className="kit-caps"><span className="kit-cap-empty">No capabilities</span></div>
-
-  const enter = (key: string, e: React.MouseEvent) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setHover({ key, top: r.bottom + 6, left: r.left })
-  }
-
-  const popContent = (key: string) => {
-    if (key === 'mcp') return (
-      <div className="kit-pop-list">
-        {p.mcps.map((id) => {
-          const m = MCP_CATALOG.find((x) => x.id === id)
-          return (
-            <div className="kit-pop-row" key={id}>
-              <img className="kit-pop-ic" src={mcpIcon(id)} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
-              <span>{m?.name ?? id}</span>
-            </div>
-          )
-        })}
-      </div>
-    )
-    if (key === 'net') return (
-      <div className="kit-pop-list">
-        {p.allowedDomains.map((d) => <div className="kit-pop-row" key={`a-${d}`}><span className="kit-pop-dot allow" />{d}</div>)}
-        {p.deniedDomains.map((d) => <div className="kit-pop-row" key={`d-${d}`}><span className="kit-pop-dot deny" />{d}</div>)}
-      </div>
-    )
-    if (key === 'env') return (
-      <div className="kit-pop-list">
-        {p.envVars.map((v) => <div className="kit-pop-row kit-pop-mono" key={v}>{v}</div>)}
-      </div>
-    )
-    if (key === 'cmd') return (
-      <div className="kit-pop-list">
-        {p.installCmds.map((c, i) => <div className="kit-pop-row kit-pop-mono" key={i}>{c}</div>)}
-      </div>
-    )
-    if (key === 'mem') return <div className="kit-pop-memo">{p.agentContext}</div>
-    return null
-  }
-
-  const titles: Record<string, string> = { mcp: 'Remote MCP servers', net: 'Network policies', env: 'Environment variables', cmd: 'Startup commands', mem: 'Agent memory' }
-
-  return (
-    <div className="kit-caps">
-      {items.map(({ key, icon: Icon, label, count }) => (
-        <span
-          key={key}
-          className="kit-cap-ic"
-          onMouseEnter={(e) => enter(key, e)}
-          onMouseLeave={() => setHover((h) => (h?.key === key ? null : h))}
-        >
-          <Icon size={14} />
-          <span className="kit-cap-lbl">{label}</span>
-          {count != null && <span className="kit-cap-n">{count}</span>}
-        </span>
-      ))}
-      {hover && (
-        <div className="kit-pop" style={{ top: hover.top, left: hover.left }}>
-          <div className="kit-pop-hd">{titles[hover.key]}</div>
-          {popContent(hover.key)}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function KitSummary({ spec }: { spec: string }) {
   const p = parseKitSpec(spec)
@@ -139,7 +60,7 @@ function hubRepoUrl(ref: string): string | null {
 }
 
 export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
-  const { modal, setModal, sandboxes } = useStore()
+  const { modal, setModal, sandboxes, defaultKits, toggleDefaultKit, setEditKit } = useStore()
   const [kits, setKits] = useState<Kit[]>([])
   const [specs, setSpecs] = useState<Record<string, ReturnType<typeof parseKitSpec>>>({})
   const [addFor, setAddFor] = useState<string | null>(null)
@@ -177,6 +98,9 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const [spec, setSpec] = useState('')
   const [savingSpec, setSavingSpec] = useState(false)
   const [specView, setSpecView] = useState<'summary' | 'code'>('summary')
+  // A kit panel opens in read-only view mode; editing the code / saving is gated
+  // behind an explicit "Edit" toggle.
+  const [editing, setEditing] = useState(false)
   // Row "⋮" menu (Open in Finder / Upload to Hub / Delete).
   const [moreFor, setMoreFor] = useState<string | null>(null)
   const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
@@ -299,17 +223,26 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   }
 
   const openEdit = async (k: Kit) => {
-    if (editFor === k.dir) { setEditFor(null); return }
+    if (editFor === k.dir) { setEditFor(null); setEditing(false); return }
     setAddFor(null)
+    setEditing(false)          // open read-only; user opts into editing
+    setSpecView('summary')
     setSpec((await window.minipit?.readKit(k.dir)) ?? '')
     setEditFor(k.dir)
+  }
+
+  // Leave edit mode without saving — reload the spec from disk so the code panel
+  // shows the last-saved content again.
+  const cancelEdit = async (k: Kit) => {
+    setSpec((await window.minipit?.readKit(k.dir)) ?? '')
+    setEditing(false)
   }
 
   const saveSpec = async (k: Kit) => {
     setSavingSpec(true)
     const res = await window.minipit?.updateKit(k.dir, spec).catch(() => null)
     setSavingSpec(false)
-    if (res?.ok) { setEditFor(null); load(); setMsg({ ok: true, text: `Saved & re-packed "${k.name}".` }) }
+    if (res?.ok) { setEditing(false); setSpecView('summary'); load(); setMsg({ ok: true, text: `Saved & re-packed "${k.name}".` }) }
     else setMsg({ ok: false, text: res?.error || 'Failed to save spec.' })
   }
 
@@ -321,7 +254,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
         <button className="btn btn-default btn-sm" style={{ marginLeft: 'auto' }} onClick={() => { setImportOpen((v) => !v); setImportRef('') }}>
           <DownloadCloud size={13} /> Add remote
         </button>
-        <button className="btn btn-primary btn-sm" onClick={() => setModal('new-kit')}>
+        <button className="btn btn-primary btn-sm" onClick={() => { setEditKit(null); setModal('new-kit') }}>
           <Plus size={13} /> New {variant === 'mixin' ? 'mixin kit' : 'sandbox kit'}
         </button>
       </div>
@@ -417,6 +350,15 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                   </div>
                   <KitCaps p={specs[k.dir]} />
                   <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+                    {variant === 'mixin' && (
+                      <button
+                        className={`btn btn-ghost btn-sm tpl-icon-btn kit-star-btn${defaultKits.includes(k.name) ? ' on' : ''}`}
+                        title={defaultKits.includes(k.name) ? 'Default kit — auto-added to new sandboxes. Click to unset.' : 'Make default — auto-add to new sandboxes'}
+                        onClick={() => toggleDefaultKit(k.name)}
+                      >
+                        <Star size={15} fill={defaultKits.includes(k.name) ? 'currentColor' : 'none'} />
+                      </button>
+                    )}
                     <div className="kit-add-wrap">
                       <button
                         className="btn btn-default btn-sm"
@@ -511,18 +453,34 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                       <KitSummary spec={spec} />
                     ) : (
                       <textarea
-                        className="kit-spec-area"
+                        className={`kit-spec-area${editing ? '' : ' readonly'}`}
                         value={spec}
                         spellCheck={false}
+                        readOnly={!editing}
                         onChange={(e) => setSpec(e.target.value)}
                       />
                     )}
 
                     <div className="kit-spec-actions">
-                      <button className="btn btn-ghost btn-sm" onClick={() => setEditFor(null)}>Cancel</button>
-                      <button className="btn btn-primary btn-sm" onClick={() => saveSpec(k)} disabled={savingSpec}>
-                        {savingSpec ? 'Saving…' : 'Save & repack'}
-                      </button>
+                      {editing ? (
+                        <>
+                          <button className="btn btn-ghost btn-sm" onClick={() => cancelEdit(k)} disabled={savingSpec}>Cancel</button>
+                          <button className="btn btn-primary btn-sm" onClick={() => saveSpec(k)} disabled={savingSpec}>
+                            {savingSpec ? 'Saving…' : 'Save & repack'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="btn btn-ghost btn-sm" onClick={() => { setEditFor(null); setEditing(false) }}>Close</button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(true); setSpecView('code') }}>Edit code</button>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => { setEditKit({ dir: k.dir, name: k.name }); setModal('new-kit'); setEditFor(null); setEditing(false) }}
+                          >
+                            Edit
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

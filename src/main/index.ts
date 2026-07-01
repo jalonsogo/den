@@ -1202,10 +1202,20 @@ function setupIPC(): void {
     catch { return '' }
   })
 
-  // Rewrite a kit's spec.yaml and re-pack it.
-  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string) => {
+  // Rewrite a kit's spec.yaml, bundle any newly-attached files, and re-pack it.
+  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string, files?: string[]) => {
     try {
-      require('fs').writeFileSync(join(dir, 'spec.yaml'), spec)
+      const fs = require('fs')
+      const path = require('path')
+      fs.writeFileSync(join(dir, 'spec.yaml'), spec)
+      // Copy in any new reference files (existing bundled files are left as-is).
+      if (files?.length) {
+        const dest = join(dir, 'files', 'workspace')
+        fs.mkdirSync(dest, { recursive: true })
+        for (const fp of files) {
+          try { fs.copyFileSync(fp, join(dest, path.basename(fp))) } catch (e) { console.error('copy kit file failed:', e) }
+        }
+      }
       const output = await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 })
       return { ok: true, output }
     } catch (err) {
