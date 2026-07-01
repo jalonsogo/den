@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-01
+
 ### Added
 - Drag and drop now accepts any file type (PDF, TXT, MD, CSV, Excel, Doc, PPT, …), not just images; multiple files are batched into a single write and the size cap is raised to 100 MB.
 - A distinct, separately configurable "agent needs you" sound cue, driven by the Claude Code `Notification` hook.
@@ -50,6 +52,7 @@ Initial release — the first automated, cross-platform build (macOS + Windows).
 - Theme submenu and den branding.
 - GitHub Actions release pipeline that builds and publishes macOS (`.dmg`/`.zip`) and Windows (NSIS `.exe`) installers on each `v*` tag.
 
-[Unreleased]: https://github.com/jalonsogo/den/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jalonsogo/den/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jalonsogo/den/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/jalonsogo/den/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jalonsogo/den/releases/tag/v0.1.0
