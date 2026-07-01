@@ -6,12 +6,11 @@ export function ContextMenu() {
   const { contextMenu, setContextMenu, sandboxes, updateSandbox, setDeleting, setSandboxes } = useStore()
   const termTheme = useStore((s) => s.termTheme)
   const setTermTheme = useStore((s) => s.setTermTheme)
+  const openPrompt = useStore((s) => s.openPrompt)
   const ref = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
   const [themeOpen, setThemeOpen] = useState(false)
-  // Electron's renderer has no window.prompt(), so collect the tag inline.
-  const [snapTag, setSnapTag] = useState<string | null>(null)
   // The theme flyout defaults to opening rightward; flip it left (and nudge it
   // up) when that would overflow the viewport near the window edge.
   const [subFlip, setSubFlip] = useState(false)
@@ -90,12 +89,20 @@ export function ContextMenu() {
   }
 
   // Save the sandbox's current state as a reusable template via `sbx template save`.
-  const submitSnapshot = async () => {
-    const tag = (snapTag ?? '').trim()
-    if (!tag) return
+  const handleSaveSnapshot = () => {
     setContextMenu({ visible: false })
-    const res = await window.minipit?.saveSnapshot(sandbox.name, tag).catch(() => null)
-    if (!res?.ok) alert(`Snapshot failed: ${res?.error ?? 'unknown error'}`)
+    openPrompt({
+      title: 'Save Snapshot',
+      message: `Save "${sandbox.name}" as a reusable template.`,
+      label: 'Template tag',
+      defaultValue: `${sandbox.name}-snapshot`,
+      placeholder: 'my-template:latest',
+      confirmText: 'Save',
+      onSubmit: async (tag) => {
+        const res = await window.minipit?.saveSnapshot(sandbox.name, tag)
+        if (!res?.ok) throw new Error(res?.error ?? 'Snapshot failed')
+      },
+    })
   }
 
 
@@ -130,24 +137,7 @@ export function ContextMenu() {
       </div>
       <div className="ctx-item">Copy Path</div>
       <div className="ctx-sep" />
-      {snapTag === null ? (
-        <div className="ctx-item" onClick={() => setSnapTag(`${sandbox.name}-snapshot`)}>Save Snapshot…</div>
-      ) : (
-        <div className="ctx-snap" onClick={(e) => e.stopPropagation()}>
-          <input
-            className="ctx-snap-input"
-            autoFocus
-            value={snapTag}
-            placeholder="template tag"
-            onChange={(e) => setSnapTag(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submitSnapshot()
-              else if (e.key === 'Escape') setSnapTag(null)
-            }}
-          />
-          <button className="ctx-snap-go" onClick={submitSnapshot} disabled={!snapTag.trim()}>Save</button>
-        </div>
-      )}
+      <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
       <div className="ctx-item" onClick={handleRestart}>Restart</div>
       <div className="ctx-sep" />
       <div

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { applyAccent, ensureRamp, savedAccents, writeSavedAccents, type SavedAccent } from './lib/accent'
-import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState } from './types'
+import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template } from './types'
 
 type ThemePref = 'light' | 'dark' | 'system'
 const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -20,6 +20,10 @@ interface AppState {
   activePage: PageType
   activeTab: TabType
   modal: ModalType
+  // Reusable input dialog (openPrompt/closePrompt). Null = closed.
+  prompt: PromptConfig | null
+  // Template shown in the inspect/details modal. Null = closed.
+  inspectTemplate: Template | null
   contextMenu: ContextMenuState
   files: Record<string, FileEntry[]>
   deletingIds: string[]
@@ -77,6 +81,9 @@ interface AppState {
   setActivePage:      (page: PageType) => void
   setActiveTab:       (tab: TabType) => void
   setModal:           (modal: ModalType) => void
+  openPrompt:         (config: PromptConfig) => void
+  closePrompt:        () => void
+  setInspectTemplate: (t: Template | null) => void
   appendLog:          (sandboxId: string, line: LogLine) => void
   setContextMenu:     (state: Partial<ContextMenuState>) => void
   setFiles:           (sandboxId: string, files: FileEntry[]) => void
@@ -92,6 +99,8 @@ export const useStore = create<AppState>((set) => ({
   activePage: 'home',
   activeTab: 'terminal',
   modal: null,
+  prompt: null,
+  inspectTemplate: null,
   contextMenu: { visible: false, x: 0, y: 0, sandboxId: null },
   files: {},
   deletingIds: [],
@@ -316,6 +325,10 @@ export const useStore = create<AppState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setModal: (modal) => set({ modal }),
+
+  openPrompt: (config) => set({ prompt: config }),
+  closePrompt: () => set({ prompt: null }),
+  setInspectTemplate: (t) => set({ inspectTemplate: t }),
 
   appendLog: (sandboxId, line) =>
     set((state) => ({

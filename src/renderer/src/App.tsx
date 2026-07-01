@@ -15,6 +15,8 @@ import { playFinalizeSound, playAskSound } from './lib/sound'
 import { NewSandboxModal } from './components/modals/NewSandboxModal'
 import { NewSecretModal } from './components/modals/NewSecretModal'
 import { NewKitModal } from './components/modals/NewKitModal'
+import { PromptModal } from './components/modals/PromptModal'
+import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
@@ -111,6 +113,8 @@ export function App() {
         </div>
       </div>
       <ContextMenu />
+      <PromptModal />
+      <TemplateInspectModal />
       <PolicyBlockToaster />
     </div>
   )

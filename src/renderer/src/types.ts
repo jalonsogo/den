@@ -125,6 +125,18 @@ export interface Template {
   createdAt: string
 }
 
+// Config for the reusable prompt modal (openPrompt in the store). onSubmit may
+// throw to keep the modal open and surface the thrown message as an error.
+export interface PromptConfig {
+  title: string
+  message?: string
+  label?: string
+  defaultValue?: string
+  placeholder?: string
+  confirmText?: string
+  onSubmit: (value: string) => void | Promise<void>
+}
+
 // Whether an agent is mid-task or waiting on the user. `null` clears it (agent
 // process exited).
 export type AgentState = 'working' | 'waiting'
@@ -218,6 +230,7 @@ declare global {
       generatePalette(hex: string, size?: number): Promise<string[]>
       listTemplates(): Promise<Template[]>
       removeTemplate(ref: string): Promise<void>
+      templatePush(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       createKit(name: string, spec: string, files?: string[]): Promise<{ dir: string; zip: string; output: string }>
       pickFiles(): Promise<string[]>
       listKits(): Promise<{ name: string; kind: string; dir: string; hasZip: boolean }[]>

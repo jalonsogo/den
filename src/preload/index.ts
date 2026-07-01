@@ -19,6 +19,7 @@ const api = {
   generatePalette: (hex: string, size?: number) => ipcRenderer.invoke('minipit:generate-palette', hex, size),
   listTemplates: ()                     => ipcRenderer.invoke('minipit:list-templates'),
   removeTemplate:(ref: string)          => ipcRenderer.invoke('minipit:remove-template', ref),
+  templatePush:  (ref: string)          => ipcRenderer.invoke('minipit:template-push', ref),
   storageUsage: ()                      => ipcRenderer.invoke('minipit:storage-usage'),
   createKit:     (name: string, spec: string, files?: string[]) => ipcRenderer.invoke('minipit:create-kit', name, spec, files),
   pickFiles:     ()                     => ipcRenderer.invoke('minipit:pick-files'),

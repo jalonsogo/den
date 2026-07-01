@@ -1838,6 +1838,36 @@ html, body, #root {
 .kit-more-item.danger:hover { background: rgba(239,68,68,0.10); }
 .kit-more-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 
+/* Generic row "⋮" dropdown (templates, and reusable elsewhere). */
+.more-menu {
+  position: fixed; z-index: 200; min-width: 190px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.more-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  font-size: 12.5px; color: var(--t1); cursor: pointer;
+  background: none; border: none; border-radius: 6px; padding: 7px 9px;
+}
+.more-item svg { color: var(--t3); }
+.more-item:hover { background: var(--bg-subtle); }
+.more-item.danger { color: var(--destruct); }
+.more-item.danger svg { color: var(--destruct); }
+.more-item.danger:hover { background: rgba(239,68,68,0.10); }
+.more-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+
+/* Template inspect / details modal rows. */
+.tpl-detail { display: flex; flex-direction: column; gap: 2px; }
+.tpl-detail-row { display: flex; gap: 12px; padding: 7px 2px; border-bottom: 1px solid var(--border); }
+.tpl-detail-row:last-child { border-bottom: none; }
+.tpl-detail-k { flex: 0 0 96px; font-size: 12px; color: var(--t3); }
+.tpl-detail-v {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--t1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+
 /* "Add remote" import panel (page-level) */
 .kit-import-box {
   padding: 12px 14px 14px; margin-bottom: 12px;
@@ -2472,21 +2502,6 @@ html, body, #root {
 .ctx-item.disabled { color: var(--t3); pointer-events: none; }
 .ctx-kbd { font-size: 11.5px; color: var(--t3); }
 .ctx-sep { height: 1px; background: var(--border); margin: 3px 0; }
-
-/* Inline tag entry for "Save Snapshot…" (Electron has no window.prompt). */
-.ctx-snap { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
-.ctx-snap-input {
-  flex: 1; min-width: 0; font-family: inherit; font-size: 12.5px;
-  padding: 4px 8px; border-radius: 5px; border: 1px solid var(--border);
-  background: var(--bg-subtle); color: var(--t1);
-}
-.ctx-snap-input:focus { outline: none; border-color: var(--border-hi); }
-.ctx-snap-go {
-  font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
-  padding: 4px 10px; border-radius: 5px; border: none;
-  background: var(--primary); color: var(--prim-fg, white);
-}
-.ctx-snap-go:disabled { opacity: 0.5; cursor: default; }
 
 /* Terminal theme submenu (flyout) inside the options menu */
 .ctx-has-sub { position: relative; }

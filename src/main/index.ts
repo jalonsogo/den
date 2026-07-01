@@ -1315,6 +1315,17 @@ function setupIPC(): void {
     }
   })
 
+  // Publish a template (image) to a registry. Auth uses the Docker credential
+  // store, so the user must `docker login` first (same as kit push).
+  ipcMain.handle('minipit:template-push', async (_, ref: string) => {
+    try {
+      const output = await sbx(['template', 'push', ref], { timeout: 300000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Import a remote kit by OCI reference: pull the artifact, then extract it
   // into the local kit library so it shows up like any locally-authored kit.
   ipcMain.handle('minipit:kit-import', async (_, ref: string) => {
