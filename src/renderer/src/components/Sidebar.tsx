@@ -1,9 +1,9 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
-  Home, FolderGit2, LayoutGrid, Layers, Package, Settings
+  Home, FolderGit2, LayoutGrid, Layers, Package, Settings, Search
 } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { ProjectAvatar } from './ProjectAvatar'
@@ -178,7 +178,17 @@ export function Sidebar() {
   const collapsed = sidebarCollapsed
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
+  const [groupBy, setGroupBy] = useState<'none' | 'project' | 'agent'>(
+    () => (localStorage.getItem('minipit:sbxGroupBy') as 'none' | 'project' | 'agent') ?? 'none'
+  )
+  const filterRef = useRef<HTMLDivElement>(null)
   const [libOpen, setLibOpen] = useState(() => localStorage.getItem('minipit:libraryOpen') === '1')
+
+  const setGrouping = (g: 'none' | 'project' | 'agent') => {
+    setGroupBy(g)
+    localStorage.setItem('minipit:sbxGroupBy', g)
+  }
+  const hasFilter = !!filter || groupBy !== 'none'
 
   // Filter by name, provider (agent), or status.
   const q = filter.trim().toLowerCase()
@@ -188,6 +198,29 @@ export function Sidebar() {
     s.agent.toLowerCase().includes(q) ||
     s.status.toLowerCase().includes(q)
   )
+
+  // Optional grouping for the sandbox list (by project folder or by agent).
+  const grouped: [string, Sandbox[]][] | null = (() => {
+    if (groupBy === 'none') return null
+    const map = new Map<string, Sandbox[]>()
+    for (const s of filtered) {
+      const key = groupBy === 'project' ? (s.workspace.split('/').pop() || s.workspace) : s.agent
+      const list = map.get(key) ?? []
+      list.push(s)
+      map.set(key, list)
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  })()
+
+  // Close the filter dropdown on outside click.
+  useEffect(() => {
+    if (!filterOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [filterOpen])
 
   // Group sandboxes into projects by workspace directory, then fold in any
   // empty projects the user created (folders with no sandbox yet).
@@ -258,43 +291,70 @@ export function Sidebar() {
               >
                 Sandboxes
               </button>
-              <button
-                className={`sb-add${filterOpen || filter ? ' has-filter' : ''}`}
-                onClick={() => {
-                  setFilterOpen((v) => {
-                    if (v) setFilter('')
-                    return !v
-                  })
-                }}
-                title="Filter sandboxes"
-              >
-                <Filter size={15} />
-              </button>
-              <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
-            </div>
-            {filterOpen && (
-              <div className="sb-filter-row">
-                <Filter size={13} className="sb-filter-row-ic" />
-                <input
-                  autoFocus
-                  value={filter}
-                  placeholder="Name, provider, or status"
-                  onChange={(e) => setFilter(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Escape') { setFilter(''); setFilterOpen(false) } }}
-                />
-                {filter && (
-                  <button className="sb-filter-row-x" onClick={() => setFilter('')} title="Clear"><X size={13} /></button>
+              <div className="sb-filter-wrap" ref={filterRef}>
+                <button
+                  className={`sb-add${hasFilter ? ' has-filter' : ''}`}
+                  onClick={() => setFilterOpen((v) => !v)}
+                  title="Filter & group sandboxes"
+                >
+                  <Filter size={15} />
+                </button>
+                {filterOpen && (
+                  <div className="sb-filter-pop">
+                    <div className="sb-filter-row">
+                      <Search size={13} className="sb-filter-row-ic" />
+                      <input
+                        autoFocus
+                        value={filter}
+                        placeholder="Filter by name…"
+                        onChange={(e) => setFilter(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Escape') setFilterOpen(false) }}
+                      />
+                      {filter && (
+                        <button className="sb-filter-row-x" onClick={() => setFilter('')} title="Clear"><X size={13} /></button>
+                      )}
+                    </div>
+                    <div className="sb-filter-grp">
+                      <span className="sb-filter-lbl">Group by</span>
+                      <div className="sb-filter-seg">
+                        {(['none', 'project', 'agent'] as const).map((g) => (
+                          <button
+                            key={g}
+                            className={`sb-filter-seg-btn${groupBy === g ? ' active' : ''}`}
+                            onClick={() => setGrouping(g)}
+                          >
+                            {g === 'none' ? 'None' : g === 'project' ? 'Project' : 'Agent'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-            )}
+              <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
+            </div>
           </>
         )}
         <div className="sb-list">
-          {filtered.length === 0
-            ? (!collapsed && <div className="sb-empty">{sandboxes.length === 0 ? 'No sandboxes' : 'No matches'}</div>)
-            : filtered.map((s) => (
+          {filtered.length === 0 ? (
+            !collapsed && <div className="sb-empty">{sandboxes.length === 0 ? 'No sandboxes' : 'No matches'}</div>
+          ) : grouped && !collapsed ? (
+            grouped.map(([key, list]) => (
+              <div className="sb-group" key={key}>
+                <div className="sb-group-hd">
+                  <span className="sb-group-name">{key}</span>
+                  <span className="sb-group-count">{list.length}</span>
+                </div>
+                {list.map((s) => (
+                  <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
+                ))}
+              </div>
+            ))
+          ) : (
+            filtered.map((s) => (
               <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
-            ))}
+            ))
+          )}
         </div>
       </div>
 

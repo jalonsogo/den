@@ -607,6 +607,38 @@ html, body, #root {
 }
 .sb-filter-row-x:hover { color: var(--sb-fg); }
 
+/* Filter/group dropdown anchored under the filter icon (fits within sidebar). */
+.sb-filter-wrap { position: relative; display: flex; }
+.sb-filter-pop {
+  position: absolute; top: calc(100% + 5px); right: 0; z-index: 60;
+  width: 196px;
+  background: var(--sb-active); border: 1px solid var(--sb-border); border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.30);
+  padding: 8px; display: flex; flex-direction: column; gap: 9px;
+}
+.sb-filter-pop .sb-filter-row { margin: 0; }
+.sb-filter-grp { display: flex; flex-direction: column; gap: 5px; }
+.sb-filter-lbl {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--sb-muted);
+}
+.sb-filter-seg { display: flex; gap: 3px; }
+.sb-filter-seg-btn {
+  flex: 1; font-size: 11.5px; padding: 4px 6px; border-radius: 5px; cursor: pointer;
+  background: var(--sb-hover); border: 1px solid transparent; color: var(--sb-muted);
+}
+.sb-filter-seg-btn:hover { color: var(--sb-fg); }
+.sb-filter-seg-btn.active {
+  background: var(--accent, var(--primary)); color: var(--prim-fg, white); border-color: transparent;
+}
+
+/* Group headers in the sandbox list (group-by project/agent). */
+.sb-group-hd {
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px 3px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--sb-muted);
+}
+.sb-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-group-count { margin-left: auto; font-weight: 500; opacity: 0.75; }
+
 /* Section header whose title navigates */
 .sb-sec-head { display: flex; align-items: center; gap: 6px; padding: 0 8px 5px; }
 .sb-sec-title {
