@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Layers, Package, FolderOpen, Trash2, Boxes, MoreVertical, UploadCloud, DownloadCloud, Star } from 'lucide-react'
+import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
@@ -366,7 +366,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                         onClick={(e) => toggleAdd(k.dir, e)}
                         disabled={busy}
                       >
-                        <Boxes size={13} /> Add to sandbox
+                        <PackagePlus size={14} /> Add to sandbox
                       </button>
                       {addFor === k.dir && addPos && (
                         <div className="kit-add-menu" style={{ top: addPos.top, right: addPos.right }}>
