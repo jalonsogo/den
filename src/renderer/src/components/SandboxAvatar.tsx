@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import type { Sandbox, AgentState } from '../types'
 
 // Two-letter initials from a sandbox name (alnum word starts, then first char).
-export function sandboxInitials(name: string): string {
+function sandboxInitials(name: string): string {
   const parts = name.split(/[^a-zA-Z0-9]+/).filter(Boolean)
   return (parts.slice(0, 2).map((p) => p[0]).join('') || name[0] || '?').toUpperCase()
 }
@@ -32,16 +32,19 @@ export function SandboxAvatar({
         ? <div className="sbx-avatar-spinner" />
         : <span className="sbx-avatar-txt">{sandboxInitials(sandbox.name)}</span>}
       {showBadge && <span className="sbx-avatar-badge"><AgentIcon agent={sandbox.agent} size={11} /></span>}
-      {alert && <span className="sbx-avatar-alert" title="Network requests blocked" />}
       {!deleting && (() => {
         // Always-on status dot so working/idle/stopped is visible at a glance,
-        // even on the collapsed rail where there's no status text.
-        const state = activity === 'working' ? 'working'
+        // even on the collapsed rail where there's no status text. A pending
+        // network-policy alert takes over the dot (turns it red) rather than
+        // adding a second corner badge.
+        const state = alert ? 'alert'
+          : activity === 'working' ? 'working'
           : activity === 'waiting' ? 'waiting'
           : sandbox.status === 'running' ? 'running'
           : sandbox.status === 'creating' ? 'working'
           : 'stopped'
-        const title = state === 'working' ? 'Agent working…'
+        const title = state === 'alert' ? 'Network requests blocked'
+          : state === 'working' ? 'Agent working…'
           : state === 'waiting' ? 'Waiting for you'
           : state === 'running' ? 'Running'
           : 'Stopped'

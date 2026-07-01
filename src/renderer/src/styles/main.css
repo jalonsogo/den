@@ -311,11 +311,6 @@ html, body, #root {
   border: 2px solid var(--spinner-track); border-top-color: var(--destruct);
   animation: spin 0.7s linear infinite;
 }
-.sbx-avatar-alert {
-  position: absolute; right: -3px; top: -3px;
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--destruct); border: 2px solid var(--avatar-surface);
-}
 .sbx-avatar-activity {
   position: absolute; left: -3px; top: -3px;
   width: 12px; height: 12px; border-radius: 50%;
@@ -326,6 +321,7 @@ html, body, #root {
 .sbx-avatar-activity.working { background: var(--yellow); animation: activity-pulse 1.3s ease-in-out infinite; }
 .sbx-avatar-activity.waiting { background: var(--blue); animation: activity-pulse 1.3s ease-in-out infinite; }
 .sbx-avatar-activity.stopped { background: var(--border-hi); }
+.sbx-avatar-activity.alert { background: var(--destruct); animation: activity-pulse 1.3s ease-in-out infinite; }
 @keyframes activity-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.45; transform: scale(0.78); }
