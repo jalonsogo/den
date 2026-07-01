@@ -1287,10 +1287,44 @@ function setupIPC(): void {
         proc.on('close', () => resolve(buf))
       })
       const map = JSON.parse(out || '{}') as Record<string, string>
-      const username = map['https://index.docker.io/v1/'] || Object.values(map)[0]
-      return username ? { loggedIn: true, username } : { loggedIn: false }
+      const registry = 'https://index.docker.io/v1/'
+      const username = map[registry] || Object.values(map)[0]
+      if (!username) return { loggedIn: false }
+      // Best-effort email for a Gravatar: the legacy `email` field is the only
+      // place the Docker config carries one (creds stores hold usernames only).
+      const email: string | undefined = cfg.auths?.[registry]?.email || cfg.auths?.[username]?.email
+      const gravatar = email
+        ? require('crypto').createHash('md5').update(email.trim().toLowerCase()).digest('hex')
+        : undefined
+      return { loggedIn: true, username, email, gravatar }
     } catch {
       return { loggedIn: false }
+    }
+  })
+
+  // Sign in to Docker via `sbx login`. It's an interactive browser/device flow,
+  // so stream its output to the renderer and allow a long timeout while the user
+  // completes auth in the browser.
+  ipcMain.handle('minipit:docker-login', async () => {
+    const send = (chunk: string) => mainWindow?.webContents.send('minipit:login-output', chunk)
+    try {
+      const output = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(getSbxPath(), ['login'], { env: guiEnv() })
+        let buf = ''
+        let err = ''
+        proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
+        proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
+        proc.on('error', (e) => reject(e))
+        const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx login timed out')) }, 300000)
+        proc.on('close', (code) => {
+          clearTimeout(timer)
+          if (code === 0) resolve(buf.trim())
+          else reject(new Error(err.trim() || buf.trim() || `sbx login exited ${code}`))
+        })
+      })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 

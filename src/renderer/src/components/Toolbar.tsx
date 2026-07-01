@@ -14,7 +14,24 @@ export function Toolbar() {
 
   const [acctOpen, setAcctOpen] = useState(false)
   const [org, setOrg] = useState(ORGS[0])
+  const [account, setAccount] = useState<{ loggedIn: boolean; username?: string; email?: string; gravatar?: string }>({ loggedIn: false })
+  const [avatarFailed, setAvatarFailed] = useState(false)
   const acctRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    window.minipit?.dockerAccount()
+      .then((a) => { setAccount(a ?? { loggedIn: false }); setAvatarFailed(false) })
+      .catch(() => {})
+  }, [])
+
+  // Name shown in the account button: the Docker username if signed in, else
+  // the local part of the fallback email.
+  const name = account.username || ACCOUNT_EMAIL.split('@')[0]
+  const email = account.email || ACCOUNT_EMAIL
+  const initials = name.slice(0, 2).toUpperCase()
+  const gravatarUrl = account.gravatar
+    ? `https://www.gravatar.com/avatar/${account.gravatar}?d=404&s=64`
+    : null
 
   useEffect(() => {
     if (!acctOpen) return
@@ -77,14 +94,25 @@ export function Toolbar() {
 
       <div className="tb-acct-wrap" ref={acctRef}>
         <button className="tb-acct" onClick={() => setAcctOpen((v) => !v)}>
-          <span className="tb-acct-avatar">JA</span>
-          <span className="tb-acct-name">{ACCOUNT_EMAIL}</span>
+          {gravatarUrl && !avatarFailed ? (
+            <img className="tb-acct-avatar" src={gravatarUrl} alt={name} onError={() => setAvatarFailed(true)} />
+          ) : (
+            <span className="tb-acct-avatar">{initials}</span>
+          )}
+          <span className="tb-acct-idy">
+            <span className="tb-acct-name">{name}</span>
+            <span className="tb-acct-org">{org}</span>
+          </span>
           <ChevronDown size={13} style={{ color: 'var(--t3)' }} />
         </button>
 
         {acctOpen && (
           <div className="tb-acct-menu">
-            <div className="tb-acct-hd">{ACCOUNT_EMAIL}</div>
+            <div className="tb-acct-hd">
+              <div className="tb-acct-hd-name">{name}</div>
+              <div className="tb-acct-hd-sub">{email}</div>
+            </div>
+            <div className="tb-acct-divider" />
             <div className="tb-acct-label">Organizations</div>
             {ORGS.map((o) => (
               <div key={o} className="tb-acct-item" onClick={() => { setOrg(o); setAcctOpen(false) }}>

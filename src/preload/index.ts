@@ -35,6 +35,7 @@ const api = {
   saveSnapshot:  (name: string, tag: string) => ipcRenderer.invoke('minipit:save-snapshot', name, tag),
   kitImport:     (ref: string)          => ipcRenderer.invoke('minipit:kit-import', ref),
   dockerAccount: ()                     => ipcRenderer.invoke('minipit:docker-account'),
+  dockerLogin:   ()                     => ipcRenderer.invoke('minipit:docker-login'),
   listSecrets:   ()                     => ipcRenderer.invoke('minipit:list-secrets'),
   setSecret:     (service: string, value: string) => ipcRenderer.invoke('minipit:set-secret', service, value),
   removeSecret:  (service: string)      => ipcRenderer.invoke('minipit:remove-secret', service),
@@ -69,6 +70,11 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:create-output', handler)
     return () => ipcRenderer.removeListener('minipit:create-output', handler)
+  },
+  onLoginOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:login-output', handler)
+    return () => ipcRenderer.removeListener('minipit:login-output', handler)
   },
   showOpenDialog:()                     => ipcRenderer.invoke('minipit:show-open-dialog'),
   listProjects:  ()                     => ipcRenderer.invoke('minipit:list-projects'),

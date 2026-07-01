@@ -244,7 +244,9 @@ declare global {
       kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
-      dockerAccount(): Promise<{ loggedIn: boolean; username?: string }>
+      dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; gravatar?: string }>
+      dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string }>
+      onLoginOutput(cb: (chunk: string) => void): () => void
       listSecrets(): Promise<StoredSecret[]>
       setSecret(service: string, value: string): Promise<void>
       removeSecret(service: string): Promise<void>

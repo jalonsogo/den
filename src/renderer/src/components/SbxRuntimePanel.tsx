@@ -47,7 +47,25 @@ export function SbxRuntimePanel({
   const [expanded, setExpanded] = useState<string | null>(null)
   const [verify, setVerify] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
   const [install, setInstall] = useState<import('../types').SbxInstallInfo | null>(null)
+  const [account, setAccount] = useState<{ loggedIn: boolean; username?: string } | null>(null)
+  const [signingIn, setSigningIn] = useState(false)
   const outRef = useRef<HTMLDivElement>(null)
+
+  const loadAccount = () =>
+    window.minipit?.dockerAccount()
+      .then((a) => setAccount(a ?? { loggedIn: false }))
+      .catch(() => setAccount({ loggedIn: false }))
+
+  // `sbx login` opens a browser to authenticate the runtime — the fix for the
+  // "not authenticated … please sign in" 401 that blocks sandbox creation.
+  const handleSignIn = async () => {
+    if (signingIn) return
+    setSigningIn(true)
+    setOutput('')
+    const r = await window.minipit?.dockerLogin().catch((e) => ({ ok: false, error: String(e) }))
+    setSigningIn(false)
+    if (r?.ok) loadAccount()
+  }
 
   const loadVersion = () => {
     window.minipit?.sbxVersion(sbxPath).then((r) => {
@@ -66,20 +84,19 @@ export function SbxRuntimePanel({
 
   useEffect(() => {
     loadVersion()
+    loadAccount()
     window.minipit?.sbxInstallInfo().then((i) => setInstall(i ?? null)).catch(() => {})
     window.minipit?.sbxReleases().then((r) => setReleases(r ?? [])).catch(() => {}).finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Stream brew output while an update/redownload runs.
+  // Stream brew (update/redownload) and sbx login output into the same box.
   useEffect(() => {
-    const unsub = window.minipit?.onRuntimeOutput((chunk) => {
-      setOutput((t) => {
-        const next = t + chunk
-        return next.length > CAP ? next.slice(-CAP) : next
-      })
-    })
-    return () => unsub?.()
+    const append = (chunk: string) =>
+      setOutput((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next })
+    const unsubRt = window.minipit?.onRuntimeOutput(append)
+    const unsubLogin = window.minipit?.onLoginOutput(append)
+    return () => { unsubRt?.(); unsubLogin?.() }
   }, [])
 
   useEffect(() => {
@@ -115,6 +132,21 @@ export function SbxRuntimePanel({
             : version && latest
               ? <span className="rt-badge rt-badge-ok">Up to date</span>
               : null}
+        </div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Authentication</div>
+            <div className="ss-sub">
+              {account === null
+                ? 'Checking…'
+                : account.loggedIn
+                  ? `Signed in${account.username ? ` as ${account.username}` : ''}`
+                  : 'Not signed in — authenticate the runtime with sbx login.'}
+            </div>
+          </div>
+          <button className="btn btn-default btn-sm" onClick={handleSignIn} disabled={signingIn}>
+            {signingIn ? 'Signing in…' : account?.loggedIn ? 'Re-authenticate' : 'Sign in'}
+          </button>
         </div>
         <div className="ss-row">
           <div>
