@@ -96,7 +96,13 @@ export function ProjectAvatar({
         <>
           <div className="proj-cpick-scrim" onClick={(e) => { e.stopPropagation(); setOpen(false) }} />
           <div ref={popRef} className="proj-cpick" style={{ top: pos.top, left: pos.left }} onClick={(e) => e.stopPropagation()}>
-            <div className="proj-cpick-lbl">Color</div>
+            <div className="proj-cpick-lblrow">
+              <div className="proj-cpick-lbl">Color</div>
+              <label className="proj-cpick-more" title="Custom color…">
+                <MoreHorizontal size={14} />
+                <input type="color" value={color ?? '#3b82f6'} onChange={(e) => setProjectColor(workspace, e.target.value)} />
+              </label>
+            </div>
             <div className="proj-cpick-row">
               {PROJECT_PALETTE.map((c) => (
                 <button
@@ -118,21 +124,23 @@ export function ProjectAvatar({
                 <MoreHorizontal size={14} />
               </button>
             </div>
-            <div className="proj-cpick-icons">
-              {ICON_KEYS.map((k) => {
-                const I = PROJECT_ICONS[k]
-                return (
-                  <button
-                    key={k}
-                    className={`proj-cpick-icon${(iconKey ?? 'folder-git-2') === k ? ' on' : ''}`}
-                    onClick={() => setProjectIcon(workspace, k)}
-                    style={color ? { color } : undefined}
-                  >
-                    <I size={15} />
-                  </button>
-                )
-              })}
-            </div>
+            {!browseOpen && (
+              <div className="proj-cpick-icons">
+                {ICON_KEYS.map((k) => {
+                  const I = PROJECT_ICONS[k]
+                  return (
+                    <button
+                      key={k}
+                      className={`proj-cpick-icon${(iconKey ?? 'folder-git-2') === k ? ' on' : ''}`}
+                      onClick={() => setProjectIcon(workspace, k)}
+                      style={color ? { color } : undefined}
+                    >
+                      <I size={15} />
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             {browseOpen && (
               <div className="proj-cpick-browse">
@@ -178,9 +186,6 @@ export function ProjectAvatar({
             )}
 
             <div className="proj-cpick-foot">
-              <label className="proj-cpick-custom" title="Custom color" style={{ background: color ?? 'var(--bg-subtle)' }}>
-                <input type="color" value={color ?? '#3b82f6'} onChange={(e) => setProjectColor(workspace, e.target.value)} />
-              </label>
               <button
                 className="proj-cpick-reset"
                 onClick={() => { setProjectColor(workspace, null); setProjectIcon(workspace, null); setOpen(false) }}

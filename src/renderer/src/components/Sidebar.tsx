@@ -2,14 +2,14 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Plus, Filter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
+  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
   Home, FolderGit2, LayoutGrid, Layers, Package, Settings, Search
 } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
-import { AGENTS, type Sandbox, type PageType } from '../types'
+import { AGENTS, type Sandbox, type PageType, type AgentType } from '../types'
 
 // Project row/icon with a hover popover that lists the project's sandboxes
 // (click to switch), the full path, and a "New sandbox" action. Used for both
@@ -229,18 +229,53 @@ export function Sidebar() {
   } = useStore()
   const collapsed = sidebarCollapsed
 
-  // Clicking blank sidebar space (not a row, button, header, or input) toggles
-  // the whole sidebar collapsed/expanded.
+  // Clicking blank sidebar space (not a row, button, header, input, or the
+  // resize handle) toggles the whole sidebar collapsed/expanded.
   const onEmptyClick = (e: React.MouseEvent) => {
     const el = e.target as HTMLElement
-    if (el.closest('button, a, input, label, .sb-item, .sb-nav-item, .sb-proj, .sb-sec-head, .sb-group-hd')) return
+    if (el.closest('button, a, input, label, .sb-item, .sb-nav-item, .sb-proj, .sb-sec-head, .sb-group-hd, .sb-resize')) return
     toggleSidebar()
+  }
+
+  // Drag-to-resize the sidebar width (expanded only), persisted.
+  const asideRef = useRef<HTMLElement>(null)
+  const [sbWidth, setSbWidth] = useState(() => {
+    const v = Number(localStorage.getItem('minipit:sidebarWidth'))
+    return v >= 180 && v <= 480 ? v : 216
+  })
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const left = asideRef.current?.getBoundingClientRect().left ?? 0
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    let latest = sbWidth
+    const onMove = (ev: MouseEvent) => {
+      latest = Math.min(480, Math.max(180, ev.clientX - left))
+      setSbWidth(latest)
+    }
+    const onUp = () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      localStorage.setItem('minipit:sidebarWidth', String(Math.round(latest)))
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const [groupBy, setGroupBy] = useState<'none' | 'project' | 'agent'>(
     () => (localStorage.getItem('minipit:sbxGroupBy') as 'none' | 'project' | 'agent') ?? 'none'
   )
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'stopped'>(
+    () => (localStorage.getItem('minipit:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
+  )
+  // Selected agents to filter by; empty = all agents.
+  const [agentFilter, setAgentFilter] = useState<AgentType[]>(() => {
+    try { return JSON.parse(localStorage.getItem('minipit:sbxAgents') ?? '[]') } catch { return [] }
+  })
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   // Fixed-position coords for the dropdown so it escapes the sidebar's overflow.
   const [filterPos, setFilterPos] = useState<{ top: number; left: number } | null>(null)
   const filterRef = useRef<HTMLDivElement>(null)
@@ -258,15 +293,37 @@ export function Sidebar() {
     setGroupBy(g)
     localStorage.setItem('minipit:sbxGroupBy', g)
   }
-  const hasFilter = !!filter || groupBy !== 'none'
+  const setAgents = (a: AgentType[]) => {
+    setAgentFilter(a)
+    localStorage.setItem('minipit:sbxAgents', JSON.stringify(a))
+  }
+  const toggleAgent = (id: AgentType) =>
+    setAgents(agentFilter.includes(id) ? agentFilter.filter((x) => x !== id) : [...agentFilter, id])
+  const setStatus = (s: 'all' | 'active' | 'stopped') => {
+    setStatusFilter(s)
+    localStorage.setItem('minipit:sbxStatus', s)
+  }
+  const clearFilters = () => { setFilter(''); setGrouping('none'); setAgents([]); setStatus('all'); setAgentMenuOpen(false) }
+  const hasFilter = !!filter || groupBy !== 'none' || agentFilter.length > 0 || statusFilter !== 'all'
 
-  // Filter by name, provider (agent), or status.
+  // Agents that actually appear in the current sandboxes — the only ones worth
+  // offering as a filter.
+  const presentAgents = AGENTS.filter((a) => sandboxes.some((s) => s.agent === a.id))
+  const agentBtnLabel = agentFilter.length === 0
+    ? 'All agents'
+    : agentFilter.length === 1
+      ? (AGENTS.find((a) => a.id === agentFilter[0])?.label ?? agentFilter[0])
+      : `${agentFilter.length} agents`
+
+  // Filter by selected agents, then by the free-text query (name/agent/status).
   const q = filter.trim().toLowerCase()
   const filtered = sandboxes.filter((s) =>
-    !q ||
-    s.name.toLowerCase().includes(q) ||
-    s.agent.toLowerCase().includes(q) ||
-    s.status.toLowerCase().includes(q)
+    (statusFilter === 'all' || (statusFilter === 'active' ? s.status === 'running' : s.status !== 'running')) &&
+    (agentFilter.length === 0 || agentFilter.includes(s.agent)) &&
+    (!q ||
+      s.name.toLowerCase().includes(q) ||
+      s.agent.toLowerCase().includes(q) ||
+      s.status.toLowerCase().includes(q))
   )
 
   // Optional grouping for the sandbox list (by project folder or by agent).
@@ -341,7 +398,12 @@ export function Sidebar() {
 
   return (
     <Tooltip.Provider delayDuration={250} skipDelayDuration={400}>
-    <aside className={`sidebar${collapsed ? ' collapsed' : ''}`} onClick={onEmptyClick}>
+    <aside
+      ref={asideRef}
+      className={`sidebar${collapsed ? ' collapsed' : ''}`}
+      style={collapsed ? undefined : { width: sbWidth }}
+      onClick={onEmptyClick}
+    >
       <div className="sb-nav sb-nav-first">
         {navItem('home', 'Home', <Home size={16} />)}
       </div>
@@ -379,11 +441,12 @@ export function Sidebar() {
                     // Right-align to the icon, but clamp so it never runs off either edge.
                     const left = Math.max(8, Math.min(r.right - W, window.innerWidth - W - 8))
                     setFilterPos({ top: r.bottom + 5, left })
+                    setAgentMenuOpen(false)
                     setFilterOpen(true)
                   }}
                   title="Filter & group sandboxes"
                 >
-                  <Filter size={15} />
+                  <ListFilter size={15} />
                 </button>
                 {filterOpen && filterPos && (
                   <div className="sb-filter-pop" style={{ top: filterPos.top, left: filterPos.left }}>
@@ -401,19 +464,71 @@ export function Sidebar() {
                       )}
                     </div>
                     <div className="sb-filter-grp">
-                      <span className="sb-filter-lbl">Group by</span>
+                      <span className="sb-filter-lbl">Status</span>
                       <div className="sb-filter-seg">
-                        {(['none', 'project', 'agent'] as const).map((g) => (
+                        {(['all', 'active', 'stopped'] as const).map((s) => (
                           <button
-                            key={g}
-                            className={`sb-filter-seg-btn${groupBy === g ? ' active' : ''}`}
-                            onClick={() => setGrouping(g)}
+                            key={s}
+                            className={`sb-filter-seg-btn${statusFilter === s ? ' active' : ''}`}
+                            onClick={() => setStatus(s)}
                           >
-                            {g === 'none' ? 'None' : g === 'project' ? 'Project' : 'Agent'}
+                            {s === 'all' ? 'All' : s === 'active' ? 'Active' : 'Stopped'}
                           </button>
                         ))}
                       </div>
                     </div>
+
+                    <div className="sb-filter-grp">
+                      <span className="sb-filter-lbl">Group by</span>
+                      <div className="sb-filter-seg">
+                        {(['project', 'agent'] as const).map((g) => (
+                          <button
+                            key={g}
+                            className={`sb-filter-seg-btn${groupBy === g ? ' active' : ''}`}
+                            onClick={() => setGrouping(groupBy === g ? 'none' : g)}
+                          >
+                            {g === 'project' ? 'Project' : 'Agent'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {presentAgents.length > 0 && (
+                      <div className="sb-filter-grp">
+                        <span className="sb-filter-lbl">Agent</span>
+                        <div className="sb-filter-select">
+                          <button
+                            className={`sb-filter-select-btn${agentFilter.length ? ' active' : ''}`}
+                            onClick={() => setAgentMenuOpen((o) => !o)}
+                          >
+                            <span>{agentBtnLabel}</span>
+                            <ChevronDown size={13} />
+                          </button>
+                          {agentMenuOpen && (
+                            <div className="sb-filter-menu">
+                              {presentAgents.map((a) => (
+                                <label key={a.id} className="sb-filter-opt">
+                                  <input
+                                    type="checkbox"
+                                    checked={agentFilter.includes(a.id)}
+                                    onChange={() => toggleAgent(a.id)}
+                                  />
+                                  {a.label}
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {hasFilter && (
+                      <div className="sb-filter-foot">
+                        <button className="sb-filter-clear" onClick={clearFilters} title="Clear filters & grouping">
+                          <X size={13} /> Clear filters
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -556,6 +671,8 @@ export function Sidebar() {
           </span>
         )}
       </div>
+
+      {!collapsed && <div className="sb-resize" onMouseDown={startResize} title="Drag to resize" />}
     </aside>
     </Tooltip.Provider>
   )
