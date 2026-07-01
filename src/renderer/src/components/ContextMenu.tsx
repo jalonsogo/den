@@ -91,16 +91,22 @@ export function ContextMenu() {
   // Save the sandbox's current state as a reusable template via `sbx template save`.
   const handleSaveSnapshot = () => {
     setContextMenu({ visible: false })
+    const running = sandbox.status === 'running'
     openPrompt({
       title: 'Save Snapshot',
-      message: `Save "${sandbox.name}" as a reusable template.`,
+      message: running
+        ? `Save "${sandbox.name}" as a reusable template. This stops the sandbox while the image is captured.`
+        : `Save "${sandbox.name}" as a reusable template.`,
       label: 'Template tag',
-      defaultValue: `${sandbox.name}-snapshot`,
-      placeholder: 'my-template:latest',
+      defaultValue: `${sandbox.name}:latest`,
+      placeholder: 'my-template:v1',
       confirmText: 'Save',
       onSubmit: async (tag) => {
         const res = await window.minipit?.saveSnapshot(sandbox.name, tag)
         if (!res?.ok) throw new Error(res?.error ?? 'Snapshot failed')
+        // sbx stops the sandbox to capture it — refresh so the UI reflects that.
+        const list = await window.minipit?.listSandboxes()
+        if (list) setSandboxes(list)
       },
     })
   }
