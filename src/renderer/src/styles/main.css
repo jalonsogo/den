@@ -2476,6 +2476,9 @@ html, body, #root {
   font-size: 11.5px;
   line-height: 1.5;
 }
+/* Full-body creation terminal (fills the modal while creating). */
+.create-log-full { margin-top: 0; }
+.create-log-full .create-log-pre { max-height: min(52vh, 460px); }
 
 .tog-row {
   display: flex;

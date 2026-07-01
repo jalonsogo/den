@@ -228,11 +228,17 @@ export function NewSandboxModal() {
     <div className="overlay" onClick={dismiss}>
       <div className="modal" style={{ width: 'clamp(460px, 52vw, 760px)' }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
-          <div className="m-title">New Sandbox</div>
-          <div className="m-sub">Pick an agent and workspace, then launch.</div>
+          <div className="m-title">{creating ? 'Creating Sandbox' : 'New Sandbox'}</div>
+          <div className="m-sub">{creating ? 'Setting up the sandbox — this can take a moment.' : 'Pick an agent and workspace, then launch.'}</div>
         </div>
 
         <div className="m-body">
+          {creating ? (
+          <div className="cmd-blk create-log create-log-full">
+            <pre ref={progRef} className="create-log-pre">{progress || 'Starting…'}</pre>
+          </div>
+          ) : (
+          <>
           {/* Name — random by default, regenerate or edit */}
           <div className="fg">
             <label className="flabel">Name</label>
@@ -481,32 +487,28 @@ export function NewSandboxModal() {
             )}
           </div>
 
-          {creating ? (
-            <div className="cmd-blk create-log">
-              <pre ref={progRef} className="create-log-pre">{progress || 'Starting…'}</pre>
-            </div>
-          ) : (
-            <div className="adv">
-              <button
-                className="adv-toggle"
-                onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
-              >
-                <ChevronRight size={13} style={{ transform: cmdOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
-                Command
-              </button>
-              {cmdOpen && (
-                <div className="adv-body">
-                  <div className="cmd-blk">
-                    {cmdParts.split(' ').map((word, i) => {
-                      if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
-                      if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
-                      if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
-                      return <span key={i} className="cm-v">{word} </span>
-                    })}
-                  </div>
+          <div className="adv">
+            <button
+              className="adv-toggle"
+              onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
+            >
+              <ChevronRight size={13} style={{ transform: cmdOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
+              Command
+            </button>
+            {cmdOpen && (
+              <div className="adv-body">
+                <div className="cmd-blk">
+                  {cmdParts.split(' ').map((word, i) => {
+                    if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
+                    if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
+                    if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
+                    return <span key={i} className="cm-v">{word} </span>
+                  })}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
+          </>
           )}
 
           {error && (
