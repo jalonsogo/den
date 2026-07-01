@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-01
+
+### Added
+- Sidebar filtering and grouping: filter by status and agent from the sidebar filter/group dropdown, plus a resizable sidebar width.
+- Collapsible sidebar sections, a full-icon picker, and hover flyouts.
+- Background sandbox creation: new sandboxes show a "Creating…" row and flash in the sidebar when ready, with live creation output streamed into an in-modal terminal.
+- Save Snapshot context-menu action, backed by a reusable prompt modal (Electron has no `window.prompt()`); the stop-sandbox prompt during snapshot is auto-confirmed.
+- Offer to initialize a Git repo when `--clone` is used on a folder that has none.
+- A three-dot menu on templates.
+
+### Changed
+- The New Sandbox modal no longer closes on outside click.
+- "Add to sandbox" now uses the PackagePlus icon.
+
+### Fixed
+- Kit push no longer fails with `docker-credential-desktop not found`.
+- Filter dropdown no longer clips or looks washed out, and stays on-screen (anchored left, clamped).
+- The terminal-theme flyout flips left when it would overflow, and the sandbox header kebab is no longer clipped.
+
 ## [0.2.0] - 2026-07-01
 
 ### Added
@@ -52,7 +71,8 @@ Initial release — the first automated, cross-platform build (macOS + Windows).
 - Theme submenu and den branding.
 - GitHub Actions release pipeline that builds and publishes macOS (`.dmg`/`.zip`) and Windows (NSIS `.exe`) installers on each `v*` tag.
 
-[Unreleased]: https://github.com/jalonsogo/den/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jalonsogo/den/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jalonsogo/den/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jalonsogo/den/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/jalonsogo/den/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jalonsogo/den/releases/tag/v0.1.0
