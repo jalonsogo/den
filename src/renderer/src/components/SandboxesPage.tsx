@@ -37,22 +37,34 @@ export function SandboxesPage() {
             </button>
           </div>
         ) : (
-          sorted.map((s) => (
-            <div key={s.id} className="home-row" onClick={() => setActiveSandboxId(s.id)}>
-              <SandboxAvatar
-                sandbox={s}
-                size={28}
-                alert={unackedBlockCount(policyBlocks, blocksSeenAt, s.name) > 0}
-                activity={s.status === 'running' ? (agentActivity[s.name] ?? null) : null}
-              />
-              <span className="home-row-name">{s.name}</span>
-              <span className="home-row-sub">{s.agent} · {projectName(s.workspace)}</span>
-              <span className="sbx-row-right">
-                {s.uptimeSeconds ? <span className="home-row-up">{formatUptime(s.uptimeSeconds)}</span> : null}
-                <span className={`proj-dot ${s.status === 'running' ? 'running' : 'stopped'}`} />
-              </span>
-            </div>
-          ))
+          sorted.map((s) => {
+            const creating = s.status === 'creating'
+            return (
+              <div
+                key={s.id}
+                className="home-row"
+                style={creating ? { cursor: 'default', opacity: 0.85 } : undefined}
+                onClick={() => { if (!creating) setActiveSandboxId(s.id) }}
+              >
+                <SandboxAvatar
+                  sandbox={s}
+                  size={28}
+                  alert={unackedBlockCount(policyBlocks, blocksSeenAt, s.name) > 0}
+                  activity={s.status === 'running' ? (agentActivity[s.name] ?? null) : null}
+                />
+                <span className="home-row-name">{s.name}</span>
+                <span className="home-row-sub">{s.agent} · {projectName(s.workspace)}</span>
+                <span className="sbx-row-right">
+                  {creating ? (
+                    <span className="home-row-up">Creating…</span>
+                  ) : s.uptimeSeconds ? (
+                    <span className="home-row-up">{formatUptime(s.uptimeSeconds)}</span>
+                  ) : null}
+                  <span className={`proj-dot ${s.status === 'running' ? 'running' : creating ? 'creating' : 'stopped'}`} />
+                </span>
+              </div>
+            )
+          })
         )}
       </div>
     </div>

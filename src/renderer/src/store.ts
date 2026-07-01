@@ -56,6 +56,8 @@ interface AppState {
   defaultKits: string[]
 
   setSandboxes:       (sandboxes: Sandbox[]) => void
+  addCreatingSandbox: (sandbox: Sandbox) => void
+  removeCreatingSandbox: (name: string) => void
   toggleDefaultKit:   (name: string) => void
   setSecretTarget:    (service: SecretService | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
@@ -277,10 +279,18 @@ export const useStore = create<AppState>((set) => ({
         status: deletingIds.includes(s.id) ? ('deleting' as const) : s.status
       }))
 
-      const activeStillExists = sandboxes.some((s) => s.id === state.activeSandboxId)
+      // Keep optimistic "creating" placeholders visible across polls until the
+      // real sandbox (same name) shows up in the incoming list.
+      const incomingNames = new Set(incoming.map((s) => s.name))
+      const creatingHold = state.sandboxes.filter(
+        (s) => s.status === 'creating' && !incomingNames.has(s.name)
+      )
+      const merged = [...creatingHold, ...sandboxes]
+
+      const activeStillExists = merged.some((s) => s.id === state.activeSandboxId)
       const activeSandboxId = activeStillExists
         ? state.activeSandboxId
-        : (sandboxes[0]?.id ?? null)
+        : (merged[0]?.id ?? null)
 
       // Activity ("Working…"/"Waiting") only makes sense for a running agent.
       // Drop it for anything not running (stopped externally, after a den
@@ -290,8 +300,20 @@ export const useStore = create<AppState>((set) => ({
         Object.entries(state.agentActivity).filter(([name]) => runningNames.has(name))
       )
 
-      return { sandboxes, activeSandboxId, deletingIds, agentActivity }
+      return { sandboxes: merged, activeSandboxId, deletingIds, agentActivity }
     }),
+
+  addCreatingSandbox: (sandbox) =>
+    set((state) => ({
+      sandboxes: state.sandboxes.some((s) => s.name === sandbox.name)
+        ? state.sandboxes
+        : [sandbox, ...state.sandboxes]
+    })),
+
+  removeCreatingSandbox: (name) =>
+    set((state) => ({
+      sandboxes: state.sandboxes.filter((s) => !(s.status === 'creating' && s.name === name))
+    })),
 
   setDeleting: (id, on) =>
     set((state) => ({

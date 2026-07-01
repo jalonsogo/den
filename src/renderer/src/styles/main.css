@@ -1539,6 +1539,7 @@ html, body, #root {
 .proj-sbx-status { font-size: 11px; font-weight: 600; }
 .proj-sbx-status.running { color: var(--green); }
 .proj-sbx-status.stopped { color: var(--t3); }
+.proj-sbx-status.creating { color: var(--amber, #f59e0b); }
 .proj-sbx-empty { font-size: 12px; color: var(--t3); padding: 2px 2px 6px; }
 .proj-sbx-new {
   color: var(--t2); border-style: dashed; justify-content: center; gap: 6px;
@@ -1761,6 +1762,7 @@ html, body, #root {
 .proj-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .proj-dot.running { background: var(--green); }
 .proj-dot.stopped { background: var(--t4); }
+.proj-dot.creating { background: var(--amber, #f59e0b); animation: pulse 1.4s infinite; }
 
 /* ── Library (Templates / Kits / Mixins) ── */
 .lib-tbl { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

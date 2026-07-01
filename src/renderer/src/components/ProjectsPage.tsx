@@ -143,8 +143,15 @@ export function ProjectsPage() {
                     {list.length === 0 && (
                       <div className="proj-sbx-empty">No sandboxes yet</div>
                     )}
-                    {list.map((s) => (
-                      <button key={s.id} className="proj-sbx" onClick={() => setActiveSandboxId(s.id)}>
+                    {list.map((s) => {
+                      const creating = s.status === 'creating'
+                      return (
+                      <button
+                        key={s.id}
+                        className="proj-sbx"
+                        style={creating ? { cursor: 'default' } : undefined}
+                        onClick={() => { if (!creating) setActiveSandboxId(s.id) }}
+                      >
                         <SandboxAvatar
                           sandbox={s}
                           size={28}
@@ -159,12 +166,13 @@ export function ProjectsPage() {
                           {s.status === 'running' && s.uptimeSeconds ? (
                             <span className="home-row-up">{formatUptime(s.uptimeSeconds)}</span>
                           ) : null}
-                          <span className={`proj-sbx-status ${s.status === 'running' ? 'running' : 'stopped'}`}>
-                            {s.status === 'running' ? 'Running' : 'Stopped'}
+                          <span className={`proj-sbx-status ${s.status === 'running' ? 'running' : creating ? 'creating' : 'stopped'}`}>
+                            {s.status === 'running' ? 'Running' : creating ? 'Creating…' : 'Stopped'}
                           </span>
                         </span>
                       </button>
-                    ))}
+                      )
+                    })}
                     <button className="proj-sbx proj-sbx-new" onClick={() => openNew(workspace)} title="New sandbox in this project">
                       <Plus size={14} /> New sandbox
                     </button>

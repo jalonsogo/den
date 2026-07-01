@@ -9,8 +9,17 @@ import { AGENTS, type AgentType, type Template } from '../../types'
 
 const MEM_VALUES = ['default', '2g', '4g', '8g', '16g', '32g']
 
+const slugify = (s: string): string =>
+  s.toLowerCase().replace(/[^a-z0-9._+-]+/g, '-').replace(/^-+|-+$/g, '')
+
+// Mirror sbx's default sandbox name: <agent>-<workdir>. Empty when no folder.
+function deriveName(agent: string, workspace: string): string {
+  const folder = workspace.split('/').filter(Boolean).pop() ?? ''
+  return folder ? slugify(`${agent}-${folder}`) : ''
+}
+
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, setActiveSandboxId, newSandboxWorkspace, newSandboxTemplate, defaultKits } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, newSandboxWorkspace, newSandboxTemplate, defaultKits } = useStore()
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -20,7 +29,10 @@ export function NewSandboxModal() {
   const [source, setSource]           = useState<'new' | 'template'>(newSandboxTemplate ? 'template' : 'new')
   const [templates, setTemplates]     = useState<Template[]>([])
   const [template, setTemplate]       = useState(newSandboxTemplate ?? '')   // "repository:tag"
-  const [name, setName]               = useState(randomName())
+  // Suggested name mirrors sbx's default (<agent>-<workdir>) once a real folder
+  // is known; falls back to a random name on first run (no folder yet).
+  const [name, setName]               = useState(() => deriveName('claude', pinnedWs) || randomName())
+  const [nameEdited, setNameEdited]   = useState(false)
   const [agent, setAgent]             = useState<AgentType>('claude')
   const [workspace, setWorkspace]     = useState(pinnedWs)
   const [wsBase, setWsBase]           = useState('')     // ~/den base for the default path
@@ -33,13 +45,10 @@ export function NewSandboxModal() {
   // Command preview lives in its own accordion; remember the user's show/hide choice.
   const [cmdOpen, setCmdOpen]         = useState(localStorage.getItem('minipit:showCreateCmd') === '1')
   const [ddOpen, setDdOpen]           = useState(false)
-  const [launching, setLaunching]     = useState(false)
   const [error, setError]             = useState('')
   const [availKits, setAvailKits]     = useState<{ name: string; dir: string }[]>([])
   const [kitSpecs, setKitSpecs]       = useState<Record<string, ParsedKit>>({})  // dir → parsed spec, for preview
   const [selKits, setSelKits]         = useState<string[]>([])
-  const [progress, setProgress]       = useState('')   // live `sbx create` output
-  const progRef = useRef<HTMLPreElement>(null)
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
   const kitDdRef = useRef<HTMLDivElement>(null)
@@ -105,44 +114,52 @@ export function NewSandboxModal() {
     setWorkspace(slug ? `${wsBase}/${slug}` : wsBase)
   }, [name, wsBase, wsEdited, pinnedWs])
 
+  // Once a real folder is known (project session or user-picked), suggest the
+  // sbx-style <agent>-<workdir> name, tracking agent/workspace until edited. In
+  // the first-run case the workspace follows the name instead (effect above), so
+  // this stays off to avoid a loop and the random name is kept.
+  useEffect(() => {
+    if (nameEdited || (!pinnedWs && !wsEdited)) return
+    const n = deriveName(agent, workspace)
+    if (n) setName(n)
+  }, [agent, workspace, nameEdited, pinnedWs, wsEdited])
+
   const handleBrowse = async () => {
     const path = await window.minipit?.showOpenDialog()
     if (path) { setWorkspace(path); setWsEdited(true) }
   }
 
-  const handleLaunch = async () => {
+  // Creation runs in the background: close the modal immediately, show a
+  // "Creating…" row in the sandbox list, and flip it to running when sbx finishes.
+  const handleLaunch = () => {
     if (!workspace) { setError('Workspace is required'); return }
-    setError('')
-    setProgress('')
-    setLaunching(true)
-    const unsub = window.minipit?.onCreateOutput((chunk) => {
-      setProgress((p) => p + chunk)
-      requestAnimationFrame(() => { if (progRef.current) progRef.current.scrollTop = progRef.current.scrollHeight })
+    const finalName = (name.trim() || deriveName(agent, workspace) || randomName())
+    // Remember this folder so the next standalone sandbox defaults to it.
+    localStorage.setItem('minipit:lastWorkspace', workspace)
+    addCreatingSandbox({
+      id: `creating-${finalName}`, name: finalName, status: 'creating',
+      agent, workspace, ports: [], logs: []
     })
-    try {
-      const created = await window.minipit?.createSandbox({
-        name: name.trim() || undefined,
-        agent,
-        workspace,
-        memory: memValue !== 'default' ? memValue : undefined,
-        branch: clone,
-        template: source === 'template' && template ? template : undefined,
-        kits: selKits
-      })
-      // Remember this folder so the next standalone sandbox defaults to it.
-      localStorage.setItem('minipit:lastWorkspace', workspace)
-      const sandboxes = await window.minipit?.listSandboxes()
-      if (sandboxes) setSandboxes(sandboxes)
-      // createSandbox also attaches (sbx run) in the main process — jump straight
-      // into the new sandbox so its agent terminal is shown.
-      if (created) setActiveSandboxId(created)
-      unsub?.()
-      setModal(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setLaunching(false)
-      unsub?.()
-    }
+    setModal(null)
+    ;(async () => {
+      try {
+        await window.minipit?.createSandbox({
+          name: finalName,
+          agent,
+          workspace,
+          memory: memValue !== 'default' ? memValue : undefined,
+          branch: clone,
+          template: source === 'template' && template ? template : undefined,
+          kits: selKits
+        })
+        const sandboxes = await window.minipit?.listSandboxes()
+        if (sandboxes) setSandboxes(sandboxes)
+        removeCreatingSandbox(finalName)
+      } catch (e) {
+        removeCreatingSandbox(finalName)
+        alert(`Sandbox "${finalName}" failed to create: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    })()
   }
 
   const cmdParts = [
@@ -157,7 +174,7 @@ export function NewSandboxModal() {
   ].filter(Boolean).join(' ')
 
   return (
-    <div className="overlay" onClick={() => !launching && setModal(null)}>
+    <div className="overlay" onClick={() => setModal(null)}>
       <div className="modal" style={{ width: 'clamp(460px, 52vw, 760px)' }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
           <div className="m-title">New Sandbox</div>
@@ -173,9 +190,9 @@ export function NewSandboxModal() {
                 className="finput"
                 value={name}
                 placeholder="furious-blackhole"
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => { setName(e.target.value); setNameEdited(true) }}
               />
-              <button className="btn btn-default btn-sm" onClick={() => setName(randomName())} title="Random name">
+              <button className="btn btn-default btn-sm" onClick={() => { setName(randomName()); setNameEdited(true) }} title="Random name">
                 <RefreshCw size={13} />
               </button>
             </div>
@@ -402,33 +419,27 @@ export function NewSandboxModal() {
             )}
           </div>
 
-          {launching || progress ? (
-            <div className="cmd-blk create-log">
-              <pre ref={progRef} className="create-log-pre">{progress || 'Starting…'}</pre>
-            </div>
-          ) : (
-            <div className="adv">
-              <button
-                className="adv-toggle"
-                onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
-              >
-                <ChevronRight size={13} style={{ transform: cmdOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
-                Command
-              </button>
-              {cmdOpen && (
-                <div className="adv-body">
-                  <div className="cmd-blk">
-                    {cmdParts.split(' ').map((word, i) => {
-                      if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
-                      if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
-                      if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
-                      return <span key={i} className="cm-v">{word} </span>
-                    })}
-                  </div>
+          <div className="adv">
+            <button
+              className="adv-toggle"
+              onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
+            >
+              <ChevronRight size={13} style={{ transform: cmdOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
+              Command
+            </button>
+            {cmdOpen && (
+              <div className="adv-body">
+                <div className="cmd-blk">
+                  {cmdParts.split(' ').map((word, i) => {
+                    if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
+                    if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
+                    if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
+                    return <span key={i} className="cm-v">{word} </span>
+                  })}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
           {error && (
             <div style={{ color: 'var(--destruct)', fontSize: 12, marginTop: 10, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: 6 }}>
@@ -438,10 +449,8 @@ export function NewSandboxModal() {
         </div>
 
         <div className="m-ftr">
-          <button className="btn btn-ghost" onClick={() => setModal(null)} disabled={launching}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleLaunch} disabled={launching}>
-            {launching ? 'Creating…' : 'Create Sandbox'}
-          </button>
+          <button className="btn btn-ghost" onClick={() => setModal(null)}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleLaunch}>Create Sandbox</button>
         </div>
       </div>
     </div>

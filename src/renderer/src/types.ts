@@ -1,4 +1,4 @@
-export type SandboxStatus = 'running' | 'stopped' | 'starting' | 'stopping' | 'deleting'
+export type SandboxStatus = 'running' | 'stopped' | 'starting' | 'stopping' | 'deleting' | 'creating'
 
 // Exact agent identifiers accepted by the sbx CLI (see `sbx run --help`).
 export type AgentType =

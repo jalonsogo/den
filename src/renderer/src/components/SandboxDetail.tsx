@@ -90,6 +90,7 @@ export function SandboxDetail() {
         </span>
         <span className="d-uptime">
           {sandbox.status === 'running'  ? 'Running' :
+           sandbox.status === 'creating' ? 'Creating…' :
            sandbox.status === 'starting' ? 'Starting…' :
            sandbox.status === 'stopping' ? 'Stopping…' :
            sandbox.status === 'deleting' ? 'Deleting…' : 'Stopped'}

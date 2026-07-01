@@ -112,6 +112,7 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const { setActiveSandboxId, setContextMenu } = useStore()
   const isRunning = sandbox.status === 'running'
   const isDeleting = sandbox.status === 'deleting'
+  const isCreating = sandbox.status === 'creating'
   const folder = sandbox.workspace.split('/').pop() || sandbox.workspace
   const hasBlocks = useStore((s) => unackedBlockCount(s.policyBlocks, s.blocksSeenAt, sandbox.name) > 0)
   const activity = useStore((s) => s.agentActivity[sandbox.name] ?? null)
@@ -119,7 +120,7 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const openMenu = (e: React.MouseEvent, anchor: 'cursor' | 'button') => {
     e.preventDefault()
     e.stopPropagation()
-    if (isDeleting) return
+    if (isDeleting || isCreating) return
     if (anchor === 'button') {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
       setContextMenu({ visible: true, x: r.right - 200, y: r.bottom + 4, sandboxId: sandbox.id })
@@ -130,8 +131,8 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
 
   return (
     <div
-      className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting ? ' is-deleting' : ''}`}
-      onClick={() => !isDeleting && setActiveSandboxId(sandbox.id)}
+      className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}`}
+      onClick={() => !isDeleting && !isCreating && setActiveSandboxId(sandbox.id)}
       onContextMenu={(e) => openMenu(e, 'cursor')}
       title={collapsed ? sandbox.name : undefined}
     >
@@ -142,7 +143,9 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
           <div className="sb-item-body">
             <div className="sb-item-name">{sandbox.name}</div>
             <div className={`sb-item-sub${isRunning && activity === 'working' ? ' is-working' : ''}`}>
-              {isDeleting
+              {isCreating
+                ? 'Creating…'
+                : isDeleting
                 ? 'Deleting…'
                 : !isRunning
                   ? `${folder} · stopped`
@@ -154,7 +157,7 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
             </div>
           </div>
 
-          {!isDeleting && (
+          {!isDeleting && !isCreating && (
             <button className="sb-item-menu" onClick={(e) => openMenu(e, 'button')} title="Actions">
               <MoreVertical size={15} />
             </button>
