@@ -8,7 +8,8 @@ import {
 import { useStore, unackedBlockCount } from '../store'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SandboxAvatar } from './SandboxAvatar'
-import type { Sandbox, PageType } from '../types'
+import { formatUptime } from '../lib/utils'
+import { AGENTS, type Sandbox, type PageType } from '../types'
 
 // Project row/icon with a hover popover that lists the project's sandboxes
 // (click to switch), the full path, and a "New sandbox" action. Used for both
@@ -41,6 +42,14 @@ function ProjectHover({
   }
   const hide = () => { closeTimer.current = setTimeout(() => { setOpen(false); setConfirmDel(false) }, 140) }
 
+  // A right-click (context menu) anywhere dismisses the hover popover.
+  useEffect(() => {
+    if (!open) return
+    const onCtx = () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(false); setConfirmDel(false) }
+    document.addEventListener('contextmenu', onCtx)
+    return () => document.removeEventListener('contextmenu', onCtx)
+  }, [open])
+
   return (
     <div className={className} onMouseEnter={show} onMouseLeave={hide} onClick={onClick}>
       {children}
@@ -57,9 +66,6 @@ function ProjectHover({
             <span className="sb-proj-pop-count">{project.list.length}</span>
           </div>
           <div className="sb-proj-pop-path">{project.workspace}</div>
-          <button className="sb-proj-pop-new" onClick={(e) => { e.stopPropagation(); onNew(); setOpen(false) }}>
-            <Plus size={13} /> New sandbox
-          </button>
           <div className="sb-proj-pop-list">
             {project.list.length === 0
               ? <div className="sb-proj-pop-empty">No sandboxes yet</div>
@@ -74,6 +80,9 @@ function ProjectHover({
                 </button>
               ))}
           </div>
+          <button className="sb-proj-pop-new" onClick={(e) => { e.stopPropagation(); onNew(); setOpen(false) }}>
+            <Plus size={13} /> New sandbox
+          </button>
 
           {/* Delete is only offered for empty projects (no sandboxes to orphan). */}
           {isEmpty && (
@@ -117,10 +126,31 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const hasBlocks = useStore((s) => unackedBlockCount(s.policyBlocks, s.blocksSeenAt, sandbox.name) > 0)
   const activity = useStore((s) => s.agentActivity[sandbox.name] ?? null)
   const justCreated = useStore((s) => s.highlightSandbox === sandbox.name)
+  const agentLabel = AGENTS.find((a) => a.id === sandbox.agent)?.label ?? sandbox.agent
+
+  // Collapsed-rail hover flyout: surfaces name/project/status/duration that are
+  // otherwise hidden when the sidebar is a thin icon rail.
+  const [hover, setHover] = useState(false)
+  const [hoverPos, setHoverPos] = useState({ top: 0, left: 0 })
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>()
+  const showHover = (e: React.MouseEvent) => {
+    if (!collapsed) return
+    if (hoverTimer.current) clearTimeout(hoverTimer.current)
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setHoverPos({ top: r.top, left: r.right + 8 })
+    setHover(true)
+  }
+  const hideHover = () => { hoverTimer.current = setTimeout(() => setHover(false), 120) }
+
+  const statusLabel = isCreating ? 'Creating…' : isDeleting ? 'Deleting…'
+    : isRunning ? (activity === 'working' ? 'Working…' : activity === 'waiting' ? 'Waiting for you' : 'Running')
+    : 'Stopped'
 
   const openMenu = (e: React.MouseEvent, anchor: 'cursor' | 'button') => {
     e.preventDefault()
     e.stopPropagation()
+    if (hoverTimer.current) clearTimeout(hoverTimer.current)
+    setHover(false)
     if (isDeleting || isCreating) return
     if (anchor === 'button') {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -135,9 +165,31 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
       className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}${justCreated ? ' just-created' : ''}`}
       onClick={() => !isDeleting && !isCreating && setActiveSandboxId(sandbox.id)}
       onContextMenu={(e) => openMenu(e, 'cursor')}
-      title={collapsed ? sandbox.name : undefined}
+      onMouseEnter={showHover}
+      onMouseLeave={hideHover}
     >
       <SandboxAvatar sandbox={sandbox} deleting={isDeleting} alert={hasBlocks} activity={isRunning ? activity : null} />
+
+      {collapsed && hover && createPortal(
+        <div
+          className="sb-item-pop"
+          style={{ top: hoverPos.top, left: hoverPos.left }}
+          onMouseEnter={() => { if (hoverTimer.current) clearTimeout(hoverTimer.current) }}
+          onMouseLeave={hideHover}
+        >
+          <div className="sb-item-pop-hd">
+            <span className="sb-item-pop-name">{sandbox.name}</span>
+            <span className="sb-item-pop-status" data-on={isRunning}>{statusLabel}</span>
+          </div>
+          <div className="sb-item-pop-row"><FolderGit2 size={12} /> {folder}</div>
+          <div className="sb-item-pop-row">{agentLabel}</div>
+          {sandbox.branch && <div className="sb-item-pop-row">⌥ {sandbox.branch}</div>}
+          {isRunning && sandbox.uptimeSeconds != null && (
+            <div className="sb-item-pop-row">Up {formatUptime(sandbox.uptimeSeconds)}</div>
+          )}
+        </div>,
+        document.body
+      )}
 
       {!collapsed && (
         <>
@@ -173,9 +225,17 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage, setActiveSandboxId,
     setNewSandboxWorkspace, setActiveProject, sidebarCollapsed,
-    customProjects, addProject
+    customProjects, addProject, toggleSidebar
   } = useStore()
   const collapsed = sidebarCollapsed
+
+  // Clicking blank sidebar space (not a row, button, header, or input) toggles
+  // the whole sidebar collapsed/expanded.
+  const onEmptyClick = (e: React.MouseEvent) => {
+    const el = e.target as HTMLElement
+    if (el.closest('button, a, input, label, .sb-item, .sb-nav-item, .sb-proj, .sb-sec-head, .sb-group-hd')) return
+    toggleSidebar()
+  }
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const [groupBy, setGroupBy] = useState<'none' | 'project' | 'agent'>(
@@ -185,6 +245,14 @@ export function Sidebar() {
   const [filterPos, setFilterPos] = useState<{ top: number; left: number } | null>(null)
   const filterRef = useRef<HTMLDivElement>(null)
   const [libOpen, setLibOpen] = useState(() => localStorage.getItem('minipit:libraryOpen') === '1')
+  const [projOpen, setProjOpen] = useState(() => localStorage.getItem('minipit:projectsOpen') !== '0')
+  const [sbxOpen, setSbxOpen] = useState(() => localStorage.getItem('minipit:sandboxesOpen') !== '0')
+  const toggleProj = () =>
+    setProjOpen((o) => { const n = !o; localStorage.setItem('minipit:projectsOpen', n ? '1' : '0'); return n })
+  const toggleLib = () =>
+    setLibOpen((o) => { const n = !o; localStorage.setItem('minipit:libraryOpen', n ? '1' : '0'); return n })
+  const toggleSbx = () =>
+    setSbxOpen((o) => { const n = !o; localStorage.setItem('minipit:sandboxesOpen', n ? '1' : '0'); return n })
 
   const setGrouping = (g: 'none' | 'project' | 'agent') => {
     setGroupBy(g)
@@ -273,7 +341,7 @@ export function Sidebar() {
 
   return (
     <Tooltip.Provider delayDuration={250} skipDelayDuration={400}>
-    <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
+    <aside className={`sidebar${collapsed ? ' collapsed' : ''}`} onClick={onEmptyClick}>
       <div className="sb-nav sb-nav-first">
         {navItem('home', 'Home', <Home size={16} />)}
       </div>
@@ -287,6 +355,14 @@ export function Sidebar() {
         ) : (
           <>
             <div className="sb-sec-head">
+              <button
+                className="sb-sec-chev"
+                title={sbxOpen ? 'Collapse' : 'Expand'}
+                aria-expanded={sbxOpen}
+                onClick={toggleSbx}
+              >
+                {sbxOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </button>
               <button
                 className={`sb-sec-title${activePage === 'sandboxes' || activePage === 'sandbox' ? ' active' : ''}`}
                 onClick={() => setActivePage('sandboxes')}
@@ -345,6 +421,7 @@ export function Sidebar() {
             </div>
           </>
         )}
+        {(collapsed || sbxOpen) && (
         <div className="sb-list">
           {filtered.length === 0 ? (
             !collapsed && <div className="sb-empty">{sandboxes.length === 0 ? 'No sandboxes' : 'No matches'}</div>
@@ -366,6 +443,7 @@ export function Sidebar() {
             ))
           )}
         </div>
+        )}
       </div>
 
       <div className="sb-div" />
@@ -374,6 +452,14 @@ export function Sidebar() {
       <div className="sb-section">
         {!collapsed && (
           <div className="sb-sec-head">
+            <button
+              className="sb-sec-chev"
+              title={projOpen ? 'Collapse' : 'Expand'}
+              aria-expanded={projOpen}
+              onClick={toggleProj}
+            >
+              {projOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </button>
             <button
               className={`sb-sec-title${activePage === 'projects' ? ' active' : ''}`}
               onClick={() => { setActiveProject(null); setActivePage('projects') }}
@@ -384,7 +470,7 @@ export function Sidebar() {
           </div>
         )}
 
-        {collapsed ? (
+        {(collapsed || projOpen) && (collapsed ? (
           projects.length === 0
             ? tip('Projects',
                 <div
@@ -427,7 +513,7 @@ export function Sidebar() {
                 </button>
               </div>
             ))
-        )}
+        ))}
       </div>
 
       <div className="sb-div" />
@@ -437,18 +523,14 @@ export function Sidebar() {
         {!collapsed && (
           <div className="sb-sec-head">
             <button
-              className="sb-sec-title"
-              onClick={() => setLibOpen((o) => { const n = !o; localStorage.setItem('minipit:libraryOpen', n ? '1' : '0'); return n })}
-            >
-              Library
-            </button>
-            <button
-              className="sb-add"
+              className="sb-sec-chev"
               title={libOpen ? 'Collapse' : 'Expand'}
-              onClick={() => setLibOpen((o) => { const n = !o; localStorage.setItem('minipit:libraryOpen', n ? '1' : '0'); return n })}
+              aria-expanded={libOpen}
+              onClick={toggleLib}
             >
-              {libOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              {libOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             </button>
+            <button className="sb-sec-title" onClick={toggleLib}>Library</button>
           </div>
         )}
         {(collapsed || libOpen) && (
