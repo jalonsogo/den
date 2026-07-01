@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useStore } from '../store'
+import { useStore, projectDisplayName } from '../store'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 
 export function ContextMenu() {
@@ -7,6 +7,16 @@ export function ContextMenu() {
   const termTheme = useStore((s) => s.termTheme)
   const setTermTheme = useStore((s) => s.setTermTheme)
   const openPrompt = useStore((s) => s.openPrompt)
+  const projectNames = useStore((s) => s.projectNames)
+  const setProjectName = useStore((s) => s.setProjectName)
+  const removeProject = useStore((s) => s.removeProject)
+  const setActiveProject = useStore((s) => s.setActiveProject)
+  const setActivePage = useStore((s) => s.setActivePage)
+  const setNewSandboxWorkspace = useStore((s) => s.setNewSandboxWorkspace)
+  const setModal = useStore((s) => s.setModal)
+  const setCustomizeProject = useStore((s) => s.setCustomizeProject)
+  const gitInfoMap = useStore((s) => s.gitInfo)
+  const loadGitInfo = useStore((s) => s.loadGitInfo)
   const ref = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
@@ -48,7 +58,105 @@ export function ContextMenu() {
     setSubTop(r.bottom > window.innerHeight - M ? -5 + (window.innerHeight - M - r.bottom) : undefined)
   }, [themeOpen])
 
-  if (!contextMenu.visible || !sandbox) return null
+  if (!contextMenu.visible) return null
+
+  // ── Project context menu (right-click a project row) ──────────────────────
+  const projectWs = contextMenu.workspace
+  if (projectWs) {
+    const list = sandboxes.filter((s) => s.workspace === projectWs)
+    const running = list.filter((s) => s.status === 'running')
+    const stopped = list.filter((s) => s.status === 'stopped')
+    const name = projectDisplayName(projectNames, projectWs)
+    const close = () => setContextMenu({ visible: false })
+
+    const openProject = () => { close(); setActiveProject(projectWs); setActivePage('projects') }
+    const newSandbox = () => { close(); setNewSandboxWorkspace(projectWs); setModal('new-sandbox') }
+    const reveal = () => { close(); window.minipit?.openInFinder(projectWs) }
+    const copyPath = () => { close(); navigator.clipboard?.writeText(projectWs).catch(() => {}) }
+    const customize = () => { close(); setCustomizeProject(projectWs) }
+    const git = gitInfoMap[projectWs]
+    const initGit = async () => {
+      close()
+      const r = await window.minipit?.gitInit(projectWs)
+      if (r && !r.ok) alert(`git init failed:\n${r.error ?? 'unknown error'}`)
+      else loadGitInfo(projectWs, true)
+    }
+    const openRemote = () => { close(); if (git?.remoteUrl) window.minipit?.openPath(git.remoteUrl) }
+    const copyRemote = () => { close(); if (git?.remote) navigator.clipboard?.writeText(git.remote).catch(() => {}) }
+    const rename = () => {
+      close()
+      openPrompt({
+        title: 'Rename project',
+        message: 'Sets a display name in den. The folder on disk is unchanged.',
+        label: 'Display name',
+        defaultValue: name,
+        placeholder: projectWs.split('/').pop() ?? '',
+        confirmText: 'Rename',
+        onSubmit: (v) => setProjectName(projectWs, v || null),
+      })
+    }
+    const stopAll = async () => {
+      close()
+      for (const s of running) {
+        updateSandbox(s.id, { status: 'stopping' })
+        try { await window.minipit?.stopSandbox(s.id); updateSandbox(s.id, { status: 'stopped', uptimeSeconds: undefined }) }
+        catch { updateSandbox(s.id, { status: 'running' }) }
+      }
+    }
+    const startAll = async () => {
+      close()
+      for (const s of stopped) {
+        try { await window.minipit?.runSandbox(s.name); updateSandbox(s.id, { status: 'running' }) }
+        catch (e) { console.error(e) }
+      }
+    }
+    const remove = () => {
+      close()
+      const msg = list.length
+        ? `Remove "${name}" from den? Its ${list.length} sandbox${list.length > 1 ? 'es' : ''} stay on disk and can be re-added.`
+        : `Remove "${name}" from den?`
+      if (!confirm(msg)) return
+      removeProject(projectWs, false)
+    }
+
+    return (
+      <div
+        ref={ref}
+        className="ctx-menu"
+        style={{ top: pos.top, left: pos.left }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="ctx-item" onClick={openProject}>Open project</div>
+        <div className="ctx-item" onClick={newSandbox}>New sandbox…</div>
+        <div className="ctx-sep" />
+        <div className="ctx-item" onClick={rename}>Rename…</div>
+        <div className="ctx-item" onClick={customize}>Customize…</div>
+        <div className="ctx-item" onClick={reveal}>Reveal in Finder <span className="ctx-kbd">⇧⌘F</span></div>
+        <div className="ctx-item" onClick={copyPath}>Copy path</div>
+        <div className="ctx-sep" />
+        {git?.isRepo ? (
+          <>
+            {git.remoteUrl && <div className="ctx-item" onClick={openRemote}>Open remote…</div>}
+            {git.remote && <div className="ctx-item" onClick={copyRemote}>Copy remote URL</div>}
+            {!git.remote && <div className="ctx-item" style={{ color: 'var(--t3)', pointerEvents: 'none' }}>Git repo · {git.branch || 'detached'}</div>}
+          </>
+        ) : (
+          <div className="ctx-item" onClick={initGit}>Initialize Git repository</div>
+        )}
+        {(running.length > 0 || stopped.length > 0) && <div className="ctx-sep" />}
+        {running.length > 0 && (
+          <div className="ctx-item" onClick={stopAll}>Stop {running.length} sandbox{running.length > 1 ? 'es' : ''}</div>
+        )}
+        {stopped.length > 0 && (
+          <div className="ctx-item" onClick={startAll}>Start {stopped.length} sandbox{stopped.length > 1 ? 'es' : ''}</div>
+        )}
+        <div className="ctx-sep" />
+        <div className="ctx-item destructive" onClick={remove}>Remove project…</div>
+      </div>
+    )
+  }
+
+  if (!sandbox) return null
 
   const handleStop = async () => {
     setContextMenu({ visible: false })

@@ -71,6 +71,12 @@ export function App() {
     const unsub5 = window.minipit?.onSetTab((tab) =>
       setActiveTab(tab as 'terminal' | 'info')
     )
+    // A sandbox's files changed → refresh its uncommitted-change count.
+    const unsubFiles = window.minipit?.onFilesChanged?.((name) => {
+      const sb = useStore.getState().sandboxes.find((s) => s.name === name)
+      if (sb) useStore.getState().refreshSandboxChanges(name, sb.workspace)
+    })
+
     // Menu-bar (tray) quick-open: jump to a sandbox or a project.
     const unsub6 = window.minipit?.onOpenSandbox((name) => setActiveSandboxId(name))
     const unsub7 = window.minipit?.onOpenProject((workspace) => {
@@ -89,6 +95,7 @@ export function App() {
       unsub5?.()
       unsub6?.()
       unsub7?.()
+      unsubFiles?.()
     }
   }, [])
 

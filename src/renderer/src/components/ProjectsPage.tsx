@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ChevronLeft, Plus, Trash2, GitBranch, Github } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { AgentIcon } from './AgentIcon'
 import { SandboxAvatar } from './SandboxAvatar'
@@ -12,6 +12,8 @@ export function ProjectsPage() {
   const policyBlocks = useStore((s) => s.policyBlocks)
   const blocksSeenAt = useStore((s) => s.blocksSeenAt)
   const agentActivity = useStore((s) => s.agentActivity)
+  const gitInfo = useStore((s) => s.gitInfo)
+  const loadGitInfo = useStore((s) => s.loadGitInfo)
   const [delFor, setDelFor] = useState<string | null>(null)
   const [delFolder, setDelFolder] = useState(false)
 
@@ -25,6 +27,13 @@ export function ProjectsPage() {
     if (!projects.has(ws)) projects.set(ws, [])
   }
   const entries = [...projects.entries()]
+
+  // Lazily load host-side git info (repo/branch/remote) for each project card.
+  const projectKeys = entries.map(([ws]) => ws).join('|')
+  useEffect(() => {
+    entries.forEach(([ws]) => loadGitInfo(ws))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectKeys])
 
   const openNew = (workspace?: string) => {
     setNewSandboxWorkspace(workspace ?? null)
@@ -109,8 +118,28 @@ export function ProjectsPage() {
               <div className="proj-card" key={workspace}>
                 <div className="proj-hdr" onClick={() => setActiveProject(workspace)} style={{ cursor: 'pointer' }}>
                   <ProjectAvatar workspace={workspace} size={24} />
-                  <span className="proj-name">{workspace.split('/').pop() || workspace}</span>
-                  <span className="proj-path">{workspace}</span>
+                  <div className="proj-hdr-text">
+                    <div className="proj-hdr-line">
+                      <span className="proj-name">{workspace.split('/').pop() || workspace}</span>
+                      <span className="proj-path">{workspace}</span>
+                    </div>
+                    {gitInfo[workspace]?.isRepo && (
+                      <div className="proj-git">
+                        <span className="proj-git-branch">
+                          <GitBranch size={11} />{gitInfo[workspace]!.branch || 'detached'}
+                        </span>
+                        {gitInfo[workspace]!.remoteUrl && (
+                          <button
+                            className="proj-git-remote"
+                            title={`Open ${gitInfo[workspace]!.remote ?? 'remote'} on the web`}
+                            onClick={(e) => { e.stopPropagation(); window.minipit?.openPath(gitInfo[workspace]!.remoteUrl!) }}
+                          >
+                            <Github size={11} /><span>Remote</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   {list.length === 0 && (
                     <button
                       className="proj-del"

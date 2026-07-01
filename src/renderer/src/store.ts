@@ -12,6 +12,8 @@ interface ContextMenuState {
   x: number
   y: number
   sandboxId: string | null
+  // When set, the menu targets a project (workspace path) instead of a sandbox.
+  workspace?: string | null
 }
 
 interface AppState {
@@ -43,7 +45,18 @@ interface AppState {
   termTheme: string
   projectColors: Record<string, string>
   projectIcons: Record<string, string>
+  projectNames: Record<string, string>
+  // Host-side git summary per workspace path (lazy-loaded, cached).
+  gitInfo: Record<string, { isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
+  // Uncommitted-change counts per sandbox name (running sandboxes only).
+  sandboxChanges: Record<string, number>
+  // Sidebar element visibility toggles (Settings → General). subLineMode picks
+  // whether the sandbox sub-line shows the agent status or the project name.
+  display: { agentBadge: boolean; sandboxSub: boolean; projectCounts: boolean; gitBranch: boolean; changeBadge: boolean; subLineMode: 'status' | 'project' }
   pickerOpen: boolean
+  // Signal for the sidebar project avatar to open its customize picker (set by
+  // the project right-click menu). Cleared once the picker opens.
+  customizeProject: string | null
   customProjects: string[]
   // Network-policy denials, newest-first per sandbox name, with a per-sandbox
   // "seen" watermark so attention badges clear once the user looks.
@@ -76,6 +89,12 @@ interface AppState {
   setTermTheme:       (id: string) => void
   setProjectColor:    (workspace: string, hex: string | null) => void
   setProjectIcon:     (workspace: string, icon: string | null) => void
+  setProjectName:     (workspace: string, name: string | null) => void
+  loadGitInfo:        (workspace: string, force?: boolean) => void
+  refreshSandboxChanges: (name: string, workspace: string) => void
+  setDisplay:         (key: 'agentBadge' | 'sandboxSub' | 'projectCounts' | 'gitBranch' | 'changeBadge', value: boolean) => void
+  setSubLineMode:     (mode: 'status' | 'project') => void
+  setCustomizeProject:(workspace: string | null) => void
   setPickerOpen:      (open: boolean) => void
   loadProjects:       () => void
   addProject:         () => Promise<string | null>
@@ -106,7 +125,7 @@ export const useStore = create<AppState>((set) => ({
   modal: null,
   prompt: null,
   inspectTemplate: null,
-  contextMenu: { visible: false, x: 0, y: 0, sandboxId: null },
+  contextMenu: { visible: false, x: 0, y: 0, sandboxId: null, workspace: null },
   files: {},
   deletingIds: [],
   secretTarget: null,
@@ -127,7 +146,17 @@ export const useStore = create<AppState>((set) => ({
   projectIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:projectIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
+  projectNames: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:projectNames') ?? '{}') ?? {} } catch { return {} }
+  })(),
+  gitInfo: {},
+  sandboxChanges: {},
+  display: (() => {
+    const d = { agentBadge: true, sandboxSub: true, projectCounts: true, gitBranch: true, changeBadge: true, subLineMode: 'status' as const }
+    try { return { ...d, ...JSON.parse(localStorage.getItem('minipit:display') ?? '{}') } } catch { return d }
+  })(),
   pickerOpen: false,
+  customizeProject: null,
   customProjects: [],
   policyBlocks: {},
   blocksSeenAt: {},
@@ -229,6 +258,46 @@ export const useStore = create<AppState>((set) => ({
       localStorage.setItem('minipit:projectIcons', JSON.stringify(next))
       return { projectIcons: next }
     }),
+
+  loadGitInfo: (workspace, force) => {
+    if (!workspace) return
+    if (!force && useStore.getState().gitInfo[workspace]) return
+    window.minipit?.gitInfo(workspace)
+      .then((info) => set((s) => ({ gitInfo: { ...s.gitInfo, [workspace]: info ?? { isRepo: false } } })))
+      .catch(() => {})
+  },
+
+  refreshSandboxChanges: (name, workspace) => {
+    window.minipit?.gitStatus(name, workspace)
+      .then((r) => set((s) => ({ sandboxChanges: { ...s.sandboxChanges, [name]: r?.isRepo ? r.changes.length : 0 } })))
+      .catch(() => {})
+  },
+
+  setProjectName: (workspace, name) =>
+    set((state) => {
+      const next = { ...state.projectNames }
+      const trimmed = name?.trim()
+      if (trimmed) next[workspace] = trimmed
+      else delete next[workspace]
+      localStorage.setItem('minipit:projectNames', JSON.stringify(next))
+      return { projectNames: next }
+    }),
+
+  setDisplay: (key, value) =>
+    set((state) => {
+      const next = { ...state.display, [key]: value }
+      localStorage.setItem('minipit:display', JSON.stringify(next))
+      return { display: next }
+    }),
+
+  setSubLineMode: (mode) =>
+    set((state) => {
+      const next = { ...state.display, subLineMode: mode }
+      localStorage.setItem('minipit:display', JSON.stringify(next))
+      return { display: next }
+    }),
+
+  setCustomizeProject: (workspace) => set({ customizeProject: workspace }),
 
   setPickerOpen: (open) => set({ pickerOpen: open }),
 
@@ -429,4 +498,10 @@ export function unackedBlockCount(
 ): number {
   const seen = seenAt[name] ?? 0
   return (blocks[name] ?? []).filter((b) => b.at > seen).length
+}
+
+// Display name for a project: the user's rename alias if set, else the folder
+// basename of the workspace path.
+export function projectDisplayName(names: Record<string, string>, workspace: string): string {
+  return names[workspace]?.trim() || workspace.split('/').pop() || workspace
 }

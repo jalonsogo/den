@@ -20,6 +20,7 @@ export function SandboxAvatar({
   activity?: AgentState | null
 }) {
   const projColor = useStore((s) => s.projectColors[sandbox.workspace])
+  const showBadge = useStore((s) => s.display.agentBadge)
   const style: React.CSSProperties = { width: size, height: size }
   if (projColor) {
     style.background = `color-mix(in srgb, ${projColor} 22%, transparent)`
@@ -30,14 +31,22 @@ export function SandboxAvatar({
       {deleting
         ? <div className="sbx-avatar-spinner" />
         : <span className="sbx-avatar-txt">{sandboxInitials(sandbox.name)}</span>}
-      <span className="sbx-avatar-badge"><AgentIcon agent={sandbox.agent} size={11} /></span>
+      {showBadge && <span className="sbx-avatar-badge"><AgentIcon agent={sandbox.agent} size={11} /></span>}
       {alert && <span className="sbx-avatar-alert" title="Network requests blocked" />}
-      {activity && (
-        <span
-          className={`sbx-avatar-activity ${activity}`}
-          title={activity === 'working' ? 'Agent working…' : 'Waiting for you'}
-        />
-      )}
+      {!deleting && (() => {
+        // Always-on status dot so working/idle/stopped is visible at a glance,
+        // even on the collapsed rail where there's no status text.
+        const state = activity === 'working' ? 'working'
+          : activity === 'waiting' ? 'waiting'
+          : sandbox.status === 'running' ? 'running'
+          : sandbox.status === 'creating' ? 'working'
+          : 'stopped'
+        const title = state === 'working' ? 'Agent working…'
+          : state === 'waiting' ? 'Waiting for you'
+          : state === 'running' ? 'Running'
+          : 'Stopped'
+        return <span className={`sbx-avatar-activity ${state}`} title={title} />
+      })()}
     </div>
   )
 }

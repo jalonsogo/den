@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FolderGit2, Folder, Code, Box, Rocket, Globe, Terminal, Layers,
@@ -33,22 +33,28 @@ function resolveIcon(key?: string | null): IconComp {
 // Project avatar = a chosen glyph in a customizable color/background. When
 // editable, clicking it opens a picker (color presets + custom, icon set, reset).
 export function ProjectAvatar({
-  workspace, size = 22, editable = true
+  workspace, size = 22, editable = true, linkToContextMenu = false
 }: {
   workspace: string
   size?: number
   editable?: boolean
+  // When true, this instance opens its picker in response to the project
+  // right-click menu's "Customize" (via the store's customizeProject signal).
+  linkToContextMenu?: boolean
 }) {
   const color = useStore((s) => s.projectColors[workspace])
   const iconKey = useStore((s) => s.projectIcons[workspace])
   const setProjectColor = useStore((s) => s.setProjectColor)
   const setProjectIcon = useStore((s) => s.setProjectIcon)
   const setPickerOpen = useStore((s) => s.setPickerOpen)
+  const customizeProject = useStore((s) => s.customizeProject)
+  const setCustomizeProject = useStore((s) => s.setCustomizeProject)
   const [open, setOpenState] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const [browseOpen, setBrowseOpen] = useState(false)
   const [iconQuery, setIconQuery] = useState('')
   const popRef = useRef<HTMLDivElement>(null)
+  const avRef = useRef<HTMLSpanElement>(null)
 
   // Keep the global flag in sync so the project hover-flyout suppresses itself
   // while this picker is open (no two overlapping popovers).
@@ -66,17 +72,32 @@ export function ProjectAvatar({
   }, [iconQuery])
 
   const Icon = resolveIcon(iconKey)
+  // A custom (browsed) icon isn't in the default set — surface it as the first
+  // quick icon so the current choice stays visible and selectable.
+  const isCustomIcon = !!iconKey && !PROJECT_ICONS[iconKey]
+  const quickKeys = isCustomIcon ? [iconKey as string, ...ICON_KEYS] : ICON_KEYS
   const style = color
     ? { width: size, height: size, background: `color-mix(in srgb, ${color} 20%, transparent)`, color }
     : { width: size, height: size }
+
+  const openAt = (r: DOMRect) => { setPos({ top: r.bottom + 6, left: r.left }); setOpen(true) }
 
   const toggle = (e: React.MouseEvent) => {
     if (!editable) return
     e.stopPropagation()
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setPos({ top: r.bottom + 6, left: r.left })
-    setOpen(!open)
+    if (open) { setOpen(false); return }
+    openAt(r)
   }
+
+  // Open the picker when the project context menu requests "Customize" for this
+  // workspace, positioned at this avatar. Clear the signal so it fires once.
+  useEffect(() => {
+    if (!linkToContextMenu || customizeProject !== workspace) return
+    if (avRef.current) openAt(avRef.current.getBoundingClientRect())
+    setCustomizeProject(null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customizeProject, linkToContextMenu, workspace])
 
   // Clamp the picker inside the viewport so it's never cut off at an edge.
   useLayoutEffect(() => {
@@ -90,7 +111,7 @@ export function ProjectAvatar({
   }, [open, browseOpen])
 
   return (
-    <span className="sb-proj-av" style={style} onClick={toggle} title={editable ? 'Customize project' : undefined}>
+    <span ref={avRef} className="sb-proj-av" style={style} onClick={toggle} title={editable ? 'Customize project' : undefined}>
       <Icon size={Math.round(size * 0.58)} />
       {open && createPortal(
         <>
@@ -126,8 +147,8 @@ export function ProjectAvatar({
             </div>
             {!browseOpen && (
               <div className="proj-cpick-icons">
-                {ICON_KEYS.map((k) => {
-                  const I = PROJECT_ICONS[k]
+                {quickKeys.map((k) => {
+                  const I = resolveIcon(k)
                   return (
                     <button
                       key={k}

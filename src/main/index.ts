@@ -1417,6 +1417,29 @@ function setupIPC(): void {
       (err, stdout) => resolve(!err && stdout.trim() === 'true'))
   }))
 
+  // Host-side repo summary for a workspace folder: branch + origin remote.
+  // Powers the project Git badge, "Open on GitHub", and "Copy remote".
+  ipcMain.handle('minipit:git-info', (_, dir: string) => new Promise<{
+    isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string
+  }>((resolve) => {
+    if (!dir) return resolve({ isRepo: false })
+    const run = (args: string[]) => new Promise<string | null>((res) =>
+      execFile('git', ['-C', dir, ...args], { timeout: 5000, env: guiEnv() },
+        (err, stdout) => res(err ? null : stdout.trim())))
+    run(['rev-parse', '--is-inside-work-tree']).then(async (inside) => {
+      if (inside !== 'true') return resolve({ isRepo: false })
+      const branch = (await run(['branch', '--show-current'])) || undefined
+      const remote = (await run(['remote', 'get-url', 'origin'])) || undefined
+      // Normalise git@github.com:org/repo(.git) and ssh/https forms to a browsable URL.
+      let remoteUrl: string | undefined
+      if (remote) {
+        const m = remote.match(/^(?:git@|https?:\/\/)([^/:]+)[/:](.+?)(?:\.git)?$/)
+        if (m) remoteUrl = `https://${m[1]}/${m[2]}`
+      }
+      resolve({ isRepo: true, branch, remote, remoteUrl })
+    })
+  }))
+
   // Initialize a Git repo in a host folder and commit its current contents, so a
   // `--clone` sandbox has a repo (with the folder's files) to clone.
   ipcMain.handle('minipit:git-init', async (_, dir: string) => {

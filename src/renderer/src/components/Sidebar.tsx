@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
-  Home, FolderGit2, LayoutGrid, Layers, Package, Settings, Search
+  Home, FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch
 } from 'lucide-react'
-import { useStore, unackedBlockCount } from '../store'
+import { useStore, unackedBlockCount, projectDisplayName } from '../store'
 import { ProjectAvatar } from './ProjectAvatar'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
@@ -15,13 +15,14 @@ import { AGENTS, type Sandbox, type PageType, type AgentType } from '../types'
 // (click to switch), the full path, and a "New sandbox" action. Used for both
 // the collapsed rail icon and the expanded project rows.
 function ProjectHover({
-  project, className, onClick, onNew, onOpenSandbox, children
+  project, className, onClick, onNew, onOpenSandbox, onContextMenu, children
 }: {
   project: { workspace: string; list: Sandbox[] }
   className?: string
   onClick?: () => void
   onNew: () => void
   onOpenSandbox: (id: string) => void
+  onContextMenu?: (e: React.MouseEvent) => void
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -31,7 +32,10 @@ function ProjectHover({
   const closeTimer = useRef<ReturnType<typeof setTimeout>>()
   const pickerOpen = useStore((s) => s.pickerOpen)
   const removeProject = useStore((s) => s.removeProject)
-  const name = project.workspace.split('/').pop() || project.workspace
+  const projectNames = useStore((s) => s.projectNames)
+  const git = useStore((s) => s.gitInfo[project.workspace])
+  const showGit = useStore((s) => s.display.gitBranch)
+  const name = projectDisplayName(projectNames, project.workspace)
   const isEmpty = project.list.length === 0
 
   const show = (e: React.MouseEvent) => {
@@ -42,16 +46,17 @@ function ProjectHover({
   }
   const hide = () => { closeTimer.current = setTimeout(() => { setOpen(false); setConfirmDel(false) }, 140) }
 
-  // A right-click (context menu) anywhere dismisses the hover popover.
+  // When any context menu opens (e.g. right-click on this project), dismiss the
+  // hover popover so only the right-click menu shows. Driven off the store flag
+  // rather than the contextmenu event — the row's handler stops propagation, so
+  // a document listener here would never fire.
+  const ctxVisible = useStore((s) => s.contextMenu.visible)
   useEffect(() => {
-    if (!open) return
-    const onCtx = () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(false); setConfirmDel(false) }
-    document.addEventListener('contextmenu', onCtx)
-    return () => document.removeEventListener('contextmenu', onCtx)
-  }, [open])
+    if (ctxVisible) { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(false); setConfirmDel(false) }
+  }, [ctxVisible])
 
   return (
-    <div className={className} onMouseEnter={show} onMouseLeave={hide} onClick={onClick}>
+    <div className={className} onMouseEnter={show} onMouseLeave={hide} onClick={onClick} onContextMenu={onContextMenu}>
       {children}
       {open && !pickerOpen && createPortal(
         <div
@@ -66,6 +71,21 @@ function ProjectHover({
             <span className="sb-proj-pop-count">{project.list.length}</span>
           </div>
           <div className="sb-proj-pop-path">{project.workspace}</div>
+          {showGit && git?.isRepo && (
+            <div className="sb-proj-pop-git">
+              <GitBranch size={12} />
+              <span className="sb-proj-pop-git-branch">{git.branch || 'detached'}</span>
+              {git.remoteUrl && (
+                <button
+                  className="sb-proj-pop-git-remote"
+                  title={git.remote}
+                  onClick={(e) => { e.stopPropagation(); window.minipit?.openPath(git.remoteUrl!) }}
+                >
+                  Open remote
+                </button>
+              )}
+            </div>
+          )}
           <div className="sb-proj-pop-list">
             {project.list.length === 0
               ? <div className="sb-proj-pop-empty">No sandboxes yet</div>
@@ -126,6 +146,10 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const hasBlocks = useStore((s) => unackedBlockCount(s.policyBlocks, s.blocksSeenAt, sandbox.name) > 0)
   const activity = useStore((s) => s.agentActivity[sandbox.name] ?? null)
   const justCreated = useStore((s) => s.highlightSandbox === sandbox.name)
+  const showSub = useStore((s) => s.display.sandboxSub)
+  const subLineMode = useStore((s) => s.display.subLineMode)
+  const showChanges = useStore((s) => s.display.changeBadge)
+  const changes = useStore((s) => s.sandboxChanges[sandbox.name] ?? 0)
   const agentLabel = AGENTS.find((a) => a.id === sandbox.agent)?.label ?? sandbox.agent
 
   // Collapsed-rail hover flyout: surfaces name/project/status/duration that are
@@ -154,9 +178,9 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
     if (isDeleting || isCreating) return
     if (anchor === 'button') {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-      setContextMenu({ visible: true, x: r.right - 200, y: r.bottom + 4, sandboxId: sandbox.id })
+      setContextMenu({ visible: true, x: r.right - 200, y: r.bottom + 4, sandboxId: sandbox.id, workspace: null })
     } else {
-      setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: sandbox.id })
+      setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: sandbox.id, workspace: null })
     }
   }
 
@@ -181,11 +205,18 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
             <span className="sb-item-pop-name">{sandbox.name}</span>
             <span className="sb-item-pop-status" data-on={isRunning}>{statusLabel}</span>
           </div>
+          <div className="sb-item-pop-sep" />
           <div className="sb-item-pop-row"><FolderGit2 size={12} /> {folder}</div>
           <div className="sb-item-pop-row">{agentLabel}</div>
-          {sandbox.branch && <div className="sb-item-pop-row">⌥ {sandbox.branch}</div>}
+          {sandbox.branch && <div className="sb-item-pop-row"><GitBranch size={12} /> {sandbox.branch}</div>}
+          {showChanges && isRunning && changes > 0 && (
+            <div className="sb-item-pop-row">{changes} uncommitted change{changes > 1 ? 's' : ''}</div>
+          )}
           {isRunning && sandbox.uptimeSeconds != null && (
-            <div className="sb-item-pop-row">Up {formatUptime(sandbox.uptimeSeconds)}</div>
+            <>
+              <div className="sb-item-pop-sep" />
+              <div className="sb-item-pop-row">Up {formatUptime(sandbox.uptimeSeconds)}</div>
+            </>
           )}
         </div>,
         document.body
@@ -195,21 +226,30 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
         <>
           <div className="sb-item-body">
             <div className="sb-item-name">{sandbox.name}</div>
-            <div className={`sb-item-sub${isRunning && activity === 'working' ? ' is-working' : ''}`}>
-              {isCreating
-                ? 'Creating…'
-                : isDeleting
-                ? 'Deleting…'
-                : !isRunning
-                  ? `${folder} · stopped`
-                  : activity === 'working'
-                    ? 'Working…'
-                    : activity === 'waiting'
-                      ? 'Waiting for you'
-                      : folder}
-            </div>
+            {showSub && (
+              <div className={`sb-item-sub${isRunning && activity === 'working' ? ' is-working' : ''}`}>
+                {isCreating
+                  ? 'Creating…'
+                  : isDeleting
+                  ? 'Deleting…'
+                  : subLineMode === 'project'
+                    ? folder
+                    : !isRunning
+                      ? 'Stopped'
+                      : activity === 'working'
+                        ? 'Working…'
+                        : activity === 'waiting'
+                          ? 'Waiting for you'
+                          : 'Running'}
+              </div>
+            )}
           </div>
 
+          {showChanges && isRunning && changes > 0 && (
+            <span className="sb-item-changes" title={`${changes} uncommitted change${changes > 1 ? 's' : ''}`}>
+              <GitBranch size={10} />{changes}
+            </span>
+          )}
           {!isDeleting && !isCreating && (
             <button className="sb-item-menu" onClick={(e) => openMenu(e, 'button')} title="Actions">
               <MoreVertical size={15} />
@@ -225,8 +265,13 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage, setActiveSandboxId,
     setNewSandboxWorkspace, setActiveProject, sidebarCollapsed,
-    customProjects, addProject, toggleSidebar
+    customProjects, addProject, toggleSidebar, setContextMenu, projectNames, display,
+    gitInfo, loadGitInfo
   } = useStore()
+  const openProjectMenu = (e: React.MouseEvent, workspace: string) => {
+    e.preventDefault(); e.stopPropagation()
+    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace })
+  }
   const collapsed = sidebarCollapsed
 
   // Clicking blank sidebar space (not a row, button, header, input, or the
@@ -331,7 +376,7 @@ export function Sidebar() {
     if (groupBy === 'none') return null
     const map = new Map<string, Sandbox[]>()
     for (const s of filtered) {
-      const key = groupBy === 'project' ? (s.workspace.split('/').pop() || s.workspace) : s.agent
+      const key = groupBy === 'project' ? projectDisplayName(projectNames, s.workspace) : s.agent
       const list = map.get(key) ?? []
       list.push(s)
       map.set(key, list)
@@ -360,6 +405,21 @@ export function Sidebar() {
   for (const ws of customProjects) {
     if (!projects.find((p) => p.workspace === ws)) projects.push({ workspace: ws, list: [] })
   }
+
+  // Lazily load host-side git info (repo/branch/remote) for each project.
+  const projectKeys = projects.map((p) => p.workspace).join('|')
+  useEffect(() => {
+    projects.forEach((p) => loadGitInfo(p.workspace))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectKeys])
+
+  // Refresh uncommitted-change counts whenever the set of running sandboxes changes.
+  const refreshSandboxChanges = useStore((s) => s.refreshSandboxChanges)
+  const runningKeys = sandboxes.filter((s) => s.status === 'running').map((s) => s.name).join('|')
+  useEffect(() => {
+    sandboxes.filter((s) => s.status === 'running').forEach((s) => refreshSandboxChanges(s.name, s.workspace))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningKeys])
 
   const newProject = () => {
     addProject().then((dir) => { if (dir) { setActiveProject(dir); setActivePage('projects') } })
@@ -545,7 +605,7 @@ export function Sidebar() {
               <div className="sb-group" key={key}>
                 <div className="sb-group-hd">
                   <span className="sb-group-name">{key}</span>
-                  <span className="sb-group-count">{list.length}</span>
+                  {display.projectCounts && <span className="sb-group-count">{list.length}</span>}
                 </div>
                 {list.map((s) => (
                   <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
@@ -553,7 +613,9 @@ export function Sidebar() {
               </div>
             ))
           ) : (
-            filtered.map((s) => (
+            // Collapsed rail can't show group headers, but keep the grouped
+            // ordering so the sequence matches the expanded view.
+            (grouped ? grouped.flatMap(([, l]) => l) : filtered).map((s) => (
               <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
             ))
           )}
@@ -603,16 +665,17 @@ export function Sidebar() {
                   onClick={() => { setActiveProject(p.workspace); setActivePage('projects') }}
                   onNew={() => openNew(p.workspace)}
                   onOpenSandbox={(id) => { setActiveSandboxId(id); setActivePage('sandbox') }}
+                  onContextMenu={(e) => openProjectMenu(e, p.workspace)}
                 >
-                  <ProjectAvatar workspace={p.workspace} size={26} editable={false} />
+                  <ProjectAvatar workspace={p.workspace} size={26} editable={false} linkToContextMenu />
                 </ProjectHover>
               ))
         ) : (
           projects.length === 0
             ? <div className="sb-empty">No projects</div>
             : projects.map((p) => (
-              <div className="sb-proj" key={p.workspace}>
-                <ProjectAvatar workspace={p.workspace} size={22} />
+              <div className="sb-proj" key={p.workspace} onContextMenu={(e) => openProjectMenu(e, p.workspace)}>
+                <ProjectAvatar workspace={p.workspace} size={22} linkToContextMenu />
                 <ProjectHover
                   project={p}
                   className="sb-proj-label"
@@ -620,8 +683,15 @@ export function Sidebar() {
                   onNew={() => openNew(p.workspace)}
                   onOpenSandbox={(id) => { setActiveSandboxId(id); setActivePage('sandbox') }}
                 >
-                  <span className="sb-proj-name">{p.workspace.split('/').pop() || p.workspace}</span>
-                  <span className="sb-proj-count">{p.list.length}</span>
+                  <span className="sb-proj-top">
+                    <span className="sb-proj-name">{projectDisplayName(projectNames, p.workspace)}</span>
+                    {display.projectCounts && <span className="sb-proj-count">{p.list.length}</span>}
+                  </span>
+                  {display.gitBranch && gitInfo[p.workspace]?.branch && (
+                    <span className="sb-proj-branch" title={`On branch ${gitInfo[p.workspace]!.branch}`}>
+                      <GitBranch size={11} />{gitInfo[p.workspace]!.branch}
+                    </span>
+                  )}
                 </ProjectHover>
                 <button className="sb-proj-add" title="New sandbox in this project" onClick={() => openNew(p.workspace)}>
                   <Plus size={13} />

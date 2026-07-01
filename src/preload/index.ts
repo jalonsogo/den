@@ -11,6 +11,7 @@ const api = {
   listFiles:     (name: string, relPath: string) => ipcRenderer.invoke('minipit:list-files', name, relPath),
   gitStatus:     (name: string, workspace: string) => ipcRenderer.invoke('minipit:git-status', name, workspace),
   isGitRepo:     (dir: string)          => ipcRenderer.invoke('minipit:is-git-repo', dir),
+  gitInfo:       (dir: string)          => ipcRenderer.invoke('minipit:git-info', dir),
   gitInit:       (dir: string)          => ipcRenderer.invoke('minipit:git-init', dir),
   readFile:      (name: string, path: string) => ipcRenderer.invoke('minipit:read-file', name, path),
   writeFile:     (name: string, path: string, content: string) => ipcRenderer.invoke('minipit:write-file', name, path, content),

@@ -318,24 +318,27 @@ html, body, #root {
 }
 .sbx-avatar-activity {
   position: absolute; left: -3px; top: -3px;
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 12px; height: 12px; border-radius: 50%;
   border: 2px solid var(--avatar-surface);
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.15);
 }
-.sbx-avatar-activity.waiting { background: var(--green); }
-.sbx-avatar-activity.working { background: var(--amber, #f59e0b); animation: activity-pulse 1.3s ease-in-out infinite; }
+.sbx-avatar-activity.running { background: var(--green); }
+.sbx-avatar-activity.working { background: var(--yellow); animation: activity-pulse 1.3s ease-in-out infinite; }
+.sbx-avatar-activity.waiting { background: var(--blue); animation: activity-pulse 1.3s ease-in-out infinite; }
+.sbx-avatar-activity.stopped { background: var(--border-hi); }
 @keyframes activity-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.45; transform: scale(0.78); }
 }
-.sb-item-sub.is-working { color: var(--amber, #f59e0b); }
+.sb-item-sub.is-working { color: var(--yellow); }
 .sb-item.is-stopped .sbx-avatar { filter: grayscale(1); opacity: 0.5; }
 
 /* Toolbar active-sandbox status dot */
 .tb-status-dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle;
 }
-.tb-status-dot.waiting { background: var(--green); }
-.tb-status-dot.working { background: var(--amber, #f59e0b); animation: activity-pulse 1.3s ease-in-out infinite; }
+.tb-status-dot.waiting { background: var(--blue); animation: activity-pulse 1.3s ease-in-out infinite; }
+.tb-status-dot.working { background: var(--yellow); animation: activity-pulse 1.3s ease-in-out infinite; }
 .sb-item.is-stopped .sb-item-name { color: var(--sb-muted); }
 .sb-item.is-deleting { pointer-events: none; opacity: 0.7; }
 /* Momentary flash on a just-created sandbox so it's easy to spot. */
@@ -344,6 +347,15 @@ html, body, #root {
   100% { background: transparent; }
 }
 .sb-item.just-created { animation: sb-flash 1.8s ease-out 2; }
+.sb-item-changes {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
+  font-size: 10px; font-weight: 500; color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  border-radius: 9px; padding: 1px 6px;
+}
+.sb-item-changes svg { flex-shrink: 0; }
+/* When the changes pill is present it takes the auto-margin; keep the menu tight. */
+.sb-item-changes + .sb-item-menu { margin-left: 4px; }
 .sb-item-menu {
   flex-shrink: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
   border: none; background: none; color: var(--sb-muted); cursor: pointer; border-radius: 6px;
@@ -493,7 +505,15 @@ html, body, #root {
 
 /* Top nav group + sandbox filter/add */
 .sb-nav-top { padding-top: 4px; }
-.sb-nav-first { padding-top: 6px; }
+/* Home sits in a header-height band so its bottom border lines up with the
+   detail/page header on the right; the SANDBOXES section below then aligns
+   with the content tabs. */
+.sb-nav-first {
+  height: 45px; padding-top: 0;
+  display: flex; flex-direction: column; justify-content: center;
+  border-bottom: 1px solid var(--sb-border);
+}
+.sb-nav-first + .sb-div { display: none; }
 .sb-filter-row { display: flex; gap: 6px; align-items: center; padding: 0 8px 6px; }
 .sb-filter {
   flex: 1; display: flex; align-items: center; gap: 5px; min-width: 0;
@@ -581,6 +601,7 @@ html, body, #root {
   padding: 1.5px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sb-item-pop-row > svg { color: var(--t3); flex-shrink: 0; }
+.sb-item-pop-sep { height: 1px; background: var(--border); margin: 6px -2px; }
 
 /* Remove-project footer in the project popover */
 .sb-proj-pop-foot { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 6px; }
@@ -741,7 +762,8 @@ html, body, #root {
 .sb-proj:hover { background: var(--sb-hover); }
 .sb-proj-main { flex: 1; display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; min-width: 0; }
 /* Hover/click target = name + count only (icon = picker, + stays reachable). */
-.sb-proj-label { display: inline-flex; align-items: center; gap: 7px; min-width: 0; cursor: pointer; }
+.sb-proj-label { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; cursor: pointer; }
+.sb-proj-top { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
 
 /* Customizable project avatar */
 .sb-proj-av {
@@ -834,6 +856,24 @@ html, body, #root {
   font-size: 10px; color: var(--sb-muted); background: var(--sb-active);
   border-radius: 9px; padding: 1px 6px; flex-shrink: 0;
 }
+.sb-proj-branch {
+  display: inline-flex; align-items: center; gap: 3px; max-width: 100%;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 10px; color: var(--sb-muted);
+}
+.sb-proj-branch svg { flex-shrink: 0; opacity: 0.8; }
+/* Git row in the project hover popover */
+.sb-proj-pop-git {
+  display: flex; align-items: center; gap: 6px; padding: 0 6px 7px;
+  font-size: 11px; color: var(--t3);
+}
+.sb-proj-pop-git > svg { flex-shrink: 0; }
+.sb-proj-pop-git-branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-proj-pop-git-remote {
+  margin-left: auto; flex-shrink: 0; font-size: 11px; color: var(--accent, var(--primary));
+  background: none; border: none; cursor: pointer; padding: 0;
+}
+.sb-proj-pop-git-remote:hover { text-decoration: underline; }
 .sb-proj-add {
   width: 22px; height: 22px; flex-shrink: 0; margin-left: auto;
   display: flex; align-items: center; justify-content: center;
@@ -1306,7 +1346,31 @@ html, body, #root {
 
 .files-body { flex: 1; overflow-y: auto; }
 .files-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 32px 16px; }
+.files-footer {
+  height: 30px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 10px;
+}
+.files-footer-spacer { flex: 1; }
+.files-branch {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 11px; color: var(--t2);
+}
+.files-branch svg { flex-shrink: 0; opacity: 0.8; }
 .files-chg-count { font-size: 10.5px; color: var(--yellow); flex-shrink: 0; white-space: nowrap; }
+.files-remote {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  font-size: 11px; color: var(--t2);
+  background: none; border: none; cursor: pointer; padding: 2px 4px;
+  border-radius: 4px;
+}
+.files-remote:hover { color: var(--t1); background: var(--bg-subtle); }
+.files-remote svg { flex-shrink: 0; opacity: 0.8; }
 .frow-badge {
   flex-shrink: 0; font-size: 9px; font-weight: 700; min-width: 14px; text-align: center;
   border-radius: 3px; padding: 0 3px; margin-left: 4px;
@@ -1671,9 +1735,25 @@ html, body, #root {
   text-align: center; color: var(--t3); font-size: 13px; padding: 40px 0;
 }
 .proj-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 13px; }
-.proj-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0; }
+.proj-hdr { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; min-width: 0; }
+.proj-hdr-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.proj-hdr-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .proj-name { font-size: 13px; font-weight: 600; color: var(--t1); flex-shrink: 0; }
 .proj-path { font-size: 11px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-git { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.proj-git-branch {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 11px; color: var(--t2);
+}
+.proj-git-branch svg { flex-shrink: 0; opacity: 0.8; }
+.proj-git-remote {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  font-size: 11px; color: var(--t2);
+  background: none; border: none; cursor: pointer; padding: 1px 4px; border-radius: 4px;
+}
+.proj-git-remote:hover { color: var(--t1); background: var(--bg-subtle); }
+.proj-git-remote svg { flex-shrink: 0; opacity: 0.8; }
 .proj-boxes { display: flex; flex-wrap: wrap; gap: 6px; }
 .proj-box {
   display: flex; align-items: center; gap: 6px;

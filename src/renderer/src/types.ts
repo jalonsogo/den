@@ -222,6 +222,7 @@ declare global {
       listFiles(name: string, relPath: string): Promise<FileEntry[]>
       gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }>
       isGitRepo(dir: string): Promise<boolean>
+      gitInfo(dir: string): Promise<{ isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
       gitInit(dir: string): Promise<{ ok: boolean; error?: string }>
       readFile(name: string, path: string): Promise<string>
       writeFile(name: string, path: string, content: string): Promise<void>
