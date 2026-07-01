@@ -116,6 +116,7 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const folder = sandbox.workspace.split('/').pop() || sandbox.workspace
   const hasBlocks = useStore((s) => unackedBlockCount(s.policyBlocks, s.blocksSeenAt, sandbox.name) > 0)
   const activity = useStore((s) => s.agentActivity[sandbox.name] ?? null)
+  const justCreated = useStore((s) => s.highlightSandbox === sandbox.name)
 
   const openMenu = (e: React.MouseEvent, anchor: 'cursor' | 'button') => {
     e.preventDefault()
@@ -131,7 +132,7 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
 
   return (
     <div
-      className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}`}
+      className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}${justCreated ? ' just-created' : ''}`}
       onClick={() => !isDeleting && !isCreating && setActiveSandboxId(sandbox.id)}
       onContextMenu={(e) => openMenu(e, 'cursor')}
       title={collapsed ? sandbox.name : undefined}

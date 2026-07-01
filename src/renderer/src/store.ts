@@ -54,10 +54,13 @@ interface AppState {
   agentActivity: Record<string, AgentState>
   // Mixin-kit names auto-added to every new sandbox (marked in the Kits page).
   defaultKits: string[]
+  // Name of a just-created sandbox to briefly flash in the sidebar. Auto-clears.
+  highlightSandbox: string | null
 
   setSandboxes:       (sandboxes: Sandbox[]) => void
   addCreatingSandbox: (sandbox: Sandbox) => void
   removeCreatingSandbox: (name: string) => void
+  setHighlightSandbox: (name: string | null) => void
   toggleDefaultKit:   (name: string) => void
   setSecretTarget:    (service: SecretService | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
@@ -130,6 +133,7 @@ export const useStore = create<AppState>((set) => ({
   blocksSeenAt: {},
   toasts: [],
   agentActivity: {},
+  highlightSandbox: null,
   defaultKits: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:defaultKits') ?? '[]') ?? [] } catch { return [] }
   })(),
@@ -314,6 +318,12 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({
       sandboxes: state.sandboxes.filter((s) => !(s.status === 'creating' && s.name === name))
     })),
+
+  setHighlightSandbox: (name) => {
+    set({ highlightSandbox: name })
+    // Auto-clear so the flash is momentary (and doesn't re-trigger on re-render).
+    if (name) setTimeout(() => set((s) => (s.highlightSandbox === name ? { highlightSandbox: null } : {})), 4000)
+  },
 
   setDeleting: (id, on) =>
     set((state) => ({

@@ -19,7 +19,7 @@ function deriveName(agent: string, workspace: string): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, newSandboxWorkspace, newSandboxTemplate, defaultKits } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, defaultKits } = useStore()
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -202,6 +202,7 @@ export function NewSandboxModal() {
         const sandboxes = await window.minipit?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
         removeCreatingSandbox(finalName)
+        setHighlightSandbox(finalName)
         unsub?.()
         setModal(null)
       } catch (e) {

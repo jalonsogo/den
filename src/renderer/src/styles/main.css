@@ -322,6 +322,12 @@ html, body, #root {
 .tb-status-dot.working { background: var(--amber, #f59e0b); animation: activity-pulse 1.3s ease-in-out infinite; }
 .sb-item.is-stopped .sb-item-name { color: var(--sb-muted); }
 .sb-item.is-deleting { pointer-events: none; opacity: 0.7; }
+/* Momentary flash on a just-created sandbox so it's easy to spot. */
+@keyframes sb-flash {
+  0%, 30% { background: color-mix(in srgb, var(--accent, var(--primary)) 32%, transparent); }
+  100% { background: transparent; }
+}
+.sb-item.just-created { animation: sb-flash 1.8s ease-out 2; }
 .sb-item-menu {
   flex-shrink: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
   border: none; background: none; color: var(--sb-muted); cursor: pointer; border-radius: 6px;
@@ -2476,9 +2482,9 @@ html, body, #root {
   font-size: 11.5px;
   line-height: 1.5;
 }
-/* Full-body creation terminal (fills the modal while creating). */
+/* Full-body creation terminal (fixed height so the modal doesn't resize). */
 .create-log-full { margin-top: 0; }
-.create-log-full .create-log-pre { max-height: min(52vh, 460px); }
+.create-log-full .create-log-pre { height: 340px; max-height: 52vh; }
 
 .tog-row {
   display: flex;
