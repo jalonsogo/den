@@ -3,7 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>den — Your AI Sandboxes, Beautifully Managed</title>
+  <title>den — Let coding agents run full YOLO, safely</title>
+  <meta name="description" content="den runs every coding agent in a disposable, network-policed microVM. Stop babysitting yes/no/cancel prompts — turn off the guardrails and let Claude, Codex, Antigravity, or OpenCode run unattended.">
+  <meta property="og:title" content="den — Let coding agents run full YOLO, safely">
+  <meta property="og:description" content="Ephemeral, isolated sandboxes you control with your own policies and tools. Full support for Codex, Antigravity, Claude, OpenCode and more.">
+  <meta property="og:image" content="screenshots/app-home.png">
+  <meta property="og:type" content="website">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -270,28 +275,57 @@
       margin: 0 auto 72px; line-height: 1.65;
     }
 
-    .features-grid {
+    /* Bento grid — varied tile sizes on a 4-column track. */
+    .bento {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 22px; max-width: 1080px; margin: 0 auto;
+      grid-template-columns: repeat(4, 1fr);
+      grid-auto-rows: minmax(186px, auto);
+      gap: 18px; max-width: 1120px; margin: 0 auto;
     }
-    .feature-card {
+    .bento-tile {
       background: var(--white);
       border-radius: 22px;
-      padding: 36px 30px;
+      padding: 30px;
       border: 1px solid rgba(0,0,0,0.05);
+      position: relative; overflow: hidden;
+      display: flex; flex-direction: column;
       opacity: 0; transform: translateY(32px);
       transition: opacity 0.6s ease, transform 0.6s ease, box-shadow 0.28s;
     }
-    .feature-card.visible { opacity: 1; transform: translateY(0); }
-    .feature-card:hover {
-      transform: translateY(-6px) !important;
+    .bento-tile.visible { opacity: 1; transform: translateY(0); }
+    .bento-tile:hover {
+      transform: translateY(-5px) !important;
       box-shadow: 0 24px 64px rgba(24,24,27,0.09);
     }
+    /* spans */
+    .bento-a { grid-column: span 2; grid-row: span 2; }
+    .bento-b { grid-column: span 2; }
+    .bento-e { grid-column: span 2; }
+    .bento-f { grid-column: span 2; }
+    /* dark hero tile */
+    .bento-a {
+      background: linear-gradient(165deg, var(--ocean-mid) 0%, var(--ocean-deep) 100%);
+      border-color: rgba(255,255,255,0.06);
+      justify-content: space-between;
+    }
+    .bento-a .feat-title { color: var(--white); font-size: 26px; }
+    .bento-a .feat-desc { color: rgba(255,255,255,0.55); font-size: 15px; }
+    .bento-a .feat-icon { background: rgba(255,255,255,0.1); color: var(--white); }
+    .bento-shot {
+      margin-top: 22px; border-radius: 12px; width: 100%;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.4);
+      display: block;
+    }
+    .bento-tile.light-shot .bento-shot {
+      border-color: rgba(0,0,0,0.06);
+      box-shadow: 0 14px 40px rgba(24,24,27,0.12);
+    }
+
     .feat-icon {
-      width: 52px; height: 52px; border-radius: 14px;
+      width: 50px; height: 50px; border-radius: 14px;
       display: flex; align-items: center; justify-content: center;
-      color: var(--ocean-mid); margin-bottom: 22px; flex-shrink: 0;
+      color: var(--ocean-mid); margin-bottom: 20px; flex-shrink: 0;
     }
     .feat-icon.a { background: var(--sand-2); }
     .feat-icon.b { background: rgba(63,63,70,0.1); }
@@ -303,6 +337,22 @@
       letter-spacing: -0.02em;
     }
     .feat-desc { font-size: 13.5px; line-height: 1.68; color: var(--text-mid); }
+
+    /* agent chips — one row that fades out at the right edge (more agents beyond) */
+    .agent-chips {
+      display: flex; gap: 8px; margin-top: auto;
+      flex-wrap: nowrap; overflow: hidden;
+      -webkit-mask-image: linear-gradient(to right, #000 0, #000 80%, transparent 100%);
+              mask-image: linear-gradient(to right, #000 0, #000 80%, transparent 100%);
+    }
+    .agent-chip {
+      flex: none; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 13px; font-weight: 600; color: var(--text-dark);
+      background: var(--sand-1); border: 1px solid rgba(0,0,0,0.06);
+      border-radius: 100px; padding: 7px 14px;
+    }
+    .agent-ico { flex: none; display: block; }
 
     /* ─── HOW IT WORKS ─── */
     .how {
@@ -375,6 +425,8 @@
       transition: opacity 0.9s ease, transform 0.9s ease;
     }
     .browser-window.visible { opacity: 1; transform: translateY(0); }
+    .browser-shot { display: block; width: 100%; height: auto; }
+    .app-frame { display: block; width: 100%; aspect-ratio: 1180 / 720; border: 0; background: #fff; }
 
     .browser-bar {
       background: #1C2E40;
@@ -565,6 +617,43 @@
     }
     .stat-label { font-size: 13px; color: var(--text-mid); font-weight: 500; }
 
+    /* ─── READINESS HOOK ─── */
+    .ready {
+      background: var(--ocean-deep);
+      padding: 140px 52px;
+      text-align: center;
+      position: relative; overflow: hidden;
+    }
+    .ready::before {
+      content: '';
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 820px; height: 820px;
+      background: radial-gradient(ellipse, rgba(63,63,70,0.16) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .ready-inner {
+      position: relative; z-index: 1;
+      opacity: 0; transform: translateY(26px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .ready-inner.visible { opacity: 1; transform: translateY(0); }
+    .ready .section-eyebrow { color: var(--ocean-sky); }
+    .ready-title {
+      font-family: 'Figtree', sans-serif;
+      font-size: clamp(40px, 6.5vw, 76px);
+      font-weight: 700; color: var(--white);
+      line-height: 1.04; letter-spacing: -0.035em;
+      margin-bottom: 24px;
+    }
+    .ready-title em { font-style: normal; color: var(--ocean-sky); }
+    .ready-sub {
+      font-size: 18px; color: rgba(255,255,255,0.55);
+      max-width: 560px; margin: 0 auto 44px; line-height: 1.65;
+    }
+    .ready-sub em { font-style: normal; color: rgba(255,255,255,0.85); }
+    .ready-btn { font-size: 16px; padding: 16px 38px; }
+
     /* ─── CTA ─── */
     .cta-section {
       background: linear-gradient(155deg, var(--ocean-mid) 0%, var(--ocean-deep) 100%);
@@ -666,7 +755,9 @@
 
     /* ─── RESPONSIVE ─── */
     @media (max-width: 960px) {
-      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .bento { grid-template-columns: repeat(2, 1fr); }
+      .bento-a, .bento-b, .bento-e, .bento-f { grid-column: span 2; }
+      .bento-a { grid-row: auto; }
       .steps { grid-template-columns: repeat(2, 1fr); }
       .steps::before { display: none; }
       nav { padding: 16px 24px; }
@@ -674,7 +765,8 @@
       .stats-bar { gap: 44px; }
     }
     @media (max-width: 580px) {
-      .features-grid { grid-template-columns: 1fr; }
+      .bento { grid-template-columns: 1fr; }
+      .bento-a, .bento-b, .bento-e, .bento-f { grid-column: span 1; }
       .steps { grid-template-columns: 1fr; }
       .hero-actions { flex-direction: column; width: 100%; }
       .btn-primary, .btn-secondary { justify-content: center; }
@@ -693,7 +785,6 @@
   </a>
   <ul class="nav-links">
     <li><a href="#features">Features</a></li>
-    <li><a href="#how">How it works</a></li>
     <li><a href="#demo">Preview</a></li>
     <li><a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener">sbx docs</a></li>
     <li><a href="#cta" class="nav-cta">Download</a></li>
@@ -704,16 +795,16 @@
 <section class="hero">
   <div class="hero-bg"></div>
 
-  <div class="hero-eyebrow">Built on Docker Sandboxes</div>
+  <div class="hero-eyebrow">Safe YOLO for coding agents</div>
 
   <img id="heroLogo" src="resources/logo.png" alt="den" class="hero-logo">
 
   <h1 class="hero-title">
-    Your AI sandboxes,<br><em>beautifully</em> managed.
+    Let your agents<br>run <em>full YOLO.</em>
   </h1>
 
   <p class="hero-sub">
-    den is a clean, visual interface for Docker Sandboxes — spin up isolated microVM environments, launch AI agents, and watch them work. No terminal required.
+    No more being the human on the yes / no / cancel button. den drops every coding agent into a disposable, network-policed microVM — so you can turn off the guardrails, walk away, and focus on the work instead of the approvals.
   </p>
 
   <div class="hero-actions">
@@ -728,198 +819,107 @@
   </div>
 
   <div class="hero-trust">
-    <div class="hero-trust-item"><b>✦</b>&nbsp;microVM isolation</div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;Isolated by default</div>
     <div class="hero-trust-sep"></div>
-    <div class="hero-trust-item"><b>✦</b>&nbsp;No CLI needed</div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;Network policies</div>
     <div class="hero-trust-sep"></div>
-    <div class="hero-trust-item"><b>✦</b>&nbsp;Claude-ready</div>
+    <div class="hero-trust-item"><b>✦</b>&nbsp;Claude · Codex · Antigravity · OpenCode</div>
     <div class="hero-trust-sep"></div>
     <div class="hero-trust-item"><b>✦</b>&nbsp;macOS &amp; Windows</div>
   </div>
 </section>
 
-<!-- ── FEATURES ── -->
-<section class="features" id="features">
-  <div class="section-eyebrow">What it does</div>
-  <h2 class="section-title">A real window into sbx</h2>
-  <p class="section-sub">Launch sandboxes, drive agents, browse files, and manage network policy — without living in the terminal.</p>
-
-  <div class="features-grid" id="featGrid">
-    <div class="feature-card">
-      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></div>
-      <h3 class="feat-title">Sandbox dashboard</h3>
-      <p class="feat-desc">Every sandbox with its agent, status and uptime in one window — plus a menu-bar menu for quick access.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-      <h3 class="feat-title">Agent &amp; shell terminals</h3>
-      <p class="feat-desc">Full agent TUIs — Claude Code, Codex, Cursor, Gemini — and an interactive shell, over a real PTY.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
-      <h3 class="feat-title">Files, inline</h3>
-      <p class="feat-desc">Browse the sandbox workspace, open files in an editor, and see the agent's changes with live git status.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></div>
-      <h3 class="feat-title">Network policy</h3>
-      <p class="feat-desc">See exactly which domains a sandbox can reach, and add allow rules — without leaving the app.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg></div>
-      <h3 class="feat-title">Projects &amp; kits</h3>
-      <p class="feat-desc">Group sandboxes by workspace and layer tools, credentials and config with sbx kits and mixins.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
-      <h3 class="feat-title">Isolated by default</h3>
-      <p class="feat-desc">Each sandbox is its own microVM with a separate filesystem and network. Your host stays untouched.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ── HOW IT WORKS ── -->
-<section class="how" id="how">
-  <div class="section-eyebrow">Get started</div>
-  <h2 class="section-title">Up and running in minutes</h2>
-  <p class="section-sub">den sits on top of your existing sbx setup. If you've used Docker Sandboxes, you're already halfway there.</p>
-
-  <div class="steps" id="stepsGrid">
-    <div class="step">
-      <div class="step-num">1</div>
-      <h3 class="step-title">Install den</h3>
-      <p class="step-desc">Download the app, drop it in Applications. No Homebrew, no npm install, no setup wizard.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">2</div>
-      <h3 class="step-title">Connect to sbx</h3>
-      <p class="step-desc">Sign in with your Docker account. den picks up your sbx credentials automatically.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <h3 class="step-title">Create a sandbox</h3>
-      <p class="step-desc">Pick a base image, tweak resources if you like, and launch. Your isolated microVM is ready in seconds.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">4</div>
-      <h3 class="step-title">Run your agents</h3>
-      <p class="step-desc">Launch Claude or any AI agent into the sandbox. Watch it build, explore, and ship from the dashboard.</p>
-    </div>
-  </div>
-</section>
-
-<!-- wave to ocean -->
-<div class="wave">
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 72" preserveAspectRatio="none" style="height:56px">
-    <path d="M0,0 C480,72 960,0 1440,56 L1440,72 L0,72 Z" fill="#0D2B3E"/>
-  </svg>
-</div>
-
 <!-- ── MOCKUP ── -->
 <section class="mockup-section" id="demo">
   <div class="section-eyebrow">Preview</div>
   <h2 class="section-title">Sandboxes left, live agent right</h2>
-  <p class="section-sub" style="margin-bottom: 60px;">Your sandboxes and projects in the sidebar; the agent's terminal front and center.</p>
+  <p class="section-sub" style="margin-bottom: 60px;">Your sandboxes and projects in the sidebar; the agent running unattended, front and center.</p>
 
   <div class="browser-window" id="browserWin">
-    <div class="browser-bar">
-      <div class="browser-dots">
-        <div class="browser-dot"></div>
-        <div class="browser-dot"></div>
-        <div class="browser-dot"></div>
-      </div>
-      <div class="browser-url">ancient-eclipse · Running</div>
-    </div>
-    <div class="browser-content">
-      <!-- Sidebar -->
-      <div class="ui-sidebar">
-        <div class="ui-sb-header">
-          <img src="resources/logo.png" alt="">
-          <span class="ui-sb-name">den</span>
-        </div>
-        <div class="ui-nav-section">
-          <div class="ui-nav-item"><div class="ui-nav-dot"></div>Home</div>
-        </div>
-        <div class="ui-nav-section">
-          <div class="ui-nav-section-label">Sandboxes</div>
-          <div class="ui-sb-item active">
-            <span class="ui-av">AE</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">ancient-eclipse</div><div class="ui-sb-itemsub">minipit · running</div></div>
-            <span class="ui-rundot"></span>
-          </div>
-          <div class="ui-sb-item">
-            <span class="ui-av">CM</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">crimson-meteor</div><div class="ui-sb-itemsub">minipit</div></div>
-          </div>
-          <div class="ui-sb-item">
-            <span class="ui-av">LA</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">lucid-aurora</div><div class="ui-sb-itemsub">api · stopped</div></div>
-          </div>
-        </div>
-        <div class="ui-nav-section">
-          <div class="ui-nav-section-label">Projects</div>
-          <div class="ui-sb-item">
-            <span class="ui-av ui-av-folder">▦</span>
-            <div class="ui-sb-text"><div class="ui-sb-itemname">minipit</div></div>
-            <span class="ui-count">3</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Main: a sandbox + its agent terminal -->
-      <div class="ui-main2">
-        <div class="ui-detail-hdr">
-          <span class="ui-rundot"></span>
-          <span class="ui-detail-name">ancient-eclipse</span>
-          <span class="ui-chip">claude</span>
-          <span class="ui-detail-status">Running · 4m 12s</span>
-          <span class="ui-stop">■ Stop</span>
-        </div>
-        <div class="ui-termbar">
-          <div class="ui-seg"><span class="on">Agent</span><span>Shell</span></div>
-          <span class="ui-files">▦ Files</span>
-        </div>
-        <div class="ui-term">
-          <div class="tm-accent">✻ Claude Code <span class="tm-dim">v2.1 · /workspace</span></div>
-          <div>&nbsp;</div>
-          <div class="tm-prompt">&gt; refactor the auth module and add tests</div>
-          <div>&nbsp;</div>
-          <div class="tm-accent">● <span class="tm-norm">Reading the existing auth code…</span></div>
-          <div class="tm-dim">&nbsp;&nbsp;Read src/auth.ts (142 lines)</div>
-          <div class="tm-accent">● <span class="tm-norm">Updated src/auth.ts, added src/auth.test.ts</span></div>
-          <div class="tm-dim">&nbsp;&nbsp;✓ 12 tests passed</div>
-          <div>&nbsp;</div>
-          <div class="tm-prompt">&gt; <span class="tm-caret">▋</span></div>
-        </div>
-      </div>
-    </div>
+    <iframe class="app-frame" src="mockup.html" title="den — live interface preview" loading="lazy" scrolling="no"></iframe>
   </div>
 </section>
 
-<!-- ── STATS ── -->
-<div class="stats-bar">
-  <div class="stat-item">
-    <div class="stat-num">&lt;&nbsp;2s</div>
-    <div class="stat-label">Sandbox spin-up</div>
+<!-- ── FEATURES ── -->
+<section class="features" id="features">
+  <div class="section-eyebrow">Why den</div>
+  <h2 class="section-title">Guardrails on the box,<br>not on the agent</h2>
+  <p class="section-sub">Lock down a disposable microVM once — its filesystem, its network — then let any agent run unattended inside it. The blast radius stops at the sandbox.</p>
+
+  <div class="bento" id="featGrid">
+
+    <!-- Centerpiece: full YOLO, safely -->
+    <div class="bento-tile bento-a">
+      <div>
+        <div class="feat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg></div>
+        <h3 class="feat-title">Full YOLO, safely</h3>
+        <p class="feat-desc">Flip on bypass-permissions and stop approving every command. The agent can install anything, run anything, touch any file — it's sealed inside a microVM it can't escape, so a bad call never reaches your machine.</p>
+      </div>
+      <img class="bento-shot" src="screenshots/app-home.png" alt="den running a Claude agent with bypass-permissions enabled inside an isolated sandbox">
+    </div>
+
+    <!-- Every agent -->
+    <div class="bento-tile bento-b">
+      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+      <h3 class="feat-title">Every agent, first-class</h3>
+      <p class="feat-desc">Full agent TUIs over a real PTY — bring the one you already use.</p>
+      <div class="agent-chips">
+        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></svg>Claude</span>
+        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"/></svg>Codex</span>
+        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"/></svg>Antigravity</span>
+        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg>OpenCode</span>
+        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z"/></svg>Gemini</span>
+        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg>Cursor</span>
+      </div>
+    </div>
+
+    <!-- Isolated -->
+    <div class="bento-tile bento-c">
+      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+      <h3 class="feat-title">Isolated by default</h3>
+      <p class="feat-desc">Each sandbox is its own microVM with a separate filesystem and network. Your host stays untouched.</p>
+    </div>
+
+    <!-- Network policy -->
+    <div class="bento-tile bento-d">
+      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></div>
+      <h3 class="feat-title">Network policies</h3>
+      <p class="feat-desc">Decide exactly which domains an agent can reach. Everything else is blocked — no exfiltration, no surprises.</p>
+    </div>
+
+    <!-- Ephemeral & customizable -->
+    <div class="bento-tile bento-e light-shot">
+      <div class="feat-icon a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/><path d="M3 9l9 5 9-5"/></svg></div>
+      <h3 class="feat-title">Ephemeral, and yours to shape</h3>
+      <p class="feat-desc">Spin up a disposable sandbox in seconds, then layer in your own tools, credentials and policies with kits and mixins. Throw it away when you're done.</p>
+      <img class="bento-shot" src="screenshots/app-newsandbox.png" alt="den new-sandbox dialog: pick an agent, base image, workspace and isolation">
+    </div>
+
+    <!-- Dashboard -->
+    <div class="bento-tile bento-f light-shot">
+      <div class="feat-icon c"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></div>
+      <h3 class="feat-title">Watch them all work</h3>
+      <p class="feat-desc">Every sandbox, its agent, status and uptime in one dashboard — run a whole fleet at once.</p>
+      <img class="bento-shot" src="screenshots/app-dashboard.png" alt="den home dashboard showing running sandboxes grouped by project">
+    </div>
+
   </div>
-  <div class="stat-item">
-    <div class="stat-num">100%</div>
-    <div class="stat-label">Host isolation</div>
+</section>
+
+<!-- ── READINESS HOOK ── -->
+<section class="ready" id="ready">
+  <div class="ready-inner">
+    <div class="section-eyebrow">The real question</div>
+    <h2 class="ready-title">Are you ready for<br><em>full YOLO mode?</em></h2>
+    <p class="ready-sub">Uncover what your agents can really do. Stop babysitting them, stop clicking <em>approve</em> — box them in, turn them loose, and get on with your day.</p>
+    <a href="#cta" class="btn-white ready-btn">I'm ready →</a>
   </div>
-  <div class="stat-item">
-    <div class="stat-num">0</div>
-    <div class="stat-label">CLI commands needed</div>
-  </div>
-  <div class="stat-item">
-    <div class="stat-num">∞</div>
-    <div class="stat-label">Sandboxes, one dashboard</div>
-  </div>
-</div>
+</section>
 
 <!-- ── CTA ── -->
 <section class="cta-section" id="cta">
-  <h2 class="cta-title">Ready to <em>dig in</em>?</h2>
-  <p class="cta-sub">den is free to try. Bring your sbx account and start building in minutes.</p>
+  <h2 class="cta-title">Ready to <em>let go of the wheel</em>?</h2>
+  <p class="cta-sub">den is free to try. Bring your sbx account and let your agents run.</p>
   <div class="cta-actions">
     <a href="#" class="btn-white">Download den</a>
     <a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener" class="btn-ghost-w">Read sbx docs →</a>
@@ -938,7 +938,7 @@
     <li><a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener">Docker Sandboxes</a></li>
     <li><a href="#">Privacy</a></li>
   </ul>
-  <span class="footer-copy">© 2025 den — Built on Docker Sandboxes</span>
+  <span class="footer-copy">© 2026 den — Built on Docker Sandboxes</span>
 </footer>
 
 <script>
@@ -957,7 +957,7 @@
   const cardObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (!entry.isIntersecting) return;
-      const cards = entry.target.querySelectorAll('.feature-card');
+      const cards = entry.target.querySelectorAll('.bento-tile');
       cards.forEach((c, i) => {
         setTimeout(() => c.classList.add('visible'), i * 90);
       });
@@ -967,21 +967,6 @@
 
   const featGrid = document.getElementById('featGrid');
   if (featGrid) cardObserver.observe(featGrid);
-
-  // Step observer
-  const stepObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-      const steps = entry.target.querySelectorAll('.step');
-      steps.forEach((s, i) => {
-        setTimeout(() => s.classList.add('visible'), i * 110);
-      });
-      stepObserver.unobserve(entry.target);
-    });
-  }, { threshold: 0.15 });
-
-  const stepsGrid = document.getElementById('stepsGrid');
-  if (stepsGrid) stepObserver.observe(stepsGrid);
 
   // Browser mockup
   const browserObs = new IntersectionObserver((entries) => {
@@ -995,6 +980,18 @@
 
   const bw = document.getElementById('browserWin');
   if (bw) browserObs.observe(bw);
+
+  // Readiness hook reveal
+  const revealObs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('visible');
+      revealObs.unobserve(entry.target);
+    });
+  }, { threshold: 0.25 });
+
+  const readyInner = document.querySelector('.ready-inner');
+  if (readyInner) revealObs.observe(readyInner);
 
   // Animate log lines
   const logRows = document.querySelectorAll('.log-row');

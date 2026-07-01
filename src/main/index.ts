@@ -586,6 +586,10 @@ function scanOutputForBlocks(name: string, data: string): void {
 // hooks inside the sandbox that append each event as JSON to ~/.den/events.jsonl,
 // then tail that file. `Stop` = finished (waiting); `UserPromptSubmit`/`PreToolUse`
 // = working; `PostToolUse` on a file tool = the workspace changed → refresh.
+// `SessionStart` (startup/resume/clear) = a session (re)started idle at the
+// prompt, so reset any stale `working` — `Stop` doesn't fire when a turn is
+// interrupted or the CLI is relaunched (the "Welcome back!" screen), which
+// otherwise leaves the sidebar stuck on "Working…".
 type AgentState = 'working' | 'waiting'
 const agentState = new Map<string, AgentState>()
 const eventTails = new Map<string, ReturnType<typeof spawn>>()
@@ -599,7 +603,8 @@ const DEN_HOOKS = {
     // asked question, or the idle "waiting for input" reminder. Distinct from
     // Stop (turn finished) so we can play a different cue.
     Notification: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    Stop: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }]
+    Stop: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }]
   }
 }
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
@@ -665,7 +670,7 @@ function startEventTail(name: string, attempt = 0): void {
     buf = lines.pop() ?? ''
     for (const line of lines) {
       if (!line.trim()) continue
-      let ev: { hook_event_name?: string; tool_name?: string }
+      let ev: { hook_event_name?: string; tool_name?: string; source?: string }
       try { ev = JSON.parse(line) } catch { hookLog(`${name} unparsable line:`, line.slice(0, 120)); continue }
       hookLog(`${name} ▸`, ev.hook_event_name, ev.tool_name ?? '')
       switch (ev.hook_event_name) {
@@ -679,6 +684,13 @@ function startEventTail(name: string, attempt = 0): void {
           break
         case 'Stop':
           setAgentState(name, 'waiting')
+          break
+        case 'SessionStart':
+          // A session started, resumed, or was cleared → the agent is idle at
+          // the prompt, so clear any stale `working` left by a turn that never
+          // emitted `Stop` (interrupt, crash, CLI relaunch). Skip `compact`,
+          // which fires *mid-turn* right after context compaction.
+          if (ev.source !== 'compact') setAgentState(name, 'waiting')
           break
         case 'UserPromptSubmit':
         case 'PreToolUse':
@@ -1190,10 +1202,20 @@ function setupIPC(): void {
     catch { return '' }
   })
 
-  // Rewrite a kit's spec.yaml and re-pack it.
-  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string) => {
+  // Rewrite a kit's spec.yaml, bundle any newly-attached files, and re-pack it.
+  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string, files?: string[]) => {
     try {
-      require('fs').writeFileSync(join(dir, 'spec.yaml'), spec)
+      const fs = require('fs')
+      const path = require('path')
+      fs.writeFileSync(join(dir, 'spec.yaml'), spec)
+      // Copy in any new reference files (existing bundled files are left as-is).
+      if (files?.length) {
+        const dest = join(dir, 'files', 'workspace')
+        fs.mkdirSync(dest, { recursive: true })
+        for (const fp of files) {
+          try { fs.copyFileSync(fp, join(dest, path.basename(fp))) } catch (e) { console.error('copy kit file failed:', e) }
+        }
+      }
       const output = await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 })
       return { ok: true, output }
     } catch (err) {

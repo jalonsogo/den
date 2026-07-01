@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, X, Paperclip, Info, Search, ChevronDown, Check } from 'lucide-react'
 import { useStore } from '../../store'
 import { MCP_CATALOG, mcpHost, mcpIcon } from '../../lib/mcpCatalog'
+import { parseKitSpec } from '../../lib/kitSpec'
 import { AgentIcon } from '../AgentIcon'
 import { AGENTS, type AgentType } from '../../types'
 
@@ -129,6 +130,43 @@ function buildSpec(f: KitForm): string {
   return lines.join('\n') + '\n'
 }
 
+// Inverse of buildSpec — best-effort parse of an existing spec.yaml back into the
+// visual form so a kit can be edited. Round-trips kits composed with this editor;
+// hand-written YAML with exotic startup commands may not fully map back.
+function specToForm(raw: string): { form: KitForm; caps: Cap[] } {
+  const p = parseKitSpec(raw)
+  // Recover MCP registrations (id/name, transport, url) from `claude mcp add`.
+  const mcps: string[] = []
+  const customMcps: { name: string; url: string }[] = []
+  for (const m of raw.matchAll(/claude\s+mcp\s+add\s+(\S+)\s+--transport\s+(\S+)\s+(\S+)/g)) {
+    const name = m[1], url = m[3]
+    if (MCP_CATALOG.some((c) => c.id === name)) { if (!mcps.includes(name)) mcps.push(name) }
+    else if (!customMcps.some((c) => c.url === url)) customMcps.push({ name, url })
+  }
+  // Real install commands exclude the auto-generated MCP registrations.
+  const installCmds = p.installCmds.filter((c) => !/claude\s+mcp\s+add\s/.test(c))
+  // Manual allow-domains exclude hosts auto-derived from the selected MCPs.
+  const mcpHosts = new Set<string>([
+    ...mcps.map((id) => { const c = MCP_CATALOG.find((x) => x.id === id); return c ? mcpHost(c.url) : '' }),
+    ...customMcps.map((c) => mcpHost(c.url))
+  ].filter(Boolean))
+  const allowedDomains = p.allowedDomains.filter((d) => !mcpHosts.has(d))
+
+  const form: KitForm = {
+    kind: p.kind === 'sandbox' ? 'sandbox' : 'mixin',
+    name: p.name, displayName: p.displayName, description: p.description,
+    image: p.image, entrypoint: p.entrypoint,
+    mcps, installCmds, allowedDomains, deniedDomains: p.deniedDomains,
+    envVars: p.envVars, agentContext: p.agentContext, attachFiles: [], customMcps
+  }
+  const caps: Cap[] = []
+  if (mcps.length || customMcps.length) caps.push('mcp')
+  if (allowedDomains.length || p.deniedDomains.length) caps.push('network')
+  if (form.envVars.length) caps.push('env')
+  if (form.agentContext.trim()) caps.push('memory')
+  return { form, caps }
+}
+
 // A list of single-line inputs with add/remove (one entry per line).
 function ListField({ placeholder, items, onChange, addLabel }: {
   placeholder: string; items: string[]; onChange: (v: string[]) => void; addLabel: string
@@ -156,8 +194,10 @@ function ListField({ placeholder, items, onChange, addLabel }: {
 }
 
 export function NewKitModal() {
-  const { setModal, activePage } = useStore()
-  // Kind is set by the section that opened the modal (Sandbox Kits vs Mixin Kits).
+  const { setModal, activePage, editKit, setEditKit } = useStore()
+  const editing = !!editKit
+  // Kind is set by the section that opened the modal (Sandbox Kits vs Mixin Kits);
+  // in edit mode it's replaced by the loaded kit's kind.
   const kind: 'mixin' | 'sandbox' = activePage === 'kits' ? 'sandbox' : 'mixin'
   const [f, setF] = useState<KitForm>({
     ...EMPTY, kind,
@@ -175,6 +215,23 @@ export function NewKitModal() {
   const [done, setDone] = useState('')
 
   const set = (k: keyof KitForm, v: KitForm[keyof KitForm]) => setF((prev) => ({ ...prev, [k]: v }))
+
+  // In edit mode, load the kit's spec.yaml and hydrate the form + open the
+  // capability blocks it already uses.
+  useEffect(() => {
+    if (!editKit) return
+    let cancelled = false
+    window.minipit?.readKit(editKit.dir).then((raw) => {
+      if (cancelled || !raw) return
+      const { form, caps: c } = specToForm(raw)
+      setF(form)
+      setCaps(c)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [editKit])
+
+  // Close and clear the edit target so the next open is a fresh "create".
+  const close = () => { setModal(null); setEditKit(null) }
 
   const addCap = (key: Cap) => setCaps((c) => (c.includes(key) ? c : [...c, key]))
   const removeCap = (key: Cap) => {
@@ -203,22 +260,36 @@ export function NewKitModal() {
     try {
       const res = await window.minipit?.createKit(f.name.trim(), buildSpec(f), f.attachFiles)
       setDone(res?.zip ? `Packed → ${res.zip}` : 'Kit created')
-      setTimeout(() => setModal(null), 1200)
+      setTimeout(() => close(), 1200)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setSaving(false)
     }
   }
 
+  // Edit mode: rewrite the existing kit's spec.yaml (name/dir unchanged) and repack.
+  const handleSave = async () => {
+    if (!editKit) return
+    setSaving(true); setError(''); setDone('')
+    const res = await window.minipit?.updateKit(editKit.dir, buildSpec(f), f.attachFiles)
+      .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+    if (res?.ok) {
+      setDone('Saved & re-packed')
+      setTimeout(() => close(), 1000)
+    } else {
+      setError(res?.error || 'Failed to save kit'); setSaving(false)
+    }
+  }
+
   const capLabel = (key: Cap) => CAPS.find((c) => c.key === key)?.label ?? key
 
   return (
-    <div className="overlay" onClick={() => !saving && setModal(null)}>
+    <div className="overlay" onClick={() => !saving && close()}>
       <div className="modal modal-adaptive" style={{ width: 'min(1200px, 100%)' }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
-          <div className="m-title">New {kind === 'sandbox' ? 'Sandbox' : 'Mixin'} Kit</div>
+          <div className="m-title">{editing ? 'Edit' : 'New'} {f.kind === 'sandbox' ? 'Sandbox' : 'Mixin'} Kit</div>
           <div className="m-sub">
-            {kind === 'sandbox'
+            {f.kind === 'sandbox'
               ? 'Define a full agent — image, entrypoint, and capabilities. den writes the spec.yaml and packs it.'
               : 'Compose add-ons (MCPs, commands, policy, env, memory) for an existing agent.'}
           </div>
@@ -227,8 +298,8 @@ export function NewKitModal() {
         <div className="m-body">
           <div className="frow-2">
             <div className="fg" style={{ flex: 1 }}>
-              <label className="flabel">Name</label>
-              <input className="finput" value={f.name} placeholder="my-kit" onChange={(e) => set('name', e.target.value)} autoFocus />
+              <label className="flabel">Name {editing && <span className="flabel-hint">can't be renamed</span>}</label>
+              <input className="finput" value={f.name} placeholder="my-kit" readOnly={editing} onChange={(e) => set('name', e.target.value)} autoFocus={!editing} />
             </div>
             <div className="fg" style={{ flex: 1 }}>
               <label className="flabel">Display name</label>
@@ -422,9 +493,9 @@ export function NewKitModal() {
             const envCount = f.envVars.filter((s) => s.includes('=')).length
             return (
               <div className="kit-summary">
-                <div className="ks-row"><span className="ks-k">Kind</span><span className="ks-v">{kind === 'sandbox' ? 'Sandbox kit — full agent' : 'Mixin kit — add-on'}</span></div>
-                {kind === 'sandbox' && <div className="ks-row"><span className="ks-k">Base</span><span className="ks-v ks-mono">{f.image || '—'}</span></div>}
-                {kind === 'sandbox' && <div className="ks-row"><span className="ks-k">Entrypoint</span><span className="ks-v ks-mono">{f.entrypoint || '—'}</span></div>}
+                <div className="ks-row"><span className="ks-k">Kind</span><span className="ks-v">{f.kind === 'sandbox' ? 'Sandbox kit — full agent' : 'Mixin kit — add-on'}</span></div>
+                {f.kind === 'sandbox' && <div className="ks-row"><span className="ks-k">Base</span><span className="ks-v ks-mono">{f.image || '—'}</span></div>}
+                {f.kind === 'sandbox' && <div className="ks-row"><span className="ks-k">Entrypoint</span><span className="ks-v ks-mono">{f.entrypoint || '—'}</span></div>}
                 {(mcpServers.length > 0 || custom.length > 0) && (
                   <div className="ks-block">
                     <span className="ks-k">Remote MCPs · {mcpServers.length + custom.length}</span>
@@ -445,7 +516,7 @@ export function NewKitModal() {
                 {(f.agentContext.trim() || f.attachFiles.length > 0) && (
                   <div className="ks-row"><span className="ks-k">Memory</span><span className="ks-v">{[f.agentContext.trim() ? 'notes' : '', f.attachFiles.length ? `${f.attachFiles.length} file${f.attachFiles.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</span></div>
                 )}
-                {mcpServers.length === 0 && allowed.size === 0 && denied.length === 0 && envCount === 0 && !f.agentContext.trim() && f.attachFiles.length === 0 && kind === 'mixin' && (
+                {mcpServers.length === 0 && allowed.size === 0 && denied.length === 0 && envCount === 0 && !f.agentContext.trim() && f.attachFiles.length === 0 && f.kind === 'mixin' && (
                   <div className="ks-empty">No capabilities added yet.</div>
                 )}
               </div>
@@ -465,9 +536,9 @@ export function NewKitModal() {
         </div>
 
         <div className="m-ftr">
-          <button className="btn btn-ghost" onClick={() => setModal(null)} disabled={saving}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleCreate} disabled={saving || !f.name.trim()}>
-            {saving ? 'Packing…' : 'Create & Pack'}
+          <button className="btn btn-ghost" onClick={close} disabled={saving}>Cancel</button>
+          <button className="btn btn-primary" onClick={editing ? handleSave : handleCreate} disabled={saving || !f.name.trim()}>
+            {saving ? 'Packing…' : editing ? 'Save & Pack' : 'Create & Pack'}
           </button>
         </div>
       </div>

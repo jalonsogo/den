@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -34,20 +34,11 @@ html, body { height:100%; overflow:hidden;
   font-family:-apple-system,'Helvetica Neue',sans-serif; font-size:13px;
   color:var(--t1); background:var(--bg); -webkit-font-smoothing:antialiased; }
 
-.stage { height:100vh; display:flex; align-items:center; justify-content:center;
-  background:
-    radial-gradient(1200px 600px at 50% -10%, rgba(217,119,87,0.10), transparent 60%),
-    radial-gradient(900px 500px at 100% 110%, rgba(59,130,246,0.08), transparent 55%),
-    #ece9e4;
-  padding:28px; }
-[data-theme="dark"] .stage { background:
-  radial-gradient(1200px 600px at 50% -10%, rgba(217,119,87,0.12), transparent 60%),
-  radial-gradient(900px 500px at 100% 110%, rgba(88,166,255,0.10), transparent 55%),
-  #06080c; }
+/* Window-only: the UI fills the frame, no desktop backdrop around it. */
+.stage { height:100vh; display:flex; background:var(--bg); padding:0; }
 
-.window { width:min(1180px,96vw); height:min(720px,92vh); background:var(--bg);
-  border-radius:12px; overflow:hidden; border:1px solid var(--border);
-  box-shadow:0 40px 90px -30px rgba(0,0,0,0.55), 0 8px 24px rgba(0,0,0,0.18);
+.window { width:100%; height:100vh; background:var(--bg);
+  overflow:hidden;
   display:flex; flex-direction:column; }
 
 /* Toolbar */
@@ -654,10 +645,10 @@ let page = 'sandbox';     // home | sandbox | settings | projects | templates | 
 let activeId = 's2';
 let tab = 'agent';        // agent | shell
 let dock = null;          // null | info
-let theme = 'light';
-let themePref = 'light';  // light | dark | system
+let theme = 'dark';
+let themePref = 'dark';  // light | dark | system
 let accent = 'default';
-let termTheme = 'claude-light';
+let termTheme = 'claude-dark';
 let settingsTab = 'general';
 const settings = { soundOn:true, askSound:true, launchAtLogin:true, menuBarOnly:true, notifyOnExit:true, notifyOnError:false,
   pollFocused:'5s', pollBackground:'30s' };

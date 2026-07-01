@@ -224,7 +224,7 @@ declare global {
       kitAdd(sandbox: string, dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
       appliedKits(sandbox: string): Promise<string[]>
       readKit(dir: string): Promise<string>
-      updateKit(dir: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      updateKit(dir: string, spec: string, files?: string[]): Promise<{ ok: boolean; output?: string; error?: string }>
       removeKit(dir: string): Promise<void>
       kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
