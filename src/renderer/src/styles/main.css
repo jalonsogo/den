@@ -1075,6 +1075,9 @@ html, body, #root {
 }
 .term-files:hover { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 8%, transparent); }
 .term-files.active { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent); }
+/* Full-opacity red so the warning reads clearly (not faded like the others). */
+.term-warn { color: var(--destruct); padding: 4px 6px; }
+.term-warn:hover { color: var(--destruct); background: color-mix(in srgb, var(--destruct) 14%, transparent); }
 
 .term-theme-select {
   appearance: none;

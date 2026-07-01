@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { PanelRight, Info, Play, RefreshCw } from 'lucide-react'
+import { PanelRight, Info, Play, RefreshCw, AlertTriangle } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { useStore } from '../store'
+import { useStore, unackedBlockCount } from '../store'
 import { termTheme as resolveTermTheme } from '../lib/termThemes'
 import type { Sandbox } from '../types'
 
@@ -319,6 +319,9 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
   const appTheme = useStore((s) => s.theme)
   const theme = resolveTermTheme(termThemeId, appTheme).theme
   const bg = theme.background ?? '#0a0a0a'
+  // Pending (unacknowledged) network-policy denials for this sandbox — surfaced
+  // as a red warning next to Info, which opens the panel (clearing the badge).
+  const hasBlocks = useStore((s) => unackedBlockCount(s.policyBlocks, s.blocksSeenAt, sandbox.name) > 0)
 
   return (
     <div
@@ -342,6 +345,15 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
           >
             <RefreshCw size={13} />
           </button>
+          {hasBlocks && onShowInfo && (
+            <button
+              className="term-files term-warn"
+              onClick={onShowInfo}
+              title="Network requests blocked — view details"
+            >
+              <AlertTriangle size={14} />
+            </button>
+          )}
           {onShowInfo && (
             <button
               className={`term-files${dock === 'info' ? ' active' : ''}`}
