@@ -67,6 +67,13 @@ function getBrewPath(): string {
   )
 }
 
+// GUI-launched apps on macOS inherit a stripped PATH that omits the brew
+// prefixes, so spawned tools (sbx, and the docker credential helpers ORAS
+// execs during `kit push`) can't be found. Augment PATH for every host spawn.
+function guiEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` }
+}
+
 // Kit artifacts live in the app's own data folder (not the user's home). On
 // first use we migrate any kits authored under the legacy ~/minipit-kits path.
 let kitsRootCache = ''
@@ -197,7 +204,7 @@ function parsePolicyLs(out: string) {
 
 function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(getSbxPath(), args, { timeout: opts?.timeout ?? 10000 }, (err, stdout, stderr) => {
+    execFile(getSbxPath(), args, { timeout: opts?.timeout ?? 10000, env: guiEnv() }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message))
       else resolve(stdout.trim())
     })
@@ -273,7 +280,7 @@ async function getPortsForSandbox(name: string) {
 // Like sbx() but pipes `input` to the child's stdin (for `secret set`).
 function sbxWithInput(args: string[], input: string, timeout = 10000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(getSbxPath(), args, { timeout })
+    const proc = spawn(getSbxPath(), args, { timeout, env: guiEnv() })
     let out = ''
     let err = ''
     proc.stdout?.on('data', (d) => (out += d))
@@ -444,7 +451,7 @@ function dockerDf(): Promise<{ images: number | null; containers: number | null 
   return new Promise((resolve) => {
     execFile(
       'docker', ['system', 'df', '--format', '{{json .}}'],
-      { timeout: 15000, env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` } },
+      { timeout: 15000, env: guiEnv() },
       (err, stdout) => {
         if (err) return resolve({ images: null, containers: null })
         let images: number | null = null
@@ -1086,7 +1093,7 @@ function setupIPC(): void {
     const send = (chunk: string) => mainWindow?.webContents.send('minipit:create-output', chunk)
     send(`$ sbx ${args.join(' ')}\n`)
     const out = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(getSbxPath(), args, { env: { ...process.env } })
+      const proc = spawn(getSbxPath(), args, { env: guiEnv() })
       let buf = ''
       let err = ''
       proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
@@ -1273,9 +1280,7 @@ function setupIPC(): void {
       const store = cfg.credsStore || cfg.credStore
       if (!store) return { loggedIn: false }
       const out = await new Promise<string>((resolve, reject) => {
-        const proc = spawn(`docker-credential-${store}`, ['list'], {
-          env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` }
-        })
+        const proc = spawn(`docker-credential-${store}`, ['list'], { env: guiEnv() })
         let buf = ''
         proc.stdout?.on('data', (d) => { buf += d.toString() })
         proc.on('error', reject)
@@ -1313,7 +1318,7 @@ function setupIPC(): void {
     const zip = join(root, `${name}.zip`)
     const dir = join(root, name)
     const run = (bin: string, args: string[]) => new Promise<number>((resolve, reject) => {
-      const p = spawn(bin, args, { env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` } })
+      const p = spawn(bin, args, { env: guiEnv() })
       let err = ''
       p.stderr?.on('data', (d) => { err += d.toString() })
       p.on('error', reject)
@@ -1544,7 +1549,7 @@ function setupIPC(): void {
     return await new Promise((resolve) => {
       const display = manager === 'brew' ? 'brew' : cmd.bin
       send(`$ ${display} ${cmd.args.join(' ')}\n\n`)
-      const proc = spawn(cmd.bin, cmd.args, { env: { ...process.env } })
+      const proc = spawn(cmd.bin, cmd.args, { env: guiEnv() })
       proc.stdout.on('data', (d) => send(d.toString()))
       proc.stderr.on('data', (d) => send(d.toString()))
       proc.on('error', (e) => { send(`\n[error] ${e.message}\n`); resolve({ ok: false, code: -1 }) })
