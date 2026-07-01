@@ -2482,6 +2482,8 @@ html, body, #root {
   box-shadow: 0 8px 28px rgba(0,0,0,0.22); padding: 4px; min-width: 190px;
   max-height: 360px; overflow-y: auto;
 }
+/* Not enough room on the right — open the flyout leftward instead. */
+.ctx-submenu.flip-left { left: auto; right: 100%; margin-left: 0; margin-right: 3px; }
 .ctx-sub-label {
   font-size: 10px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
   color: var(--t3); padding: 6px 10px 3px;

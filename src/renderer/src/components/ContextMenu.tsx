@@ -7,8 +7,13 @@ export function ContextMenu() {
   const termTheme = useStore((s) => s.termTheme)
   const setTermTheme = useStore((s) => s.setTermTheme)
   const ref = useRef<HTMLDivElement>(null)
+  const subRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
   const [themeOpen, setThemeOpen] = useState(false)
+  // The theme flyout defaults to opening rightward; flip it left (and nudge it
+  // up) when that would overflow the viewport near the window edge.
+  const [subFlip, setSubFlip] = useState(false)
+  const [subTop, setSubTop] = useState<number | undefined>(undefined)
 
   const sandbox = sandboxes.find((s) => s.id === contextMenu.sandboxId)
 
@@ -31,6 +36,16 @@ export function ContextMenu() {
     const top = Math.max(M, Math.min(contextMenu.y, window.innerHeight - r.height - M))
     setPos({ top, left })
   }, [contextMenu.x, contextMenu.y, contextMenu.visible])
+
+  // Decide the flyout side/offset once it's rendered, based on real geometry.
+  useLayoutEffect(() => {
+    if (!themeOpen) { setSubFlip(false); setSubTop(undefined); return }
+    if (!subRef.current) return
+    const M = 8
+    const r = subRef.current.getBoundingClientRect()
+    setSubFlip(r.right > window.innerWidth - M)
+    setSubTop(r.bottom > window.innerHeight - M ? -5 + (window.innerHeight - M - r.bottom) : undefined)
+  }, [themeOpen])
 
   if (!contextMenu.visible || !sandbox) return null
 
@@ -115,7 +130,11 @@ export function ContextMenu() {
         Terminal theme
         <span className="ctx-sub-arrow">›</span>
         {themeOpen && (
-          <div className="ctx-submenu">
+          <div
+            ref={subRef}
+            className={`ctx-submenu${subFlip ? ' flip-left' : ''}`}
+            style={subTop !== undefined ? { top: subTop } : undefined}
+          >
             {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
               <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
                 <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
