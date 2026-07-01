@@ -452,11 +452,18 @@ export function Sidebar() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectKeys])
 
-  // Refresh uncommitted-change counts whenever the set of running sandboxes changes.
+  // Refresh uncommitted-change counts when the running set changes, then on a
+  // slow poll. The poll matters because commits/edits made in the terminal emit
+  // no file-change hook, so without it the badge would stay stale until a file
+  // changed or a sandbox stopped/started.
   const refreshSandboxChanges = useStore((s) => s.refreshSandboxChanges)
   const runningKeys = sandboxes.filter((s) => s.status === 'running').map((s) => s.name).join('|')
   useEffect(() => {
-    sandboxes.filter((s) => s.status === 'running').forEach((s) => refreshSandboxChanges(s.name, s.workspace))
+    const refresh = () =>
+      sandboxes.filter((s) => s.status === 'running').forEach((s) => refreshSandboxChanges(s.name, s.workspace))
+    refresh()
+    const id = setInterval(refresh, 15000)
+    return () => clearInterval(id)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningKeys])
 
