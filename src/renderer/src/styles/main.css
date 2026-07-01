@@ -692,7 +692,9 @@ html, body, #root {
 .sb-filter-seg-btn {
   flex: 1; font-size: 11.5px; padding: 5px 6px; border-radius: 5px; cursor: pointer;
   background: var(--bg-subtle); border: 1px solid transparent; color: var(--t2);
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
 }
+.sb-filter-seg-btn svg { flex-shrink: 0; }
 .sb-filter-seg-btn:hover:not(:disabled) { color: var(--t1); }
 .sb-filter-seg-btn:disabled { opacity: 0.4; cursor: default; }
 .sb-filter-seg-btn.active {

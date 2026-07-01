@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, Trash2,
-  Home, FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch
+  Home, FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
+  ArrowUp, ArrowDown
 } from 'lucide-react'
 import { useStore, unackedBlockCount, projectDisplayName } from '../store'
 import { ProjectAvatar } from './ProjectAvatar'
@@ -320,6 +321,13 @@ export function Sidebar() {
   const [agentFilter, setAgentFilter] = useState<AgentType[]>(() => {
     try { return JSON.parse(localStorage.getItem('minipit:sbxAgents') ?? '[]') } catch { return [] }
   })
+  // Sort order for the sandbox list. 'none' keeps the runtime's own ordering.
+  const [sortBy, setSortBy] = useState<'none' | 'name' | 'status' | 'project'>(
+    () => (localStorage.getItem('minipit:sbxSortBy') as 'none' | 'name' | 'status' | 'project') ?? 'none'
+  )
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
+    () => (localStorage.getItem('minipit:sbxSortDir') as 'asc' | 'desc') ?? 'asc'
+  )
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   // Fixed-position coords for the dropdown so it escapes the sidebar's overflow.
   const [filterPos, setFilterPos] = useState<{ top: number; left: number } | null>(null)
@@ -348,8 +356,24 @@ export function Sidebar() {
     setStatusFilter(s)
     localStorage.setItem('minipit:sbxStatus', s)
   }
-  const clearFilters = () => { setFilter(''); setGrouping('none'); setAgents([]); setStatus('all'); setAgentMenuOpen(false) }
-  const hasFilter = !!filter || groupBy !== 'none' || agentFilter.length > 0 || statusFilter !== 'all'
+  // Click a sort field: select it (ascending) when inactive, otherwise cycle
+  // its direction asc → desc → off, so a third click clears the sort.
+  const setSort = (field: 'name' | 'status' | 'project') => {
+    let nextBy: 'none' | 'name' | 'status' | 'project' = field
+    let nextDir: 'asc' | 'desc' = 'asc'
+    if (sortBy === field) {
+      if (sortDir === 'asc') { nextBy = field; nextDir = 'desc' }
+      else { nextBy = 'none'; nextDir = 'asc' }
+    }
+    setSortBy(nextBy); localStorage.setItem('minipit:sbxSortBy', nextBy)
+    setSortDir(nextDir); localStorage.setItem('minipit:sbxSortDir', nextDir)
+  }
+  const clearFilters = () => {
+    setFilter(''); setGrouping('none'); setAgents([]); setStatus('all'); setAgentMenuOpen(false)
+    setSortBy('none'); localStorage.setItem('minipit:sbxSortBy', 'none')
+    setSortDir('asc'); localStorage.setItem('minipit:sbxSortDir', 'asc')
+  }
+  const hasFilter = !!filter || groupBy !== 'none' || agentFilter.length > 0 || statusFilter !== 'all' || sortBy !== 'none'
 
   // Agents that actually appear in the current sandboxes — the only ones worth
   // offering as a filter.
@@ -371,11 +395,26 @@ export function Sidebar() {
       s.status.toLowerCase().includes(q))
   )
 
+  // Optional explicit ordering. 'none' preserves the runtime's own order.
+  const sorted = (() => {
+    if (sortBy === 'none') return filtered
+    const key = (s: Sandbox) =>
+      sortBy === 'name' ? s.name
+        : sortBy === 'status' ? s.status
+          : projectDisplayName(projectNames, s.workspace)
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...filtered].sort((a, b) => {
+      const r = key(a).localeCompare(key(b), undefined, { sensitivity: 'base', numeric: true })
+      // Stable tie-break by name so equal keys keep a predictable order.
+      return (r || a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })) * dir
+    })
+  })()
+
   // Optional grouping for the sandbox list (by project folder or by agent).
   const grouped: [string, Sandbox[]][] | null = (() => {
     if (groupBy === 'none') return null
     const map = new Map<string, Sandbox[]>()
-    for (const s of filtered) {
+    for (const s of sorted) {
       const key = groupBy === 'project' ? projectDisplayName(projectNames, s.workspace) : s.agent
       const list = map.get(key) ?? []
       list.push(s)
@@ -553,6 +592,27 @@ export function Sidebar() {
                       </div>
                     </div>
 
+                    <div className="sb-filter-grp">
+                      <span className="sb-filter-lbl">Order by</span>
+                      <div className="sb-filter-seg">
+                        {([
+                          { id: 'name', label: 'Name' },
+                          { id: 'status', label: 'Status' },
+                          { id: 'project', label: 'Project' },
+                        ] as const).map(({ id, label }) => (
+                          <button
+                            key={id}
+                            className={`sb-filter-seg-btn${sortBy === id ? ' active' : ''}`}
+                            onClick={() => setSort(id)}
+                            title={sortBy === id ? (sortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click to clear') : `Sort by ${label.toLowerCase()}`}
+                          >
+                            {label}
+                            {sortBy === id && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {presentAgents.length > 0 && (
                       <div className="sb-filter-grp">
                         <span className="sb-filter-lbl">Agent</span>
@@ -615,7 +675,7 @@ export function Sidebar() {
           ) : (
             // Collapsed rail can't show group headers, but keep the grouped
             // ordering so the sequence matches the expanded view.
-            (grouped ? grouped.flatMap(([, l]) => l) : filtered).map((s) => (
+            (grouped ? grouped.flatMap(([, l]) => l) : sorted).map((s) => (
               <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
             ))
           )}
