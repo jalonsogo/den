@@ -74,6 +74,8 @@ interface AppState {
   defaultKits: string[]
   // Name of a just-created sandbox to briefly flash in the sidebar. Auto-clears.
   highlightSandbox: string | null
+  // Sandbox to focus when opening the Logs page (from a sandbox's Logs action).
+  logsSandbox: string | null
 
   setSandboxes:       (sandboxes: Sandbox[]) => void
   addCreatingSandbox: (sandbox: Sandbox) => void
@@ -108,6 +110,7 @@ interface AppState {
   updateSandbox:      (id: string, updates: Partial<Sandbox>) => void
   setActiveSandboxId: (id: string | null) => void
   setActivePage:      (page: PageType) => void
+  setLogsSandbox:     (name: string | null) => void
   setActiveTab:       (tab: TabType) => void
   setModal:           (modal: ModalType) => void
   openPrompt:         (config: PromptConfig) => void
@@ -169,6 +172,7 @@ export const useStore = create<AppState>((set) => ({
   toasts: [],
   agentActivity: {},
   highlightSandbox: null,
+  logsSandbox: null,
   defaultKits: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:defaultKits') ?? '[]') ?? [] } catch { return [] }
   })(),
@@ -452,6 +456,8 @@ export const useStore = create<AppState>((set) => ({
   setActiveSandboxId: (id) => set({ activeSandboxId: id, activePage: 'sandbox', activeTab: 'terminal' }),
 
   setActivePage: (page) => set({ activePage: page }),
+
+  setLogsSandbox: (name) => set({ logsSandbox: name }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 

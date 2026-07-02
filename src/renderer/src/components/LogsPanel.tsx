@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import { useStore } from '../store'
 import { termTheme as resolveTermTheme } from '../lib/termThemes'
 
 const CAP = 200_000 // keep the last ~200 KB of log text
+const MAX_ROWS = 2500 // cap rendered rows so a long tail stays responsive
 const KIT_PREFIX = 'kit:' // sentinel for in-sandbox kit/startup log sources
 
 type Level = 'all' | 'error' | 'warn' | 'info' | 'debug'
+type LevelKey = Exclude<Level, 'all'>
 const LEVELS: { id: Level; label: string }[] = [
   { id: 'all', label: 'All levels' },
   { id: 'error', label: 'Error' },
@@ -15,15 +17,73 @@ const LEVELS: { id: Level; label: string }[] = [
   { id: 'debug', label: 'Debug' }
 ]
 
-// Best-effort severity of a single log line. Matches the common shapes: bare
-// words (ERROR, warn), bracketed/level tags ([info], level=debug), and a few
-// error synonyms. Lines that match nothing are only shown under "All levels".
-function classifyLevel(line: string): Exclude<Level, 'all'> | null {
+// Best-effort severity of a raw line. Matches bare words (ERROR, warn),
+// level tags (level=debug, "level":"INFO"), and error synonyms.
+function classifyLevel(line: string): LevelKey | null {
   if (/\b(error|err|fatal|panic|exception|fail(?:ed|ure)?)\b/i.test(line)) return 'error'
   if (/\bwarn(?:ing)?\b/i.test(line)) return 'warn'
   if (/\binfo(?:rmation)?\b/i.test(line)) return 'info'
   if (/\b(?:debug|trace|verbose)\b/i.test(line)) return 'debug'
   return null
+}
+
+interface Parsed {
+  time?: string      // HH:MM:SS.mmm
+  level: LevelKey | null
+  id?: string        // sandbox/container id (for per-sandbox colouring)
+  component?: string // e.g. shim, sandboxd
+  msg: string        // the human-readable message
+  raw: string
+}
+
+function levelFromText(s: string): LevelKey | null {
+  const l = s.toLowerCase()
+  if (/err|fatal|panic/.test(l)) return 'error'
+  if (/warn/.test(l)) return 'warn'
+  if (/info/.test(l)) return 'info'
+  if (/debug|trace/.test(l)) return 'debug'
+  return null
+}
+
+// The sbx daemon log is JSON per line ({time,level,msg}); the msg often nests
+// logfmt (level=… id=… component=… msg=…). Pull out the useful bits and fall
+// back gracefully for plain lines (e.g. kit startup logs).
+function parseLine(raw: string): Parsed {
+  const line = raw.replace(/\s+$/, '')
+  let time: string | undefined
+  let outerLevel: string | undefined
+  let body = line
+  if (line.startsWith('{')) {
+    try {
+      const o = JSON.parse(line)
+      if (typeof o.time === 'string') {
+        const m = o.time.match(/T(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)/)
+        time = m ? m[1] : undefined
+      }
+      if (typeof o.level === 'string') outerLevel = o.level
+      if (typeof o.msg === 'string') body = o.msg
+    } catch { /* not JSON — keep the raw line as the body */ }
+  }
+  const id = body.match(/\bid=([0-9a-f]{8,})/i)?.[1]
+  const component = body.match(/\bcomponent=([\w.-]+)/)?.[1]
+  const innerLevel = body.match(/\blevel=([A-Za-z]+)/)?.[1]
+  const msgMatch = body.match(/\bmsg=(?:"((?:[^"\\]|\\.)*)"|(\S+))/)
+  const msg = (msgMatch ? (msgMatch[1] ?? msgMatch[2]) : body).replace(/\\"/g, '"').trim()
+  return {
+    time,
+    level: levelFromText(innerLevel || outerLevel || '') ?? classifyLevel(line),
+    id,
+    component,
+    msg: msg || body,
+    raw: line
+  }
+}
+
+// Stable colour per sandbox id so lines from the same sandbox share a hue.
+function idHue(id: string): number {
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360
+  return h
 }
 
 export function LogsPanel() {
@@ -39,6 +99,15 @@ export function LogsPanel() {
   const running = sandboxes.filter((s) => s.status === 'running')
   const isKit = source.startsWith(KIT_PREFIX)
   const kitName = isKit ? source.slice(KIT_PREFIX.length) : ''
+
+  // Opened via a sandbox's "Logs" action → focus that sandbox's kit log.
+  const logsSandbox = useStore((s) => s.logsSandbox)
+  const setLogsSandbox = useStore((s) => s.setLogsSandbox)
+  useEffect(() => {
+    if (!logsSandbox) return
+    setSource(`${KIT_PREFIX}${logsSandbox}`)
+    setLogsSandbox(null)
+  }, [logsSandbox, setLogsSandbox])
 
   // Match the Logs viewer to the terminal theme picked in settings.
   const termThemeId = useStore((s) => s.termTheme)
@@ -91,22 +160,29 @@ export function LogsPanel() {
     return () => { alive = false; if (id) clearInterval(id) }
   }, [isKit, kitName, follow])
 
-  // Filter lines by the search query (case-insensitive substring) and level.
+  // Parse + filter the tail into rows. Memoised so tailing/theme changes don't
+  // re-parse needlessly; only the last MAX_ROWS are rendered to stay snappy.
   const q = query.trim().toLowerCase()
   const filtering = !!q || level !== 'all'
-  const shownLines = filtering
-    ? text.split('\n').filter((l) =>
-        (!q || l.toLowerCase().includes(q)) &&
-        (level === 'all' || classifyLevel(l) === level))
-    : null
-  const shown = shownLines ? shownLines.join('\n') : text
-  const matchCount = shownLines ? shownLines.length : 0
+  const { rows, matchCount } = useMemo(() => {
+    const raw = text ? text.split('\n') : []
+    const kept = raw.filter((l) =>
+      l && (!q || l.toLowerCase().includes(q)) && (level === 'all' || classifyLevel(l) === level))
+    return { rows: kept.slice(-MAX_ROWS).map(parseLine), matchCount: kept.length }
+  }, [text, q, level])
+
+  // Distinct sandbox ids present → show the colour legend only when it helps.
+  const ids = useMemo(() => {
+    const seen: string[] = []
+    for (const r of rows) if (r.id && !seen.includes(r.id)) seen.push(r.id)
+    return seen
+  }, [rows])
 
   // Auto-scroll to bottom while following (disabled when filtering — the
   // filtered view is a subset, so jumping to its end would be misleading).
   useEffect(() => {
     if (follow && !filtering && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
-  }, [shown, follow, filtering])
+  }, [rows, follow, filtering])
 
   return (
     <div className="logs">
@@ -127,6 +203,13 @@ export function LogsPanel() {
         <select className="finput" style={{ width: 120, cursor: 'pointer' }} value={level} onChange={(e) => setLevel(e.target.value as Level)}>
           {LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
         </select>
+        {isKit ? (
+          <span className="logs-kind logs-kind-kit" title="This sandbox's kit startup log">Kit startup</span>
+        ) : ids.length > 0 ? (
+          <span className="logs-kind" title="Distinct sandboxes appearing in this log (each has its own colour)">
+            {ids.length} sandbox{ids.length > 1 ? 'es' : ''}
+          </span>
+        ) : null}
         <div className="logs-search">
           <Search size={13} className="logs-search-ic" />
           <input
@@ -149,11 +232,31 @@ export function LogsPanel() {
         )}
       </div>
       <div className="logs-body" ref={bodyRef} onWheel={() => setFollow(false)} style={{ background: bg }}>
-        {shown
-          ? <pre className="logs-pre" style={{ color: fg }}>{shown}</pre>
-          : <div className="files-empty" style={{ color: fg, opacity: 0.5 }}>
-              {filtering ? 'No matching lines' : 'Waiting for log output…'}
-            </div>}
+        {rows.length ? (
+          <div className="logs-lines" style={{ color: fg }}>
+            {rows.map((r, i) => (
+              <div key={i} className={`logline${r.level ? ` lvl-${r.level}` : ''}`} title={r.raw}>
+                {r.time && <span className="logline-time">{r.time}</span>}
+                {r.id && (
+                  <span
+                    className="logline-sid"
+                    style={{ color: `hsl(${idHue(r.id)}, 70%, 66%)`, borderColor: `hsl(${idHue(r.id)}, 70%, 66%)` }}
+                    title={`sandbox container ${r.id.slice(0, 16)}`}
+                  >
+                    {r.id.slice(0, 6)}
+                  </span>
+                )}
+                {r.level && <span className={`logline-lvl lvl-${r.level}`}>{r.level.slice(0, 4).toUpperCase()}</span>}
+                {r.component && <span className="logline-comp">{r.component}</span>}
+                <span className="logline-msg">{r.msg}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="files-empty" style={{ color: fg, opacity: 0.5 }}>
+            {filtering ? 'No matching lines' : 'Waiting for log output…'}
+          </div>
+        )}
       </div>
     </div>
   )

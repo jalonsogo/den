@@ -49,6 +49,7 @@ export function ContextMenu() {
   const removeProject = useStore((s) => s.removeProject)
   const setActiveProject = useStore((s) => s.setActiveProject)
   const setActivePage = useStore((s) => s.setActivePage)
+  const setLogsSandbox = useStore((s) => s.setLogsSandbox)
   const setNewSandboxWorkspace = useStore((s) => s.setNewSandboxWorkspace)
   const setModal = useStore((s) => s.setModal)
   const setCustomizeProject = useStore((s) => s.setCustomizeProject)
@@ -280,6 +281,8 @@ export function ContextMenu() {
       <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
       <div className="ctx-item" onClick={handleRestart}>Restart</div>
+      <div className="ctx-sep" />
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setActivePage('logs') }}>Logs</div>
       <div className="ctx-sep" />
       <SubMenu label="Terminal theme">
         {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
