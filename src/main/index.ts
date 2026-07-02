@@ -1736,9 +1736,10 @@ function setupIPC(): void {
   // Kit/startup logs live INSIDE the sandbox (the durable-startup dispatcher
   // writes every startup command's output here). Not host-tailable, so read it
   // on demand via exec; callers poll for "follow".
-  ipcMain.handle('minipit:sandbox-kit-log', async (_, name: string) => {
+  ipcMain.handle('minipit:sandbox-log', async (_, name: string, which: 'kit' | 'sandbox') => {
+    const path = which === 'sandbox' ? '/var/log/dockerd.log' : '/var/log/sbx-kit-startup.log'
     try {
-      const text = await sbx(['exec', name, 'sh', '-c', 'cat /var/log/sbx-kit-startup.log 2>/dev/null'], { timeout: 10000 })
+      const text = await sbx(['exec', name, 'sh', '-c', `cat ${path} 2>/dev/null`], { timeout: 10000 })
       return { ok: true, text }
     } catch (e) {
       return { ok: false, text: '', error: e instanceof Error ? e.message : String(e) }

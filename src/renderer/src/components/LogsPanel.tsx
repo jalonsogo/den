@@ -5,7 +5,9 @@ import { termTheme as resolveTermTheme } from '../lib/termThemes'
 
 const CAP = 200_000 // keep the last ~200 KB of log text
 const MAX_ROWS = 2500 // cap rendered rows so a long tail stays responsive
-const KIT_PREFIX = 'kit:' // sentinel for in-sandbox kit/startup log sources
+// Sentinels for the two in-sandbox log sources (read via `sbx exec cat`).
+const KIT_PREFIX = 'kit:'    // /var/log/sbx-kit-startup.log
+const SBX_PREFIX = 'sbxlog:' // /var/log/dockerd.log (the sandbox's runtime log)
 
 type Level = 'all' | 'error' | 'warn' | 'info' | 'debug'
 type LevelKey = Exclude<Level, 'all'>
@@ -98,14 +100,16 @@ export function LogsPanel() {
   const sandboxes = useStore((s) => s.sandboxes)
   const running = sandboxes.filter((s) => s.status === 'running')
   const isKit = source.startsWith(KIT_PREFIX)
-  const kitName = isKit ? source.slice(KIT_PREFIX.length) : ''
+  const isSbxLog = source.startsWith(SBX_PREFIX)
+  const inSandbox = isKit || isSbxLog
+  const sbxTarget = isKit ? source.slice(KIT_PREFIX.length) : isSbxLog ? source.slice(SBX_PREFIX.length) : ''
 
-  // Opened via a sandbox's "Logs" action → focus that sandbox's kit log.
+  // Opened via a sandbox's "Logs" action → focus that sandbox's runtime log.
   const logsSandbox = useStore((s) => s.logsSandbox)
   const setLogsSandbox = useStore((s) => s.setLogsSandbox)
   useEffect(() => {
     if (!logsSandbox) return
-    setSource(`${KIT_PREFIX}${logsSandbox}`)
+    setSource(`${SBX_PREFIX}${logsSandbox}`)
     setLogsSandbox(null)
   }, [logsSandbox, setLogsSandbox])
 
@@ -129,7 +133,7 @@ export function LogsPanel() {
 
   // Host file source: tail it live.
   useEffect(() => {
-    if (!source || isKit) return
+    if (!source || inSandbox) return
     setText('')
     const unsub = window.minipit?.onLogTail((chunk) => {
       setText((t) => {
@@ -142,23 +146,27 @@ export function LogsPanel() {
       unsub?.()
       window.minipit?.stopLogTail()
     }
-  }, [source, isKit])
+  }, [source, inSandbox])
 
-  // Kit/startup log source: in-sandbox, so fetch on demand and poll while following.
+  // In-sandbox log source: read on demand via exec, poll while auto-refresh is on.
   useEffect(() => {
-    if (!isKit || !kitName) return
+    if (!inSandbox || !sbxTarget) return
+    const kind = isKit ? 'kit' : 'sandbox'
+    const emptyMsg = isKit
+      ? '(kit startup log is empty — no startup commands have run yet)'
+      : '(sandbox log is empty)'
     let alive = true
     const fetchOnce = () =>
-      window.minipit?.sandboxKitLog(kitName).then((r) => {
+      window.minipit?.sandboxLog(sbxTarget, kind).then((r) => {
         if (!alive) return
-        setText(r?.ok ? (r.text || '(kit startup log is empty — no startup commands have run yet)')
-          : `Couldn’t read kit startup log${r?.error ? `: ${r.error}` : '.'}`)
+        setText(r?.ok ? (r.text || emptyMsg)
+          : `Couldn’t read ${isKit ? 'kit startup' : 'sandbox'} log${r?.error ? `: ${r.error}` : '.'}`)
       }).catch(() => {})
-    setText('Reading kit startup log…')
+    setText('Reading log…')
     fetchOnce()
     const id = follow ? setInterval(fetchOnce, 3000) : null
     return () => { alive = false; if (id) clearInterval(id) }
-  }, [isKit, kitName, follow])
+  }, [inSandbox, isKit, sbxTarget, follow])
 
   // Parse + filter the tail into rows. Memoised so tailing/theme changes don't
   // re-parse needlessly; only the last MAX_ROWS are rendered to stay snappy.
@@ -195,21 +203,22 @@ export function LogsPanel() {
             </optgroup>
           )}
           {running.length > 0 && (
-            <optgroup label="Sandbox · kit startup">
-              {running.map((s) => <option key={s.name} value={`${KIT_PREFIX}${s.name}`}>{s.name} · kit log</option>)}
+            <optgroup label="Sandbox logs">
+              {running.flatMap((s) => [
+                <option key={`k-${s.name}`} value={`${KIT_PREFIX}${s.name}`}>{s.name} · kit startup</option>,
+                <option key={`s-${s.name}`} value={`${SBX_PREFIX}${s.name}`}>{s.name} · sandbox log</option>
+              ])}
             </optgroup>
           )}
         </select>
         <select className="finput" style={{ width: 120, cursor: 'pointer' }} value={level} onChange={(e) => setLevel(e.target.value as Level)}>
           {LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
         </select>
-        {isKit ? (
-          <span className="logs-kind logs-kind-kit" title="This sandbox's kit startup log">Kit startup</span>
-        ) : ids.length > 0 ? (
+        {!inSandbox && ids.length > 0 && (
           <span className="logs-kind" title="Distinct sandboxes appearing in this log (each has its own colour)">
             {ids.length} sandbox{ids.length > 1 ? 'es' : ''}
           </span>
-        ) : null}
+        )}
         <div className="logs-search">
           <Search size={13} className="logs-search-ic" />
           <input
@@ -221,13 +230,19 @@ export function LogsPanel() {
           {filtering && <span className="logs-search-count">{matchCount}</span>}
           {query && <button className="logs-search-x" onClick={() => setQuery('')} title="Clear"><X size={13} /></button>}
         </div>
-        <label className="logs-follow">
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          {isKit ? 'Auto-refresh' : 'Follow'}
-        </label>
+        <div className="logs-follow" onClick={() => setFollow((f) => !f)}>
+          <button
+            type="button"
+            className={`s-toggle${follow ? ' on' : ''}`}
+            role="switch"
+            aria-checked={follow}
+            tabIndex={-1}
+          />
+          {inSandbox ? 'Auto-refresh' : 'Follow'}
+        </div>
         <div style={{ flex: 1 }} />
         <button className="btn btn-ghost btn-sm" onClick={() => setText('')}>Clear</button>
-        {!isKit && (
+        {!inSandbox && (
           <button className="btn btn-ghost btn-sm" onClick={() => source && window.minipit?.openInFinder(source)}>Reveal</button>
         )}
       </div>

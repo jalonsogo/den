@@ -49,7 +49,7 @@ const api = {
   listLogs:      ()                     => ipcRenderer.invoke('minipit:list-logs'),
   startLogTail:  (path: string)         => ipcRenderer.invoke('minipit:start-log-tail', path),
   stopLogTail:   ()                     => ipcRenderer.invoke('minipit:stop-log-tail'),
-  sandboxKitLog: (name: string)         => ipcRenderer.invoke('minipit:sandbox-kit-log', name),
+  sandboxLog:    (name: string, which: 'kit' | 'sandbox') => ipcRenderer.invoke('minipit:sandbox-log', name, which),
   onLogTail: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:log-tail', handler)
