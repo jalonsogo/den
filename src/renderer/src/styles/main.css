@@ -2621,6 +2621,8 @@ html, body, #root {
 }
 .finput:focus { border-color: var(--t1); }
 .fhint { font-size: 11px; color: var(--t3); margin-top: 4px; }
+.ccode { font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; background: var(--bg-subtle); padding: 1px 5px; border-radius: 4px; }
+.secret-op-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .frow-2 { display: flex; gap: 7px; }
 .frow-2 .finput { flex: 1; }
 .fdiv { height: 1px; background: var(--border); margin: 14px 0; }

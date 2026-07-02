@@ -250,6 +250,8 @@ declare global {
       onLoginOutput(cb: (chunk: string) => void): () => void
       listSecrets(): Promise<StoredSecret[]>
       setSecret(service: string, value: string): Promise<void>
+      setSecretOp(service: string, ref: string): Promise<void>
+      opAvailable(): Promise<boolean>
       removeSecret(service: string): Promise<void>
       anthropicOAuth(): Promise<{ ok: true }>
       oauthSecret(service: string): Promise<{ ok: true }>
