@@ -156,12 +156,15 @@ export function LogsPanel() {
       ? '(kit startup log is empty — no startup commands have run yet)'
       : '(sandbox log is empty)'
     let alive = true
-    const fetchOnce = () =>
-      window.minipit?.sandboxLog(sbxTarget, kind).then((r) => {
+    const fetchOnce = () => {
+      const p = window.minipit?.sandboxLog?.(sbxTarget, kind)
+      if (!p) { if (alive) setText('Log reader unavailable — fully restart the app to load the update.'); return }
+      p.then((r) => {
         if (!alive) return
         setText(r?.ok ? (r.text || emptyMsg)
           : `Couldn’t read ${isKit ? 'kit startup' : 'sandbox'} log${r?.error ? `: ${r.error}` : '.'}`)
-      }).catch(() => {})
+      }).catch(() => { if (alive) setText('Couldn’t read log.') })
+    }
     setText('Reading log…')
     fetchOnce()
     const id = follow ? setInterval(fetchOnce, 3000) : null
