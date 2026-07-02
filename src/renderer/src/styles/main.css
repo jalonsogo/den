@@ -1358,7 +1358,17 @@ html, body, #root {
   align-items: center;
   white-space: nowrap;
 }
-.files-crumb-wrap { display: inline-flex; align-items: center; min-width: 0; }
+.files-crumb-wrap { display: inline-flex; align-items: center; min-width: 0; flex-shrink: 0; }
+/* Only the current (last) folder truncates, so a long name shows an ellipsis
+   instead of running under the toolbar buttons; ancestors stay intact. */
+.files-crumbs > .files-crumb-wrap:last-child { flex: 0 1 auto; min-width: 0; }
+.files-crumbs > .files-crumb-wrap:last-child > .files-crumb {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .files-crumb {
   display: inline-flex;
   align-items: center;
