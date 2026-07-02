@@ -1365,6 +1365,7 @@ html, body, #root {
 .files-crumbs > .files-crumb-wrap:last-child > .files-crumb {
   display: block;
   min-width: 0;
+  flex-shrink: 1; /* override the base .files-crumb flex-shrink:0 so it can truncate */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
