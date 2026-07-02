@@ -2623,7 +2623,8 @@ html, body, #root {
 .fhint { font-size: 11px; color: var(--t3); margin-top: 4px; }
 .ccode { font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; background: var(--bg-subtle); padding: 1px 5px; border-radius: 4px; }
 .secret-op-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.op-badge { display: inline-flex; align-items: center; color: #1668e3; }
+.secret-op-label { display: flex; align-items: center; gap: 8px; }
+.op-badge { display: inline-flex; align-items: center; color: #1668e3; flex-shrink: 0; }
 .frow-2 { display: flex; gap: 7px; }
 .frow-2 .finput { flex: 1; }
 .fdiv { height: 1px; background: var(--border); margin: 14px 0; }

@@ -122,8 +122,9 @@ export function NewSecretModal() {
 
           <div className="fg">
             <div className="secret-op-row">
-              <span className="op-badge" title="Load the value from 1Password">
-                <OnePasswordIcon />
+              <span className="secret-op-label">
+                <span className="op-badge"><OnePasswordIcon /></span>
+                <span className="flabel" style={{ marginBottom: 0 }}>Load from 1Password</span>
               </span>
               <button
                 type="button"
