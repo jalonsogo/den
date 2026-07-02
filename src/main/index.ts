@@ -6,7 +6,8 @@ import {
   ipcMain,
   shell,
   nativeImage,
-  dialog
+  dialog,
+  session
 } from 'electron'
 import { join } from 'path'
 import http from 'http'
@@ -72,6 +73,17 @@ function getBrewPath(): string {
 // execs during `kit push`) can't be found. Augment PATH for every host spawn.
 function guiEnv(): NodeJS.ProcessEnv {
   return { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` }
+}
+
+// Only hand web/mail URLs to the OS. Renderer- or agent-influenced links must
+// never reach shell.openExternal with a file://, custom-scheme, or other URL
+// that could trigger an unexpected OS handler.
+const SAFE_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
+function openExternalSafe(url: string): void {
+  try {
+    if (SAFE_EXTERNAL_SCHEMES.has(new URL(url).protocol)) shell.openExternal(url)
+    else console.warn('blocked openExternal for disallowed scheme:', url)
+  } catch { /* not a parseable URL — drop it */ }
 }
 
 // Kit artifacts live in the app's own data folder (not the user's home). On
@@ -334,7 +346,9 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         const code = url.searchParams.get('code')
         const rState = url.searchParams.get('state')
         if (!code) { res.writeHead(400); res.end('Missing authorization code'); return }
-        if (rState && rState !== state) { res.writeHead(400); res.end('State mismatch'); return }
+        // Require the state param to be present *and* match — a missing state
+        // must not pass (CSRF guard); PKCE still protects the code exchange.
+        if (rState !== state) { res.writeHead(400); res.end('State mismatch'); return }
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end('<body style="font-family:sans-serif;padding:40px"><h2>✓ Connected. You can close this tab and return to den.</h2></body>')
         server.close()
@@ -372,7 +386,7 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         code_challenge_method: 'S256',
         state
       }).toString()
-      shell.openExternal(authUrl)
+      openExternalSafe(authUrl)
     })
 
     setTimeout(() => {
@@ -890,7 +904,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => { mainWindow = null })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    openExternalSafe(url)
     return { action: 'deny' }
   })
 
@@ -1478,7 +1492,7 @@ function setupIPC(): void {
   // Open a host path (the workspace is bind-mounted) in the OS default app,
   // or an http(s) URL in the default browser.
   ipcMain.handle('minipit:open-path', (_, path: string) => {
-    if (/^https?:\/\//i.test(path)) return shell.openExternal(path)
+    if (/^https?:\/\//i.test(path)) return openExternalSafe(path)
     const expanded = path.replace(/^~/, app.getPath('home'))
     return shell.openPath(expanded)
   })
@@ -1869,6 +1883,30 @@ app.whenReady().then(() => {
     version: '',
     copyright: '© Docker · den.studio',
     iconPath: dockIconPath
+  })
+
+  // Content-Security-Policy for the renderer. Production loads only bundled
+  // local assets (script-src 'self'); the sole remote resource is the Gravatar
+  // avatar image, and all real network calls happen in the main process. Dev
+  // additionally allows Vite's HMR (inline/eval scripts + its ws/http server).
+  // 'unsafe-inline' in style-src is required for React inline style attributes.
+  const CSP = [
+    "default-src 'self'",
+    is.dev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https://www.gravatar.com",
+    "font-src 'self' data:",
+    "media-src 'self' data:",
+    is.dev
+      ? "connect-src 'self' ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*"
+      : "connect-src 'self'",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-src 'none'"
+  ].join('; ')
+  session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+    cb({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [CSP] } })
   })
 
   setAppMenu()
