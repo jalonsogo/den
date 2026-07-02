@@ -167,7 +167,7 @@ export function LogsPanel() {
         if (!alive) return
         if (r?.ok) { setText(r.text || emptyMsg); setLoadError(null) }
         else setLoadError(`Couldn’t read the ${label} log${r?.error ? `: ${r.error}` : '.'}`)
-      }).catch(() => { if (alive) setLoadError(`Couldn’t reach the sandbox to read its ${label} log.`) })
+      }).catch((e) => { if (alive) setLoadError(`Couldn’t reach the sandbox to read its ${label} log: ${e?.message ?? e}`) })
     }
     fetchOnce()
     const id = follow ? setInterval(fetchOnce, 3000) : null
