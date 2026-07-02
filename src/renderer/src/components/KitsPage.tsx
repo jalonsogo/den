@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star } from 'lucide-react'
+import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check } from 'lucide-react'
 import { useStore } from '../store'
-import { parseKitSpec } from '../lib/kitSpec'
+import { parseKitSpec, type ParsedKit } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 import { KitCaps } from './KitCaps'
+
+const CONTRIB_REPO_URL = 'https://github.com/docker/sbx-kits-contrib'
 
 interface Kit { name: string; kind: string; dir: string; hasZip: boolean }
 
@@ -113,6 +115,46 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const [importOpen, setImportOpen] = useState(false)
   const [importRef, setImportRef] = useState('')
   const [importing, setImporting] = useState(false)
+  // "Browse contrib" gallery — community kits from docker/sbx-kits-contrib,
+  // fetched live and imported into the local library on demand.
+  const [tab, setTab] = useState<'library' | 'browse'>('library')
+  const [contrib, setContrib] = useState<{ dir: string; p: ParsedKit }[] | null>(null)
+  const [contribErr, setContribErr] = useState<string | null>(null)
+  const [contribLoading, setContribLoading] = useState(false)
+  const [importingDir, setImportingDir] = useState<string | null>(null)
+
+  const loadContrib = useCallback(async () => {
+    setContribLoading(true)
+    setContribErr(null)
+    // Surface the real rejection reason (e.g. "No handler registered …" when the
+    // main process is stale) instead of masking it behind a generic message.
+    const res = await window.minipit?.listContribKits()
+      .catch((e) => ({ ok: false as const, kits: undefined, error: e instanceof Error ? e.message : String(e) }))
+    setContribLoading(false)
+    if (res?.ok && res.kits) {
+      setContrib(res.kits.map((k) => ({ dir: k.dir, p: parseKitSpec(k.spec) })))
+    } else {
+      setContrib([])
+      setContribErr(res?.error || 'Could not reach GitHub — check your connection and try again.')
+    }
+  }, [])
+
+  // Fetch the gallery the first time the Browse tab is opened.
+  useEffect(() => { if (tab === 'browse' && contrib === null && !contribLoading) loadContrib() }, [tab, contrib, contribLoading, loadContrib])
+
+  const importContrib = async (dir: string) => {
+    setImportingDir(dir)
+    setMsg(null)
+    const res = await window.minipit?.importContribKit(dir).catch(() => null)
+    setImportingDir(null)
+    if (res?.ok) {
+      await load()
+      setTab('library')
+      setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
+    } else {
+      setMsg({ ok: false, text: res?.error || 'Import failed — make sure git is installed and the repo is reachable.' })
+    }
+  }
 
   const doImport = async () => {
     const ref = importRef.trim()
@@ -251,18 +293,39 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       <div className="page-hdr">
         <span className="page-title">{title}</span>
         <span className="lib-badge" style={{ marginLeft: 8 }}>Experimental</span>
-        <button className="btn btn-default btn-sm" style={{ marginLeft: 'auto' }} onClick={() => { setImportOpen((v) => !v); setImportRef('') }}>
-          <DownloadCloud size={13} /> Add remote
-        </button>
-        <button className="btn btn-primary btn-sm" onClick={() => { setEditKit(null); setModal('new-kit') }}>
-          <Plus size={13} /> New {variant === 'mixin' ? 'mixin kit' : 'sandbox kit'}
-        </button>
+      </div>
+
+      <div className="page-subbar">
+        <div className="kit-tabs">
+          <button className={tab === 'library' ? 'on' : ''} onClick={() => setTab('library')}>Your kits</button>
+          <button className={tab === 'browse' ? 'on' : ''} onClick={() => setTab('browse')}>Browse contrib</button>
+        </div>
+        <div className="page-subbar-actions">
+          {tab === 'library' ? (
+            <>
+              <button className="btn btn-default btn-sm" onClick={() => { setImportOpen((v) => !v); setImportRef('') }}>
+                <DownloadCloud size={13} /> Add remote
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={() => { setEditKit(null); setModal('new-kit') }}>
+                <Plus size={13} /> New {variant === 'mixin' ? 'mixin kit' : 'sandbox kit'}
+              </button>
+            </>
+          ) : (
+            <button className="btn btn-default btn-sm" onClick={loadContrib} disabled={contribLoading}>
+              <RefreshCw size={13} className={contribLoading ? 'spin' : ''} /> Refresh
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="page-body home-dash">
-        <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>{blurb} Managed by den and packed with <code>sbx kit pack</code>.</p>
+        <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
+          {tab === 'library'
+            ? <>{blurb} Managed by den and packed with <code>sbx kit pack</code>.</>
+            : <>Community {variant === 'mixin' ? 'mixin' : 'sandbox'} kits from <a className="kit-repo-link" onClick={() => window.minipit?.openPath(CONTRIB_REPO_URL)}>docker/sbx-kits-contrib</a>. Import one to add it to your library.</>}
+        </p>
 
-        {importOpen && (
+        {tab === 'library' && importOpen && (
           <div className="kit-import-box">
             <label className="kit-push-lbl">Add a remote kit by OCI reference</label>
             <div className="kit-push-row">
@@ -325,7 +388,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
           </div>
         )}
 
-        {shown.length === 0 ? (
+        {tab === 'library' && (shown.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>
             No {variant} kits yet — create one to get started.
           </div>
@@ -487,6 +550,55 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
               </div>
             ))}
           </div>
+        ))}
+
+        {tab === 'browse' && (
+          contribLoading && contrib === null ? (
+            <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>Loading kits from GitHub…</div>
+          ) : contribErr ? (
+            <div className="np-banner err" style={{ marginBottom: 12 }}>
+              <span className="np-banner-txt">{contribErr}</span>
+              <button className="btn btn-default btn-sm" onClick={loadContrib} disabled={contribLoading}>Retry</button>
+            </div>
+          ) : (() => {
+            // Sandbox Kits page shows full-agent kits; Mixin Kits page shows add-ons.
+            const wanted = variant === 'mixin' ? 'mixin' : 'agent'
+            const gallery = (contrib ?? []).filter((c) => (c.p.kind || 'mixin') === wanted)
+            const installed = new Set(kits.map((k) => k.name))
+            if (gallery.length === 0) {
+              return <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>No community {variant} kits found.</div>
+            }
+            return (
+              <div className="kit-gallery">
+                {gallery.map(({ dir, p }) => {
+                  const has = installed.has(dir)
+                  return (
+                    <div className="kit-card" key={dir}>
+                      <div className="kit-card-hd">
+                        {variant === 'mixin' ? <Layers size={15} /> : <Package size={15} />}
+                        <span className="kit-card-name">{p.displayName || p.name || dir}</span>
+                        {has && <span className="kit-card-has"><Check size={11} /> Imported</span>}
+                      </div>
+                      {p.description && <p className="kit-card-desc">{p.description}</p>}
+                      <KitCaps p={p} />
+                      <div className="kit-card-actions">
+                        <a className="kit-card-link" onClick={() => window.minipit?.openPath(`${CONTRIB_REPO_URL}/tree/main/${dir}`)}>
+                          <Globe size={12} /> View source
+                        </a>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => importContrib(dir)}
+                          disabled={importingDir !== null}
+                        >
+                          {importingDir === dir ? 'Importing…' : <><DownloadCloud size={13} /> {has ? 'Re-import' : 'Import'}</>}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()
         )}
       </div>
     </div>

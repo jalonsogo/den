@@ -37,6 +37,8 @@ const api = {
   kitPush:       (dir: string, ref: string) => ipcRenderer.invoke('minipit:kit-push', dir, ref),
   saveSnapshot:  (name: string, tag: string) => ipcRenderer.invoke('minipit:save-snapshot', name, tag),
   kitImport:     (ref: string)          => ipcRenderer.invoke('minipit:kit-import', ref),
+  listContribKits: ()                   => ipcRenderer.invoke('minipit:list-contrib-kits'),
+  importContribKit: (dir: string)       => ipcRenderer.invoke('minipit:import-contrib-kit', dir),
   dockerAccount: ()                     => ipcRenderer.invoke('minipit:docker-account'),
   dockerLogin:   ()                     => ipcRenderer.invoke('minipit:docker-login'),
   listSecrets:   ()                     => ipcRenderer.invoke('minipit:list-secrets'),
@@ -86,6 +88,8 @@ const api = {
   addProject:    ()                     => ipcRenderer.invoke('minipit:add-project'),
   removeProject: (dir: string, deleteFolder?: boolean) => ipcRenderer.invoke('minipit:remove-project', dir, deleteFolder),
   defaultWorkspace: ()                  => ipcRenderer.invoke('minipit:default-workspace'),
+  projectConfigSync: (local: unknown)   => ipcRenderer.invoke('minipit:project-config-sync', local),
+  projectConfigSet: (field: string, workspace: string, value: string | null) => ipcRenderer.invoke('minipit:project-config-set', field, workspace, value),
 
   onSandboxesUpdated: (cb: (sandboxes: unknown[]) => void) => {
     const handler = (_: Electron.IpcRendererEvent, s: unknown[]) => cb(s)

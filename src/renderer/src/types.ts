@@ -247,6 +247,8 @@ declare global {
       kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
+      listContribKits(): Promise<{ ok: boolean; kits?: { dir: string; spec: string }[]; error?: string }>
+      importContribKit(dir: string): Promise<{ ok: boolean; name?: string; error?: string }>
       dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; gravatar?: string }>
       dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string }>
       onLoginOutput(cb: (chunk: string) => void): () => void
@@ -281,6 +283,8 @@ declare global {
       addProject(): Promise<string | null>
       removeProject(dir: string, deleteFolder?: boolean): Promise<{ ok: boolean; error?: string }>
       defaultWorkspace(): Promise<string>
+      projectConfigSync(local: { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string> }): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string> }>
+      projectConfigSet(field: 'colors' | 'icons' | 'names', workspace: string, value: string | null): Promise<void>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void

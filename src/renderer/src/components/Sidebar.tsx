@@ -719,7 +719,9 @@ export function Sidebar() {
         )}
 
         {(collapsed || projOpen) && (collapsed ? (
-          projects.length === 0
+          // On the collapsed rail, only fan out per-project avatars when the
+          // Projects group is expanded; otherwise show a single Projects icon.
+          !projOpen || projects.length === 0
             ? tip('Projects',
                 <div
                   className={`sb-nav-item${activePage === 'projects' ? ' active' : ''}`}

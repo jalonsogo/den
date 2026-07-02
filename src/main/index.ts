@@ -89,6 +89,11 @@ function openExternalSafe(url: string): void {
   } catch { /* not a parseable URL — drop it */ }
 }
 
+// Community kit gallery source (browsed live, imported via git). sbx consumes a
+// kit from here with `--kit "git+https://github.com/<repo>.git#dir=<name>"`.
+const CONTRIB_REPO = 'docker/sbx-kits-contrib'
+const CONTRIB_BRANCH = 'main'
+
 // Kit artifacts live in the app's own data folder (not the user's home). On
 // first use we migrate any kits authored under the legacy ~/minipit-kits path.
 let kitsRootCache = ''
@@ -474,7 +479,9 @@ function listKits(): { name: string; kind: string; dir: string; hasZip: boolean 
         try {
           const spec = fs.readFileSync(join(dir, 'spec.yaml'), 'utf8') as string
           const m = spec.match(/kind:\s*(\w+)/)
-          if (m) kind = m[1]
+          // sbx spells full-agent kits `agent`; den's library splits kits into
+          // `mixin` vs `sandbox`, so treat `agent` as a sandbox kit for display.
+          if (m) kind = m[1] === 'agent' ? 'sandbox' : m[1]
         } catch {
           return null
         }
@@ -1552,6 +1559,84 @@ function setupIPC(): void {
     }
   })
 
+  // ── Community kit gallery (github.com/docker/sbx-kits-contrib) ────────────
+  // Browse the community kit repo. Each top-level directory with a spec.yaml is
+  // a kit; sbx consumes it via `--kit "git+<repo>#dir=<name>"`. We list the kits
+  // live from GitHub (one tree call + raw spec fetches — raw.githubusercontent
+  // isn't API-rate-limited) and return the raw specs for the renderer to parse.
+  ipcMain.handle('minipit:list-contrib-kits', async () => {
+    try {
+      const treeRes = await fetch(
+        `https://api.github.com/repos/${CONTRIB_REPO}/git/trees/${CONTRIB_BRANCH}?recursive=1`,
+        { headers: { 'User-Agent': 'den-app', Accept: 'application/vnd.github+json' } }
+      )
+      if (!treeRes.ok) {
+        const detail = treeRes.status === 403 ? ' (GitHub rate limit — try again in a bit)' : ''
+        return { ok: false, error: `GitHub returned ${treeRes.status}${detail}.` }
+      }
+      const tree = (await treeRes.json()) as { tree?: { path: string; type: string }[] }
+      // Top-level "<dir>/spec.yaml" blobs mark each kit (skip nested spec files).
+      const dirs = (tree.tree ?? [])
+        .filter((n) => n.type === 'blob' && /^[^/]+\/spec\.yaml$/.test(n.path))
+        .map((n) => n.path.split('/')[0])
+      const kits = await Promise.all(
+        dirs.map(async (dir) => {
+          try {
+            const r = await fetch(`https://raw.githubusercontent.com/${CONTRIB_REPO}/${CONTRIB_BRANCH}/${dir}/spec.yaml`,
+              { headers: { 'User-Agent': 'den-app' } })
+            if (!r.ok) return null
+            return { dir, spec: await r.text() }
+          } catch { return null }
+        })
+      )
+      return { ok: true, kits: kits.filter(Boolean) as { dir: string; spec: string }[] }
+    } catch (err) {
+      console.error('list-contrib-kits failed:', err)
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() || 'Could not reach GitHub.' }
+    }
+  })
+
+  // Import a community kit into the local library: shallow-clone the repo, copy
+  // the kit's subdirectory into <userData>/kits/<dir>/, and pack it so it shows
+  // up (and can be edited/re-added) like any locally-authored kit.
+  ipcMain.handle('minipit:import-contrib-kit', async (_, dir: string) => {
+    const fs = require('fs')
+    const os = require('os')
+    const name = (dir || '').replace(/[^A-Za-z0-9._-]/g, '-')
+    if (!name) return { ok: false, error: 'Kit name is required.' }
+    const dest = join(kitsRoot(), name)
+    const tmp = fs.mkdtempSync(join(os.tmpdir(), 'den-kit-'))
+    const run = (bin: string, args: string[], timeout = 60000) => new Promise<void>((resolve, reject) => {
+      const p = spawn(bin, args, { env: guiEnv() })
+      let err = ''
+      p.stderr?.on('data', (d) => { err += d.toString() })
+      p.on('error', reject)
+      const timer = setTimeout(() => { p.kill(); reject(new Error(`${bin} timed out`)) }, timeout)
+      p.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(err.trim() || `${bin} exited ${code}`)) })
+    })
+    try {
+      // Sparse shallow clone — fetch only this kit's subtree, not the whole repo.
+      await run('git', ['clone', '--depth', '1', '--filter=blob:none', '--sparse',
+        '--branch', CONTRIB_BRANCH, `https://github.com/${CONTRIB_REPO}.git`, tmp])
+      await run('git', ['-C', tmp, 'sparse-checkout', 'set', name])
+      const src = join(tmp, name)
+      if (!fs.existsSync(join(src, 'spec.yaml'))) {
+        return { ok: false, error: `"${name}" has no spec.yaml in the repo.` }
+      }
+      fs.rmSync(dest, { recursive: true, force: true })
+      fs.cpSync(src, dest, { recursive: true })
+      fs.rmSync(join(dest, '.git'), { recursive: true, force: true })
+      await sbx(['kit', 'pack', dest, '-o', `${dest}.zip`], { timeout: 30000 })
+      setAppMenu().catch(() => {})
+      return { ok: true, name }
+    } catch (err) {
+      fs.rmSync(dest, { recursive: true, force: true })
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    } finally {
+      try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  })
+
   ipcMain.handle('minipit:git-status', (_, name: string, workspace: string) => gitStatus(name, workspace))
 
   // Host-side check: is this workspace folder a Git repo? `--clone` sandboxes
@@ -1908,12 +1993,46 @@ function setupIPC(): void {
   })
 
   ipcMain.handle('minipit:show-open-dialog', async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'] })
+    // createDirectory lets the user make a new workspace folder from the picker
+    // (shown by default on macOS; gated by this flag on Windows/Linux).
+    const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
   })
 
   // ── Projects (empty workspaces, persisted independently of sandboxes) ───────
   ipcMain.handle('minipit:list-projects', () => (store.get('projects') as string[]) ?? [])
+
+  // ── Per-project appearance (color / icon / display name) ──────────────────
+  // Persisted in the file-based electron-store (not the renderer's localStorage,
+  // which is scoped to the dev-server origin and lost when the port shifts).
+  type ProjectConfig = { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string> }
+  const CFG_KEYS = { colors: 'projectColors', icons: 'projectIcons', names: 'projectNames' } as const
+  const readProjectConfig = (): ProjectConfig => ({
+    colors: (store.get(CFG_KEYS.colors) as Record<string, string>) ?? {},
+    icons: (store.get(CFG_KEYS.icons) as Record<string, string>) ?? {},
+    names: (store.get(CFG_KEYS.names) as Record<string, string>) ?? {}
+  })
+
+  // One-time-per-origin sync from the renderer: merge any localStorage-cached
+  // config into the store (the store wins on conflict — it's the source of
+  // truth), then return the authoritative merged config to hydrate the UI.
+  ipcMain.handle('minipit:project-config-sync', (_, local: Partial<ProjectConfig>) => {
+    for (const [field, key] of Object.entries(CFG_KEYS) as [keyof ProjectConfig, string][]) {
+      const incoming = local?.[field] ?? {}
+      const existing = (store.get(key) as Record<string, string>) ?? {}
+      store.set(key, { ...incoming, ...existing })
+    }
+    return readProjectConfig()
+  })
+
+  ipcMain.handle('minipit:project-config-set', (_, field: keyof ProjectConfig, workspace: string, value: string | null) => {
+    const key = CFG_KEYS[field]
+    if (!key || !workspace) return
+    const map = (store.get(key) as Record<string, string>) ?? {}
+    if (value) map[workspace] = value
+    else delete map[workspace]
+    store.set(key, map)
+  })
 
   ipcMain.handle('minipit:add-project', async () => {
     // Pick or create a folder; the OS panel's "New Folder" covers creation.
