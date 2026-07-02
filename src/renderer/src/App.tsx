@@ -9,6 +9,7 @@ import { SandboxDetail } from './components/SandboxDetail'
 import { TemplatesPage } from './components/TemplatesPage'
 import { KitsPage } from './components/KitsPage'
 import { SettingsPage } from './components/SettingsPage'
+import { LogsPanel } from './components/LogsPanel'
 import { ContextMenu } from './components/ContextMenu'
 import { PolicyBlockToaster } from './components/PolicyBlockToaster'
 import { playFinalizeSound, playAskSound } from './lib/sound'
@@ -63,7 +64,7 @@ export function App() {
     })
 
     const unsub3 = window.minipit?.onNavigate((page) =>
-      setActivePage(page as 'sandbox' | 'settings')
+      setActivePage(page as import('./types').PageType)
     )
     const unsub4 = window.minipit?.onOpenModal((m) =>
       setModal(m as 'new-sandbox' | 'new-secret')
@@ -83,6 +84,12 @@ export function App() {
       setActiveProject(workspace)
       setActivePage('projects')
     })
+    // Menu-bar "New Project…": run the same pick-folder flow as the sidebar.
+    const unsub8 = window.minipit?.onNewProject?.(() => {
+      useStore.getState().addProject().then((dir) => {
+        if (dir) { setActiveProject(dir); setActivePage('projects') }
+      })
+    })
 
     return () => {
       unsub1?.()
@@ -95,6 +102,7 @@ export function App() {
       unsub5?.()
       unsub6?.()
       unsub7?.()
+      unsub8?.()
       unsubFiles?.()
     }
   }, [])
@@ -113,6 +121,12 @@ export function App() {
           {activePage === 'mixins'    && <KitsPage variant="mixin" />}
           {activePage === 'kits'      && <KitsPage variant="sandbox" />}
           {activePage === 'settings'  && <SettingsPage />}
+          {activePage === 'logs'      && (
+            <div className="page">
+              <div className="page-hdr"><span className="page-title">Logs</span></div>
+              <LogsPanel />
+            </div>
+          )}
 
           {modal === 'new-sandbox' && <NewSandboxModal />}
           {modal === 'new-secret'  && <NewSecretModal />}

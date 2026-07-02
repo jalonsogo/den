@@ -149,10 +149,10 @@ export function ContextMenu() {
       >
         <div className="ctx-item" onClick={openProject}>Open project</div>
         <div className="ctx-item" onClick={newSandbox}>New sandbox…</div>
+        <div className="ctx-item" onClick={customize}>Customize…</div>
         <div className="ctx-sep" />
         <SubMenu label="Manage">
           <div className="ctx-sub-item" onClick={rename}>Rename…</div>
-          <div className="ctx-sub-item" onClick={customize}>Customize…</div>
           <div className="ctx-sub-sep" />
           <div className="ctx-sub-item" onClick={reveal}>Reveal in Finder <span className="ctx-kbd">⇧⌘F</span></div>
           <div className="ctx-sub-item" onClick={copyPath}>Copy path</div>

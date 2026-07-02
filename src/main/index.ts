@@ -6,7 +6,8 @@ import {
   ipcMain,
   shell,
   nativeImage,
-  dialog
+  dialog,
+  session
 } from 'electron'
 import { join } from 'path'
 import http from 'http'
@@ -14,7 +15,10 @@ import { randomBytes, createHash } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { execFile, spawn } from 'child_process'
 import Store from 'electron-store'
-import pty from 'node-pty'
+// node-pty 1.x compiles to CJS with `__esModule: true` but no `default` export,
+// so a default import resolves to `undefined` under esbuild's interop (crashing
+// `pty.spawn`). Import the namespace instead.
+import * as pty from 'node-pty'
 
 // Name the app early (before whenReady) so menus, the About panel and the dock
 // label read "den" instead of "Electron" in dev. Packaged builds use productName.
@@ -72,6 +76,17 @@ function getBrewPath(): string {
 // execs during `kit push`) can't be found. Augment PATH for every host spawn.
 function guiEnv(): NodeJS.ProcessEnv {
   return { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` }
+}
+
+// Only hand web/mail URLs to the OS. Renderer- or agent-influenced links must
+// never reach shell.openExternal with a file://, custom-scheme, or other URL
+// that could trigger an unexpected OS handler.
+const SAFE_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
+function openExternalSafe(url: string): void {
+  try {
+    if (SAFE_EXTERNAL_SCHEMES.has(new URL(url).protocol)) shell.openExternal(url)
+    else console.warn('blocked openExternal for disallowed scheme:', url)
+  } catch { /* not a parseable URL — drop it */ }
 }
 
 // Kit artifacts live in the app's own data folder (not the user's home). On
@@ -334,7 +349,9 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         const code = url.searchParams.get('code')
         const rState = url.searchParams.get('state')
         if (!code) { res.writeHead(400); res.end('Missing authorization code'); return }
-        if (rState && rState !== state) { res.writeHead(400); res.end('State mismatch'); return }
+        // Require the state param to be present *and* match — a missing state
+        // must not pass (CSRF guard); PKCE still protects the code exchange.
+        if (rState !== state) { res.writeHead(400); res.end('State mismatch'); return }
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end('<body style="font-family:sans-serif;padding:40px"><h2>✓ Connected. You can close this tab and return to den.</h2></body>')
         server.close()
@@ -372,7 +389,7 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         code_challenge_method: 'S256',
         state
       }).toString()
-      shell.openExternal(authUrl)
+      openExternalSafe(authUrl)
     })
 
     setTimeout(() => {
@@ -416,6 +433,32 @@ async function listTemplates() {
     )
   } catch (err) {
     console.error('sbx template ls failed:', err)
+    return []
+  }
+}
+
+// Authored kits under <userData>/kits/<name>/ (spec.yaml). `kind` distinguishes
+// mixin kits from sandbox kits. Shared by the list-kits IPC and the app menu.
+function listKits(): { name: string; kind: string; dir: string; hasZip: boolean }[] {
+  const fs = require('fs')
+  const base = kitsRoot()
+  try {
+    return (fs.readdirSync(base, { withFileTypes: true }) as { name: string; isDirectory: () => boolean }[])
+      .filter((d) => d.isDirectory())
+      .map((d) => {
+        const dir = join(base, d.name)
+        let kind = 'mixin'
+        try {
+          const spec = fs.readFileSync(join(dir, 'spec.yaml'), 'utf8') as string
+          const m = spec.match(/kind:\s*(\w+)/)
+          if (m) kind = m[1]
+        } catch {
+          return null
+        }
+        return { name: d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
+      })
+      .filter(Boolean) as { name: string; kind: string; dir: string; hasZip: boolean }[]
+  } catch {
     return []
   }
 }
@@ -890,7 +933,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => { mainWindow = null })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    openExternalSafe(url)
     return { action: 'deny' }
   })
 
@@ -964,9 +1007,80 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
   tray.setContextMenu(Menu.buildFromTemplate(items))
 }
 
-function setAppMenu(): void {
-  const send = (channel: string, ...args: unknown[]) =>
-    mainWindow?.webContents.send(channel, ...args)
+// The application menu mirrors the sidebar navigation and lists live data
+// (sandboxes, projects, templates, kits) so it can be interacted with directly
+// from the menu bar. Rebuilt when that data changes; the signature guard below
+// avoids needless rebuilds (which would close a menu the user has open).
+const MENU_LIST_LIMIT = 12
+let lastMenuSig = ''
+let lastMenuSandboxSig = ''
+
+async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSandboxes>>): Promise<void> {
+  // Route clicks through navigateFromTray so they work even when the window is
+  // hidden (menu-bar-only mode): it shows/recreates the window, then delivers.
+  const go = (channel: string, payload = '') => navigateFromTray(channel, payload)
+
+  const [sandboxes, templates] = await Promise.all([
+    prefetchedSandboxes ? Promise.resolve(prefetchedSandboxes) : listSandboxes().catch(() => []),
+    listTemplates().catch(() => [])
+  ])
+  const kits = listKits()
+  const mixinKits = kits.filter((k) => k.kind === 'mixin')
+  const sandboxKits = kits.filter((k) => k.kind === 'sandbox')
+
+  // Projects = folders the user added (persisted) ∪ workspaces in use by a
+  // sandbox. Labels use the folder basename, matching the tray menu.
+  const projectDirs = Array.from(new Set([
+    ...(((store.get('projects') as string[]) ?? [])),
+    ...sandboxes.map((s) => s.workspace)
+  ])).filter(Boolean)
+  const projCount = (ws: string) => sandboxes.filter((s) => s.workspace === ws).length
+  const base = (dir: string) => dir.split('/').pop() || dir
+
+  // Skip the rebuild when nothing menu-relevant changed.
+  const sig = JSON.stringify({
+    s: sandboxes.map((s) => [s.name, s.status]),
+    p: projectDirs.map((ws) => [ws, projCount(ws)]),
+    t: templates.map((t) => `${t.repository}:${t.tag}`),
+    m: kits.map((k) => [k.name, k.kind])
+  })
+  if (sig === lastMenuSig && Menu.getApplicationMenu()) return
+  lastMenuSig = sig
+
+  // Cap a list and append a disabled "N more…" tail so nothing is silently hidden.
+  const capped = <T,>(
+    all: T[], render: (x: T) => Electron.MenuItemConstructorOptions, noun: string
+  ): Electron.MenuItemConstructorOptions[] => {
+    const shown = all.slice(0, MENU_LIST_LIMIT).map(render)
+    if (all.length > MENU_LIST_LIMIT) shown.push({ label: `${all.length - MENU_LIST_LIMIT} more ${noun}…`, enabled: false })
+    return shown
+  }
+
+  const sandboxItems: Electron.MenuItemConstructorOptions[] = sandboxes.length
+    ? capped(sandboxes, (s) => ({
+        label: `${s.status === 'running' ? '●' : '○'}  ${s.name}`,
+        click: () => go('minipit:open-sandbox', s.name)
+      }), 'sandboxes')
+    : [{ label: 'No sandboxes yet', enabled: false }]
+
+  const projectItems: Electron.MenuItemConstructorOptions[] = projectDirs.length
+    ? capped(projectDirs, (ws) => {
+        const c = projCount(ws)
+        return { label: c ? `${base(ws)}  (${c})` : base(ws), click: () => go('minipit:open-project', ws) }
+      }, 'projects')
+    : [{ label: 'No projects yet', enabled: false }]
+
+  // A Library submenu: "Show all" + the list (each opens the management page,
+  // which is where individual items are edited/run).
+  const libSubmenu = (
+    names: string[], page: string, showLabel: string, noun: string
+  ): Electron.MenuItemConstructorOptions[] => [
+    { label: showLabel, click: () => go('minipit:navigate', page) },
+    { type: 'separator' },
+    ...(names.length
+      ? capped(names, (n) => ({ label: n, click: () => go('minipit:navigate', page) }), noun)
+      : [{ label: `No ${noun} yet`, enabled: false }])
+  ]
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -974,7 +1088,7 @@ function setAppMenu(): void {
       submenu: [
         { label: 'About den', role: 'about' },
         { type: 'separator' },
-        { label: 'Preferences…', accelerator: 'Cmd+,', click: () => send('minipit:navigate', 'settings') },
+        { label: 'Settings…', accelerator: 'Cmd+,', click: () => go('minipit:navigate', 'settings') },
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },
@@ -985,7 +1099,8 @@ function setAppMenu(): void {
     {
       label: 'File',
       submenu: [
-        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => send('minipit:open-modal', 'new-sandbox') },
+        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
+        { label: 'New Project…', accelerator: 'Shift+Cmd+N', click: () => go('minipit:new-project') },
         { type: 'separator' },
         { label: 'Close Window', accelerator: 'Cmd+W', role: 'close' }
       ]
@@ -1008,26 +1123,53 @@ function setAppMenu(): void {
     {
       label: 'View',
       submenu: [
-        { label: 'Terminal', accelerator: 'Cmd+1', click: () => send('minipit:set-tab', 'terminal') },
-        { label: 'Info', accelerator: 'Cmd+2', click: () => send('minipit:set-tab', 'info') },
+        { label: 'Terminal', accelerator: 'Cmd+1', click: () => go('minipit:set-tab', 'terminal') },
+        { label: 'Info', accelerator: 'Cmd+2', click: () => go('minipit:set-tab', 'info') },
         { type: 'separator' },
         { label: 'Reload', accelerator: 'Cmd+R', role: 'reload' },
         { label: 'Toggle DevTools', role: 'toggleDevTools' }
       ]
     },
+    // Top-level menus that mirror the app's navigation (sidebar sections) and
+    // list live data you can jump straight into.
     {
-      label: 'Sandbox',
+      label: 'Sandboxes',
       submenu: [
-        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => send('minipit:open-modal', 'new-sandbox') },
+        { label: 'Show All Sandboxes', accelerator: 'Shift+Cmd+S', click: () => go('minipit:navigate', 'sandboxes') },
+        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
+        { label: 'Stop Sandbox', accelerator: 'Cmd+.', click: () => go('minipit:stop-active') },
+        { label: 'Open in Finder', accelerator: 'Shift+Cmd+F', click: () => go('minipit:open-in-finder') },
+        { label: 'Logs', accelerator: 'Cmd+L', click: () => go('minipit:navigate', 'logs') },
         { type: 'separator' },
-        { label: 'Stop Sandbox', accelerator: 'Cmd+.', click: () => send('minipit:stop-active') },
+        ...sandboxItems
+      ]
+    },
+    {
+      label: 'Projects',
+      submenu: [
+        { label: 'Show All Projects', accelerator: 'Shift+Cmd+P', click: () => go('minipit:navigate', 'projects') },
+        { label: 'New Project…', click: () => go('minipit:new-project') },
         { type: 'separator' },
-        { label: 'Open in Finder', accelerator: 'Shift+Cmd+F', click: () => send('minipit:open-in-finder') }
+        ...projectItems
+      ]
+    },
+    {
+      label: 'Library',
+      submenu: [
+        { label: 'Templates', submenu: libSubmenu(templates.map((t) => `${t.repository}:${t.tag}`), 'templates', 'Show All Templates', 'templates') },
+        { label: 'Mixin Kits', submenu: libSubmenu(mixinKits.map((k) => k.name), 'mixins', 'Show All Mixin Kits', 'mixin kits') },
+        { label: 'Sandbox Kits', submenu: libSubmenu(sandboxKits.map((k) => k.name), 'kits', 'Show All Sandbox Kits', 'sandbox kits') }
       ]
     },
     {
       label: 'Window',
       submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+    },
+    {
+      role: 'help',
+      submenu: [
+        { label: 'den Website', click: () => shell.openExternal('https://den.studio') }
+      ]
     }
   ]
 
@@ -1169,6 +1311,7 @@ function setupIPC(): void {
     const zip = join(kitsRoot(), `${name}.zip`)
     // pack validates the spec and produces the ZIP artifact.
     const output = await sbx(['kit', 'pack', base, '-o', zip], { timeout: 30000 })
+    setAppMenu().catch(() => {})
     return { dir: base, zip, output }
   })
 
@@ -1241,33 +1384,12 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:list-kits', () => {
-    const fs = require('fs')
-    const base = kitsRoot()
-    try {
-      return (fs.readdirSync(base, { withFileTypes: true }) as { name: string; isDirectory: () => boolean }[])
-        .filter((d) => d.isDirectory())
-        .map((d) => {
-          const dir = join(base, d.name)
-          let kind = 'mixin'
-          try {
-            const spec = fs.readFileSync(join(dir, 'spec.yaml'), 'utf8') as string
-            const m = spec.match(/kind:\s*(\w+)/)
-            if (m) kind = m[1]
-          } catch {
-            return null
-          }
-          return { name: d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
-        })
-        .filter(Boolean)
-    } catch {
-      return []
-    }
-  })
+  ipcMain.handle('minipit:list-kits', () => listKits())
 
   ipcMain.handle('minipit:remove-kit', (_, dir: string) => {
     const fs = require('fs')
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch (err) { console.error(err) }
+    setAppMenu().catch(() => {})
   })
 
   // The logged-in Docker Hub account, read from the Docker credential helper
@@ -1478,7 +1600,7 @@ function setupIPC(): void {
   // Open a host path (the workspace is bind-mounted) in the OS default app,
   // or an http(s) URL in the default browser.
   ipcMain.handle('minipit:open-path', (_, path: string) => {
-    if (/^https?:\/\//i.test(path)) return shell.openExternal(path)
+    if (/^https?:\/\//i.test(path)) return openExternalSafe(path)
     const expanded = path.replace(/^~/, app.getPath('home'))
     return shell.openPath(expanded)
   })
@@ -1506,6 +1628,52 @@ function setupIPC(): void {
   // Delete a file or directory inside the sandbox workspace.
   ipcMain.handle('minipit:delete-path', async (_, name: string, path: string) => {
     await sbx(['exec', name, 'rm', '-rf', path])
+  })
+
+  // Write dropped files' bytes into a directory inside the sandbox. Mirrors the
+  // agent file-drop (reads bytes in the renderer via arrayBuffer, streams them
+  // in over stdin), so it needs no host path and works for any container
+  // directory regardless of how the workspace is mounted. Returns a per-file
+  // result so the renderer can report partial failures (e.g. permission denied).
+  ipcMain.handle('minipit:copy-into', async (_, name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]) => {
+    const results: { name: string; ok: boolean; error?: string }[] = []
+    for (const f of files) {
+      const safe = ((f.name.split(/[\\/]/).pop() || 'file').replace(/[^A-Za-z0-9._ -]/g, '_').slice(-160)) || 'file'
+      if (!f.bytes?.byteLength || f.bytes.byteLength > 500 * 1024 * 1024) {
+        results.push({ name: safe, ok: false, error: 'file is empty or too large (500 MB max)' })
+        continue
+      }
+      const r = await new Promise<{ name: string; ok: boolean; error?: string }>((resolve) => {
+        // Positional args ($1 dir, $2 name) keep paths with spaces/quotes safe.
+        const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'cat > "$1/$2"', 'sh', destDir, safe])
+        let err = ''
+        proc.stderr.on('data', (d) => { err += d.toString() })
+        proc.on('error', (e) => resolve({ name: safe, ok: false, error: String(e) }))
+        proc.on('close', (code) => resolve(code === 0 ? { name: safe, ok: true } : { name: safe, ok: false, error: err.trim() || `exit ${code}` }))
+        proc.stdin.write(Buffer.from(f.bytes))
+        proc.stdin.end()
+      })
+      results.push(r)
+    }
+    return results
+  })
+
+  // Download a file from the sandbox to the host via a save dialog, then
+  // `sbx cp sandbox:src → host`. Works for any container path, so it's the way
+  // to get files that live outside the (host-mounted) workspace onto the host.
+  ipcMain.handle('minipit:download-from', async (_, name: string, srcPath: string) => {
+    const base = srcPath.split('/').pop() || 'file'
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      defaultPath: join(app.getPath('downloads'), base),
+      buttonLabel: 'Download'
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      await sbx(['cp', `${name}:${srcPath}`, res.filePath], { timeout: 120000 })
+      return { ok: true, path: res.filePath }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle('minipit:list-secrets', () => listSecrets())
@@ -1722,12 +1890,14 @@ function setupIPC(): void {
     const dir = result.filePaths[0]
     const list = (store.get('projects') as string[]) ?? []
     if (!list.includes(dir)) { list.push(dir); store.set('projects', list) }
+    setAppMenu().catch(() => {})
     return dir
   })
 
   ipcMain.handle('minipit:remove-project', (_, dir: string, deleteFolder?: boolean) => {
     const list = ((store.get('projects') as string[]) ?? []).filter((d) => d !== dir)
     store.set('projects', list)
+    setAppMenu().catch(() => {})
     // Only touch disk when the user explicitly opted in.
     if (deleteFolder && dir) {
       try { require('fs').rmSync(dir, { recursive: true, force: true }) }
@@ -1838,6 +2008,10 @@ function startPolling(): void {
       const sandboxes = await listSandboxes()
       mainWindow?.webContents.send('minipit:sandboxes-updated', sandboxes)
       updateTrayMenu(sandboxes)
+      // Refresh the app menu's sandbox/project lists only when the sandbox set
+      // changes — this avoids running `sbx template ls` on every poll tick.
+      const sbxSig = JSON.stringify(sandboxes.map((s) => [s.name, s.status, s.workspace]))
+      if (sbxSig !== lastMenuSandboxSig) { lastMenuSandboxSig = sbxSig; setAppMenu(sandboxes).catch(() => {}) }
     } catch { /* silent */ }
     // Canonical block detection: diff `sbx policy log` and push new denials.
     try { for (const b of await fetchPolicyLog()) emitBlock(b) } catch { /* silent */ }
@@ -1871,7 +2045,31 @@ app.whenReady().then(() => {
     iconPath: dockIconPath
   })
 
-  setAppMenu()
+  // Content-Security-Policy for the renderer. Production loads only bundled
+  // local assets (script-src 'self'); the sole remote resource is the Gravatar
+  // avatar image, and all real network calls happen in the main process. Dev
+  // additionally allows Vite's HMR (inline/eval scripts + its ws/http server).
+  // 'unsafe-inline' in style-src is required for React inline style attributes.
+  const CSP = [
+    "default-src 'self'",
+    is.dev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https://www.gravatar.com",
+    "font-src 'self' data:",
+    "media-src 'self' data:",
+    is.dev
+      ? "connect-src 'self' ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*"
+      : "connect-src 'self'",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-src 'none'"
+  ].join('; ')
+  session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+    cb({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [CSP] } })
+  })
+
+  setAppMenu().catch(() => {})
   createWindow()
   createTray()
   setupIPC()

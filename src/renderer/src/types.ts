@@ -29,7 +29,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'shell',          label: 'Shell' }
 ]
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
-export type PageType = 'home' | 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings'
+export type PageType = 'home' | 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings' | 'logs'
 export type TabType = 'terminal' | 'info'
 export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
 
@@ -229,6 +229,8 @@ declare global {
       openPath(path: string): Promise<string>
       openFileWindow(name: string, path: string, fileName: string): Promise<void>
       deletePath(name: string, path: string): Promise<void>
+      copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
+      downloadFrom(name: string, path: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>
       signOut(): Promise<void>
       generatePalette(hex: string, size?: number): Promise<string[]>
       listTemplates(): Promise<Template[]>
@@ -286,6 +288,7 @@ declare global {
       onNavigate(cb: (page: string) => void): () => void
       onOpenSandbox(cb: (name: string) => void): () => void
       onOpenProject(cb: (workspace: string) => void): () => void
+      onNewProject(cb: () => void): () => void
       onOpenModal(cb: (modal: string) => void): () => void
       onSetTab(cb: (tab: string) => void): () => void
       onStopActive(cb: () => void): () => void

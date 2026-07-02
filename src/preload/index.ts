@@ -18,6 +18,8 @@ const api = {
   openPath:      (path: string)         => ipcRenderer.invoke('minipit:open-path', path),
   openFileWindow:(name: string, path: string, fileName: string) => ipcRenderer.invoke('minipit:open-file-window', name, path, fileName),
   deletePath:    (name: string, path: string) => ipcRenderer.invoke('minipit:delete-path', name, path),
+  copyInto:      (name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]) => ipcRenderer.invoke('minipit:copy-into', name, destDir, files),
+  downloadFrom:  (name: string, path: string) => ipcRenderer.invoke('minipit:download-from', name, path),
   signOut:       ()                     => ipcRenderer.invoke('minipit:sign-out'),
   generatePalette: (hex: string, size?: number) => ipcRenderer.invoke('minipit:generate-palette', hex, size),
   listTemplates: ()                     => ipcRenderer.invoke('minipit:list-templates'),
@@ -127,6 +129,11 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, workspace: string) => cb(workspace)
     ipcRenderer.on('minipit:open-project', handler)
     return () => ipcRenderer.removeListener('minipit:open-project', handler)
+  },
+  onNewProject: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on('minipit:new-project', handler)
+    return () => ipcRenderer.removeListener('minipit:new-project', handler)
   },
   onOpenModal: (cb: (modal: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, modal: string) => cb(modal)

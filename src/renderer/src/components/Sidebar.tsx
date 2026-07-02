@@ -71,7 +71,11 @@ function ProjectHover({
             <span className="sb-proj-pop-name">{name}</span>
             <span className="sb-proj-pop-count">{project.list.length}</span>
           </div>
-          <div className="sb-proj-pop-path">{project.workspace}</div>
+          <div
+            className="sb-proj-pop-path"
+            title="Double-click to reveal in Finder"
+            onDoubleClick={(e) => { e.stopPropagation(); window.minipit?.openInFinder(project.workspace) }}
+          >{project.workspace}</div>
           {showGit && git?.isRepo && (
             <div className="sb-proj-pop-git">
               <GitBranch size={12} />
@@ -312,7 +316,7 @@ export function Sidebar() {
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const [groupBy, setGroupBy] = useState<'none' | 'project' | 'agent'>(
-    () => (localStorage.getItem('minipit:sbxGroupBy') as 'none' | 'project' | 'agent') ?? 'none'
+    () => (localStorage.getItem('minipit:sbxGroupBy') as 'none' | 'project' | 'agent') ?? 'project'
   )
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'stopped'>(
     () => (localStorage.getItem('minipit:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
@@ -333,7 +337,7 @@ export function Sidebar() {
   const [filterPos, setFilterPos] = useState<{ top: number; left: number } | null>(null)
   const filterRef = useRef<HTMLDivElement>(null)
   const [libOpen, setLibOpen] = useState(() => localStorage.getItem('minipit:libraryOpen') === '1')
-  const [projOpen, setProjOpen] = useState(() => localStorage.getItem('minipit:projectsOpen') !== '0')
+  const [projOpen, setProjOpen] = useState(() => localStorage.getItem('minipit:projectsOpen') === '1')
   const [sbxOpen, setSbxOpen] = useState(() => localStorage.getItem('minipit:sandboxesOpen') !== '0')
   const toggleProj = () =>
     setProjOpen((o) => { const n = !o; localStorage.setItem('minipit:projectsOpen', n ? '1' : '0'); return n })
