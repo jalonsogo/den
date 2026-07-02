@@ -145,6 +145,28 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
         </div>
       </div>
 
+      {blocks.length > 0 && (
+        <div className="np-blocks np-blocks-top">
+          <div className="np-blocks-hd">
+            <ShieldAlert size={13} className="np-blocks-ic" />
+            Recent blocks
+          </div>
+          {blocks.slice(0, 6).map((b, i) => (
+            <div className="np-block" key={`${b.host}|${b.at}|${i}`}>
+              <div className="np-block-body">
+                <span className="np-block-host">{b.host}</span>
+                <span className="np-block-meta">
+                  {b.rule ? `${b.rule} · ` : ''}{new Date(b.at).toLocaleTimeString()}
+                </span>
+              </div>
+              <button className="btn btn-default btn-sm" onClick={() => allowHost(b.host)} disabled={allowBusy}>
+                Allow
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <AccordionSection id="workspaces" title="Workspaces" defaultOpen>
         <div className="info-row">
           <span className="ir-label">Primary (read-write)</span>
@@ -232,28 +254,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
               Agents can only reach the allowed resources above; anything else is blocked by the default deny policy.
             </div>
           </>
-        )}
-
-        {blocks.length > 0 && (
-          <div className="np-blocks">
-            <div className="np-blocks-hd">
-              <ShieldAlert size={13} className="np-blocks-ic" />
-              Recent blocks
-            </div>
-            {blocks.slice(0, 6).map((b, i) => (
-              <div className="np-block" key={`${b.host}|${b.at}|${i}`}>
-                <div className="np-block-body">
-                  <span className="np-block-host">{b.host}</span>
-                  <span className="np-block-meta">
-                    {b.rule ? `${b.rule} · ` : ''}{new Date(b.at).toLocaleTimeString()}
-                  </span>
-                </div>
-                <button className="btn btn-default btn-sm" onClick={() => allowHost(b.host)} disabled={allowBusy}>
-                  Allow
-                </button>
-              </div>
-            ))}
-          </div>
         )}
 
         {!polLoading && (

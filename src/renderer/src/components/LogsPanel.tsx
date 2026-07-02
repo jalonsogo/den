@@ -95,7 +95,10 @@ export function LogsPanel() {
   const [follow, setFollow] = useState(true)
   const [query, setQuery] = useState('')
   const [level, setLevel] = useState<Level>('all')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const retry = () => { setLoadError(null); setText(''); setReloadKey((k) => k + 1) }
 
   const sandboxes = useStore((s) => s.sandboxes)
   const running = sandboxes.filter((s) => s.status === 'running')
@@ -155,21 +158,24 @@ export function LogsPanel() {
     const emptyMsg = isKit
       ? '(kit startup log is empty — no startup commands have run yet)'
       : '(sandbox log is empty)'
+    const label = isKit ? 'kit startup' : 'sandbox'
     let alive = true
     const fetchOnce = () => {
       const p = window.minipit?.sandboxLog?.(sbxTarget, kind)
-      if (!p) { if (alive) setText('Log reader unavailable — fully restart the app to load the update.'); return }
+      if (!p) { if (alive) setLoadError('The log reader isn’t available yet — fully restart the app to load the latest update, then retry.'); return }
       p.then((r) => {
         if (!alive) return
-        setText(r?.ok ? (r.text || emptyMsg)
-          : `Couldn’t read ${isKit ? 'kit startup' : 'sandbox'} log${r?.error ? `: ${r.error}` : '.'}`)
-      }).catch(() => { if (alive) setText('Couldn’t read log.') })
+        if (r?.ok) { setText(r.text || emptyMsg); setLoadError(null) }
+        else setLoadError(`Couldn’t read the ${label} log${r?.error ? `: ${r.error}` : '.'}`)
+      }).catch(() => { if (alive) setLoadError(`Couldn’t reach the sandbox to read its ${label} log.`) })
     }
-    setText('Reading log…')
     fetchOnce()
     const id = follow ? setInterval(fetchOnce, 3000) : null
     return () => { alive = false; if (id) clearInterval(id) }
-  }, [inSandbox, isKit, sbxTarget, follow])
+  }, [inSandbox, isKit, sbxTarget, follow, reloadKey])
+
+  // Reset any error when the selected source changes.
+  useEffect(() => { setLoadError(null) }, [source])
 
   // Parse + filter the tail into rows. Memoised so tailing/theme changes don't
   // re-parse needlessly; only the last MAX_ROWS are rendered to stay snappy.
@@ -250,7 +256,14 @@ export function LogsPanel() {
         )}
       </div>
       <div className="logs-body" ref={bodyRef} onWheel={() => setFollow(false)} style={{ background: bg }}>
-        {rows.length ? (
+        {loadError ? (
+          <div className="logs-error">
+            <div className="logs-error-msg">{loadError}</div>
+            <div className="logs-error-actions">
+              <button className="btn btn-primary btn-sm" onClick={retry}>Retry</button>
+            </div>
+          </div>
+        ) : rows.length ? (
           <div className="logs-lines" style={{ color: fg }}>
             {rows.map((r, i) => (
               <div key={i} className={`logline${r.level ? ` lvl-${r.level}` : ''}`} title={r.raw}>
