@@ -2,6 +2,17 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../../store'
 import { SECRET_SERVICES, type SecretService } from '../../types'
 
+// 1Password brand mark (keyhole in a circle), in the brand blue.
+function OnePasswordIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-label="1Password" role="img">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="9.6" r="2.3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 11.9v4.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function NewSecretModal() {
   const { setModal, secretTarget } = useStore()
   const [configured, setConfigured] = useState<Set<string>>(new Set())
@@ -111,17 +122,17 @@ export function NewSecretModal() {
 
           <div className="fg">
             <div className="secret-op-row">
-              <div>
-                <div className="flabel" style={{ marginBottom: 2 }}>Load from 1Password</div>
-                <div className="fhint" style={{ marginTop: 0 }}>Pull the value from your vault instead of pasting it.</div>
-              </div>
+              <span className="op-badge" title="Load the value from 1Password">
+                <OnePasswordIcon />
+              </span>
               <button
                 type="button"
                 className={`s-toggle${useOp ? ' on' : ''}`}
                 role="switch"
                 aria-checked={useOp}
+                aria-label="Load from 1Password"
                 disabled={opAvail === false || saving}
-                title={opAvail === false ? '1Password CLI (op) not found' : undefined}
+                title={opAvail === false ? '1Password CLI (op) not found' : 'Load the value from 1Password'}
                 onClick={() => setUseOp((v) => !v)}
               />
             </div>
