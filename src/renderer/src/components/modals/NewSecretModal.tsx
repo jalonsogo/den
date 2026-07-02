@@ -2,6 +2,17 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../../store'
 import { SECRET_SERVICES, type SecretService } from '../../types'
 
+// 1Password brand mark (keyhole in a circle), in the brand blue.
+function OnePasswordIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-label="1Password" role="img">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="9.6" r="2.3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 11.9v4.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function NewSecretModal() {
   const { setModal, secretTarget } = useStore()
   const [configured, setConfigured] = useState<Set<string>>(new Set())
@@ -10,6 +21,14 @@ export function NewSecretModal() {
   const [saving, setSaving] = useState(false)
   const [oauthing, setOauthing] = useState(false)
   const [error, setError] = useState('')
+  // 1Password: pull the value from a vault reference instead of pasting it.
+  const [useOp, setUseOp] = useState(false)
+  const [opRef, setOpRef] = useState('')
+  const [opAvail, setOpAvail] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    window.minipit?.opAvailable?.().then((v) => setOpAvail(!!v)).catch(() => setOpAvail(false))
+  }, [])
 
   // Anthropic uses our custom OAuth flow; OpenAI uses sbx's built-in --oauth.
   const oauthService = service === 'anthropic' || service === 'openai' ? service : null
@@ -46,11 +65,16 @@ export function NewSecretModal() {
   }, [secretTarget])
 
   const handleSave = async () => {
-    if (!apiKey) return
+    if (useOp ? !opRef.trim() : !apiKey) return
+    if (useOp && typeof window.minipit?.setSecretOp !== 'function') {
+      setError('1Password support needs an app restart to load. Quit den and relaunch, then try again.')
+      return
+    }
     setSaving(true)
     setError('')
     try {
-      await window.minipit?.setSecret(service, apiKey)
+      if (useOp) await window.minipit?.setSecretOp(service, opRef.trim())
+      else await window.minipit?.setSecret(service, apiKey)
       setModal(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -87,7 +111,7 @@ export function NewSecretModal() {
             </select>
           </div>
 
-          {oauthService && (
+          {oauthService && !useOp && (
             <div className="fg">
               <button className="btn btn-default" style={{ width: '100%', justifyContent: 'center' }} onClick={handleOAuth} disabled={oauthing || saving}>
                 {oauthing ? 'Waiting for browser…' : `Connect with ${oauthService === 'anthropic' ? 'Anthropic' : 'OpenAI'} (OAuth)`}
@@ -97,22 +121,62 @@ export function NewSecretModal() {
           )}
 
           <div className="fg">
-            <label className="flabel">API Key</label>
-            <input
-              className="finput"
-              type="password"
-              placeholder="sk-ant-api03-…"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              autoFocus
-            />
-            <div className="fhint">
-              Stored via{' '}
-              <code style={{ fontFamily: 'SF Mono,Menlo,monospace', fontSize: 10.5, background: 'var(--bg-subtle)', padding: '1px 5px', borderRadius: 4 }}>
-                sbx secret set -g {service}
-              </code>
+            <div className="secret-op-row">
+              <span className="secret-op-label">
+                <span className="op-badge"><OnePasswordIcon /></span>
+                <span className="flabel" style={{ marginBottom: 0 }}>Load from 1Password</span>
+              </span>
+              <button
+                type="button"
+                className={`s-toggle${useOp ? ' on' : ''}`}
+                role="switch"
+                aria-checked={useOp}
+                aria-label="Load from 1Password"
+                disabled={opAvail === false || saving}
+                title={opAvail === false ? '1Password CLI (op) not found' : 'Load the value from 1Password'}
+                onClick={() => setUseOp((v) => !v)}
+              />
             </div>
+            {opAvail === false && (
+              <div className="fhint">1Password CLI (<code className="ccode">op</code>) not found — install it to use this.</div>
+            )}
           </div>
+
+          {useOp ? (
+            <div className="fg">
+              <label className="flabel">1Password secret reference</label>
+              <input
+                className="finput"
+                placeholder="op://Work/Anthropic/credential"
+                value={opRef}
+                onChange={(e) => setOpRef(e.target.value)}
+                autoFocus
+                spellCheck={false}
+                autoCapitalize="off"
+              />
+              <div className="fhint">
+                Runs{' '}
+                <code className="ccode">op read</code>{' '}on your host and stores the result via{' '}
+                <code className="ccode">sbx secret set -g {service}</code>. The value is never pasted here.
+              </div>
+            </div>
+          ) : (
+            <div className="fg">
+              <label className="flabel">API Key</label>
+              <input
+                className="finput"
+                type="password"
+                placeholder="sk-ant-api03-…"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                autoFocus
+              />
+              <div className="fhint">
+                Stored via{' '}
+                <code className="ccode">sbx secret set -g {service}</code>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div style={{ color: 'var(--destruct)', fontSize: 12, marginTop: 4, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: 6 }}>
@@ -123,8 +187,8 @@ export function NewSecretModal() {
 
         <div className="m-ftr">
           <button className="btn btn-ghost" onClick={() => setModal(null)} disabled={saving}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={!apiKey || saving}>
-            {saving ? 'Saving…' : 'Save'}
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || (useOp ? !opRef.trim() : !apiKey)}>
+            {saving ? (useOp ? 'Fetching…' : 'Saving…') : 'Save'}
           </button>
         </div>
       </div>

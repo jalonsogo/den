@@ -309,6 +309,29 @@ function sbxWithInput(args: string[], input: string, timeout = 10000): Promise<s
   })
 }
 
+// The 1Password CLI (`op`). Used to resolve `op://…` secret references so the
+// real value never has to be pasted into den.
+function getOpPath(): string {
+  const fs = require('fs')
+  const candidates = ['/opt/homebrew/bin/op', '/usr/local/bin/op', '/usr/bin/op']
+  return candidates.find((p) => { try { return fs.existsSync(p) } catch { return false } }) ?? 'op'
+}
+function opAvailable(): boolean {
+  const fs = require('fs')
+  return ['/opt/homebrew/bin/op', '/usr/local/bin/op', '/usr/bin/op'].some((p) => {
+    try { return fs.existsSync(p) } catch { return false }
+  })
+}
+// Resolve a single `op://Vault/Item/field` reference to its value via `op read`.
+function opRead(ref: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(getOpPath(), ['read', ref], { timeout: 30000, env: guiEnv() }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || err.message).trim() || 'op read failed'))
+      else resolve(stdout.replace(/\r?\n+$/, ''))
+    })
+  })
+}
+
 interface StoredSecret {
   scope: string
   type: string
@@ -1679,6 +1702,18 @@ function setupIPC(): void {
   ipcMain.handle('minipit:list-secrets', () => listSecrets())
 
   ipcMain.handle('minipit:set-secret', async (_, service: string, value: string) => {
+    await sbxWithInput(['secret', 'set', '-g', service], value.endsWith('\n') ? value : value + '\n')
+  })
+
+  // Is the 1Password CLI installed? Gates the "Load from 1Password" option.
+  ipcMain.handle('minipit:op-available', () => opAvailable())
+
+  // Resolve a 1Password reference with `op read` and store the result — mirrors
+  // `op read "op://…" | sbx secret set -g <service>`. The real value stays on
+  // the host and is never pasted into den.
+  ipcMain.handle('minipit:set-secret-op', async (_, service: string, ref: string) => {
+    const value = await opRead(ref)
+    if (!value) throw new Error('1Password returned an empty value for that reference.')
     await sbxWithInput(['secret', 'set', '-g', service], value.endsWith('\n') ? value : value + '\n')
   })
 
