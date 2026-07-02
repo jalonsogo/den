@@ -264,7 +264,7 @@ declare global {
       listLogs(): Promise<{ name: string; path: string }[]>
       startLogTail(path: string): Promise<void>
       stopLogTail(): Promise<void>
-      sandboxKitLog(name: string): Promise<{ ok: boolean; text: string; error?: string }>
+      sandboxLog(name: string, which: 'kit' | 'sandbox'): Promise<{ ok: boolean; text: string; error?: string }>
       onLogTail(cb: (chunk: string) => void): () => void
       getSettings(): Promise<AppSettings>
       saveSettings(settings: Partial<AppSettings>): Promise<void>
