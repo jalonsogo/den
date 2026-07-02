@@ -21,12 +21,15 @@ import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects, addPolicyBlock, setAgentActivity } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects, addPolicyBlock, setAgentActivity, syncProjectConfig } = useStore()
 
   useEffect(() => {
     // Initial load
     window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
     loadProjects()
+    // Pull durable per-project appearance from the main-process store (and
+    // migrate any localStorage-cached config into it on first run).
+    syncProjectConfig()
 
     // Live updates from main process
     const unsub1 = window.minipit?.onSandboxesUpdated((s) => {

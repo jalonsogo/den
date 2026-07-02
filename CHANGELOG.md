@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-03
+
+### Added
+- Community kit gallery: a "Browse contrib" tab on the Kits pages lists kits from [docker/sbx-kits-contrib](https://github.com/docker/sbx-kits-contrib), fetched live from GitHub. Import one to add it to your local library (shallow git clone + `sbx kit pack`). Agent kits appear on the Sandbox Kits page, mixin kits on the Mixin Kits page.
+
+### Changed
+- The Kits pages move their Your kits / Browse contrib tabs into a dedicated sub-toolbar under the page title, mirroring the sandbox `Agent | Shell` bar.
+- The collapsed sidebar now shows a single Projects icon when the Projects group is collapsed, instead of always fanning out every project avatar.
+
+### Fixed
+- Per-project appearance (color, icon, display name) is now persisted in the file-based store instead of the renderer's `localStorage`, so it survives dev-server origin changes (a shifting port no longer appears to wipe project config). Existing localStorage config is migrated on first launch.
+- The New Sandbox folder picker can create a new workspace folder on Windows and Linux too (`createDirectory`), matching macOS and the project picker.
+
 ## [0.3.1] - 2026-07-02
 
 ### Fixed

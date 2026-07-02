@@ -1836,6 +1836,47 @@ html, body, #root {
 .kit-spec-tabs { display: inline-flex; gap: 2px; background: var(--bg-subtle); border-radius: 6px; padding: 2px; margin-bottom: 8px; }
 .kit-spec-tabs button { font-size: 12px; padding: 4px 12px; border-radius: 4px; border: none; background: none; color: var(--t2); cursor: pointer; }
 .kit-spec-tabs button.on { background: var(--bg); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+
+/* Page sub-toolbar — a second bar under .page-hdr (mirrors the sandbox term-bar):
+   segmented tabs on the left, contextual actions on the right. */
+.page-subbar {
+  height: 40px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px;
+}
+.page-subbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* Kits page — Your kits / Browse contrib segmented control */
+.kit-tabs { display: inline-flex; gap: 2px; background: var(--bg-subtle); border-radius: 7px; padding: 2px; }
+.kit-tabs button { font-size: 12px; padding: 4px 12px; border-radius: 5px; border: none; background: none; color: var(--t2); cursor: pointer; }
+.kit-tabs button.on { background: var(--bg); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.kit-repo-link { color: var(--accent, var(--primary)); cursor: pointer; text-decoration: none; }
+.kit-repo-link:hover { text-decoration: underline; }
+@keyframes kit-spin { to { transform: rotate(360deg); } }
+.spin { animation: kit-spin 0.9s linear infinite; }
+
+/* Community kit gallery cards */
+.kit-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.kit-card {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+}
+.kit-card-hd { display: flex; align-items: center; gap: 8px; }
+.kit-card-hd > svg { color: var(--t3); flex-shrink: 0; }
+.kit-card-name { font-size: 13.5px; font-weight: 600; color: var(--t1); flex: 1; }
+.kit-card-has {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 600; color: var(--t3);
+  background: var(--bg-subtle); border-radius: 100px; padding: 2px 7px; flex-shrink: 0;
+}
+.kit-card-desc { font-size: 12px; color: var(--t2); line-height: 1.45; margin: 0; }
+.kit-card-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
+.kit-card-link {
+  display: inline-flex; align-items: center; gap: 4px; margin-right: auto;
+  font-size: 11.5px; color: var(--t3); cursor: pointer; text-decoration: none;
+}
+.kit-card-link:hover { color: var(--t1); }
 .ks-tag { font-family: 'SF Mono','Menlo',monospace; font-size: 11px; color: var(--t2); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; }
 .ks-tag-deny { color: var(--destruct); border-color: color-mix(in srgb, var(--destruct) 30%, var(--border)); }
 .ks-cmd { font-family: 'SF Mono','Menlo',monospace; font-size: 11px; color: var(--t2); margin-top: 6px; word-break: break-all; }

@@ -95,6 +95,7 @@ interface AppState {
   setProjectColor:    (workspace: string, hex: string | null) => void
   setProjectIcon:     (workspace: string, icon: string | null) => void
   setProjectName:     (workspace: string, name: string | null) => void
+  syncProjectConfig:  () => void
   loadGitInfo:        (workspace: string, force?: boolean) => void
   refreshSandboxChanges: (name: string, workspace: string) => void
   setDisplay:         (key: 'agentBadge' | 'sandboxSub' | 'projectCounts' | 'gitBranch' | 'changeBadge', value: boolean) => void
@@ -252,7 +253,10 @@ export const useStore = create<AppState>((set) => ({
       const next = { ...state.projectColors }
       if (hex) next[workspace] = hex
       else delete next[workspace]
+      // localStorage is a per-origin cache for instant paint; the file-based
+      // electron-store (via IPC) is the durable source of truth.
       localStorage.setItem('minipit:projectColors', JSON.stringify(next))
+      window.minipit?.projectConfigSet('colors', workspace, hex ?? null)
       return { projectColors: next }
     }),
 
@@ -262,8 +266,31 @@ export const useStore = create<AppState>((set) => ({
       if (icon) next[workspace] = icon
       else delete next[workspace]
       localStorage.setItem('minipit:projectIcons', JSON.stringify(next))
+      window.minipit?.projectConfigSet('icons', workspace, icon ?? null)
       return { projectIcons: next }
     }),
+
+  // Merge this origin's localStorage cache into the durable store (store wins),
+  // then hydrate the in-memory maps + refresh the cache from the authoritative
+  // result. Called once at startup — this is what makes config survive a
+  // dev-server port change (and thus a new localStorage origin).
+  syncProjectConfig: () => {
+    const readLS = (k: string): Record<string, string> => {
+      try { return JSON.parse(localStorage.getItem(k) ?? '{}') ?? {} } catch { return {} }
+    }
+    const local = {
+      colors: readLS('minipit:projectColors'),
+      icons: readLS('minipit:projectIcons'),
+      names: readLS('minipit:projectNames')
+    }
+    window.minipit?.projectConfigSync(local).then((cfg) => {
+      if (!cfg) return
+      localStorage.setItem('minipit:projectColors', JSON.stringify(cfg.colors))
+      localStorage.setItem('minipit:projectIcons', JSON.stringify(cfg.icons))
+      localStorage.setItem('minipit:projectNames', JSON.stringify(cfg.names))
+      set({ projectColors: cfg.colors, projectIcons: cfg.icons, projectNames: cfg.names })
+    }).catch(() => {})
+  },
 
   loadGitInfo: (workspace, force) => {
     if (!workspace) return
@@ -286,6 +313,7 @@ export const useStore = create<AppState>((set) => ({
       if (trimmed) next[workspace] = trimmed
       else delete next[workspace]
       localStorage.setItem('minipit:projectNames', JSON.stringify(next))
+      window.minipit?.projectConfigSet('names', workspace, trimmed ?? null)
       return { projectNames: next }
     }),
 
