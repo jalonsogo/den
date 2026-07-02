@@ -4,7 +4,6 @@ import { useStore } from '../store'
 import { ACCENTS } from '../lib/accent'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
-import { LogsPanel } from './LogsPanel'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
 import {
   SOUND_OPTIONS, type SoundId, isSoundEnabled, setSoundEnabled,
@@ -29,7 +28,7 @@ export function SettingsPage() {
     setAccent, setCustomAccent, saveCustomAccent, removeCustomAccent,
     termTheme, setTermTheme, display, setDisplay, setSubLineMode
   } = useStore()
-  const [tab, setTab] = useState<'general' | 'runtime' | 'secrets' | 'logs'>('general')
+  const [tab, setTab] = useState<'general' | 'runtime' | 'secrets'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
   const [palette, setPalette] = useState<string[]>([])
@@ -127,7 +126,6 @@ export function SettingsPage() {
         <div className={`tab${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>General</div>
         <div className={`tab${tab === 'runtime' ? ' active' : ''}`} onClick={() => setTab('runtime')}>Runtime</div>
         <div className={`tab${tab === 'secrets' ? ' active' : ''}`} onClick={() => setTab('secrets')}>Secrets</div>
-        <div className={`tab${tab === 'logs' ? ' active' : ''}`} onClick={() => setTab('logs')}>Logs</div>
       </div>
 
       {tab === 'runtime' ? (
@@ -135,8 +133,6 @@ export function SettingsPage() {
           sbxPath={settings.sbxPath}
           onChangePath={(v) => setSettings((s) => ({ ...s, sbxPath: v }))}
         />
-      ) : tab === 'logs' ? (
-        <LogsPanel />
       ) : tab === 'secrets' ? (
         <div className="page-body" style={{ padding: '16px 28px 28px' }}>
           <SecretsPanel />

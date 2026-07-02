@@ -15,7 +15,10 @@ import { randomBytes, createHash } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { execFile, spawn } from 'child_process'
 import Store from 'electron-store'
-import pty from 'node-pty'
+// node-pty 1.x compiles to CJS with `__esModule: true` but no `default` export,
+// so a default import resolves to `undefined` under esbuild's interop (crashing
+// `pty.spawn`). Import the namespace instead.
+import * as pty from 'node-pty'
 
 // Name the app early (before whenReady) so menus, the About panel and the dock
 // label read "den" instead of "Electron" in dev. Packaged builds use productName.
@@ -430,6 +433,32 @@ async function listTemplates() {
     )
   } catch (err) {
     console.error('sbx template ls failed:', err)
+    return []
+  }
+}
+
+// Authored kits under <userData>/kits/<name>/ (spec.yaml). `kind` distinguishes
+// mixin kits from sandbox kits. Shared by the list-kits IPC and the app menu.
+function listKits(): { name: string; kind: string; dir: string; hasZip: boolean }[] {
+  const fs = require('fs')
+  const base = kitsRoot()
+  try {
+    return (fs.readdirSync(base, { withFileTypes: true }) as { name: string; isDirectory: () => boolean }[])
+      .filter((d) => d.isDirectory())
+      .map((d) => {
+        const dir = join(base, d.name)
+        let kind = 'mixin'
+        try {
+          const spec = fs.readFileSync(join(dir, 'spec.yaml'), 'utf8') as string
+          const m = spec.match(/kind:\s*(\w+)/)
+          if (m) kind = m[1]
+        } catch {
+          return null
+        }
+        return { name: d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
+      })
+      .filter(Boolean) as { name: string; kind: string; dir: string; hasZip: boolean }[]
+  } catch {
     return []
   }
 }
@@ -978,9 +1007,80 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
   tray.setContextMenu(Menu.buildFromTemplate(items))
 }
 
-function setAppMenu(): void {
-  const send = (channel: string, ...args: unknown[]) =>
-    mainWindow?.webContents.send(channel, ...args)
+// The application menu mirrors the sidebar navigation and lists live data
+// (sandboxes, projects, templates, kits) so it can be interacted with directly
+// from the menu bar. Rebuilt when that data changes; the signature guard below
+// avoids needless rebuilds (which would close a menu the user has open).
+const MENU_LIST_LIMIT = 12
+let lastMenuSig = ''
+let lastMenuSandboxSig = ''
+
+async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSandboxes>>): Promise<void> {
+  // Route clicks through navigateFromTray so they work even when the window is
+  // hidden (menu-bar-only mode): it shows/recreates the window, then delivers.
+  const go = (channel: string, payload = '') => navigateFromTray(channel, payload)
+
+  const [sandboxes, templates] = await Promise.all([
+    prefetchedSandboxes ? Promise.resolve(prefetchedSandboxes) : listSandboxes().catch(() => []),
+    listTemplates().catch(() => [])
+  ])
+  const kits = listKits()
+  const mixinKits = kits.filter((k) => k.kind === 'mixin')
+  const sandboxKits = kits.filter((k) => k.kind === 'sandbox')
+
+  // Projects = folders the user added (persisted) ∪ workspaces in use by a
+  // sandbox. Labels use the folder basename, matching the tray menu.
+  const projectDirs = Array.from(new Set([
+    ...(((store.get('projects') as string[]) ?? [])),
+    ...sandboxes.map((s) => s.workspace)
+  ])).filter(Boolean)
+  const projCount = (ws: string) => sandboxes.filter((s) => s.workspace === ws).length
+  const base = (dir: string) => dir.split('/').pop() || dir
+
+  // Skip the rebuild when nothing menu-relevant changed.
+  const sig = JSON.stringify({
+    s: sandboxes.map((s) => [s.name, s.status]),
+    p: projectDirs.map((ws) => [ws, projCount(ws)]),
+    t: templates.map((t) => `${t.repository}:${t.tag}`),
+    m: kits.map((k) => [k.name, k.kind])
+  })
+  if (sig === lastMenuSig && Menu.getApplicationMenu()) return
+  lastMenuSig = sig
+
+  // Cap a list and append a disabled "N more…" tail so nothing is silently hidden.
+  const capped = <T,>(
+    all: T[], render: (x: T) => Electron.MenuItemConstructorOptions, noun: string
+  ): Electron.MenuItemConstructorOptions[] => {
+    const shown = all.slice(0, MENU_LIST_LIMIT).map(render)
+    if (all.length > MENU_LIST_LIMIT) shown.push({ label: `${all.length - MENU_LIST_LIMIT} more ${noun}…`, enabled: false })
+    return shown
+  }
+
+  const sandboxItems: Electron.MenuItemConstructorOptions[] = sandboxes.length
+    ? capped(sandboxes, (s) => ({
+        label: `${s.status === 'running' ? '●' : '○'}  ${s.name}`,
+        click: () => go('minipit:open-sandbox', s.name)
+      }), 'sandboxes')
+    : [{ label: 'No sandboxes yet', enabled: false }]
+
+  const projectItems: Electron.MenuItemConstructorOptions[] = projectDirs.length
+    ? capped(projectDirs, (ws) => {
+        const c = projCount(ws)
+        return { label: c ? `${base(ws)}  (${c})` : base(ws), click: () => go('minipit:open-project', ws) }
+      }, 'projects')
+    : [{ label: 'No projects yet', enabled: false }]
+
+  // A Library submenu: "Show all" + the list (each opens the management page,
+  // which is where individual items are edited/run).
+  const libSubmenu = (
+    names: string[], page: string, showLabel: string, noun: string
+  ): Electron.MenuItemConstructorOptions[] => [
+    { label: showLabel, click: () => go('minipit:navigate', page) },
+    { type: 'separator' },
+    ...(names.length
+      ? capped(names, (n) => ({ label: n, click: () => go('minipit:navigate', page) }), noun)
+      : [{ label: `No ${noun} yet`, enabled: false }])
+  ]
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -988,7 +1088,7 @@ function setAppMenu(): void {
       submenu: [
         { label: 'About den', role: 'about' },
         { type: 'separator' },
-        { label: 'Preferences…', accelerator: 'Cmd+,', click: () => send('minipit:navigate', 'settings') },
+        { label: 'Settings…', accelerator: 'Cmd+,', click: () => go('minipit:navigate', 'settings') },
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },
@@ -999,7 +1099,8 @@ function setAppMenu(): void {
     {
       label: 'File',
       submenu: [
-        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => send('minipit:open-modal', 'new-sandbox') },
+        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
+        { label: 'New Project…', accelerator: 'Shift+Cmd+N', click: () => go('minipit:new-project') },
         { type: 'separator' },
         { label: 'Close Window', accelerator: 'Cmd+W', role: 'close' }
       ]
@@ -1022,26 +1123,53 @@ function setAppMenu(): void {
     {
       label: 'View',
       submenu: [
-        { label: 'Terminal', accelerator: 'Cmd+1', click: () => send('minipit:set-tab', 'terminal') },
-        { label: 'Info', accelerator: 'Cmd+2', click: () => send('minipit:set-tab', 'info') },
+        { label: 'Terminal', accelerator: 'Cmd+1', click: () => go('minipit:set-tab', 'terminal') },
+        { label: 'Info', accelerator: 'Cmd+2', click: () => go('minipit:set-tab', 'info') },
         { type: 'separator' },
         { label: 'Reload', accelerator: 'Cmd+R', role: 'reload' },
         { label: 'Toggle DevTools', role: 'toggleDevTools' }
       ]
     },
+    // Top-level menus that mirror the app's navigation (sidebar sections) and
+    // list live data you can jump straight into.
     {
-      label: 'Sandbox',
+      label: 'Sandboxes',
       submenu: [
-        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => send('minipit:open-modal', 'new-sandbox') },
+        { label: 'Show All Sandboxes', accelerator: 'Shift+Cmd+S', click: () => go('minipit:navigate', 'sandboxes') },
+        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
+        { label: 'Stop Sandbox', accelerator: 'Cmd+.', click: () => go('minipit:stop-active') },
+        { label: 'Open in Finder', accelerator: 'Shift+Cmd+F', click: () => go('minipit:open-in-finder') },
+        { label: 'Logs', accelerator: 'Cmd+L', click: () => go('minipit:navigate', 'logs') },
         { type: 'separator' },
-        { label: 'Stop Sandbox', accelerator: 'Cmd+.', click: () => send('minipit:stop-active') },
+        ...sandboxItems
+      ]
+    },
+    {
+      label: 'Projects',
+      submenu: [
+        { label: 'Show All Projects', accelerator: 'Shift+Cmd+P', click: () => go('minipit:navigate', 'projects') },
+        { label: 'New Project…', click: () => go('minipit:new-project') },
         { type: 'separator' },
-        { label: 'Open in Finder', accelerator: 'Shift+Cmd+F', click: () => send('minipit:open-in-finder') }
+        ...projectItems
+      ]
+    },
+    {
+      label: 'Library',
+      submenu: [
+        { label: 'Templates', submenu: libSubmenu(templates.map((t) => `${t.repository}:${t.tag}`), 'templates', 'Show All Templates', 'templates') },
+        { label: 'Mixin Kits', submenu: libSubmenu(mixinKits.map((k) => k.name), 'mixins', 'Show All Mixin Kits', 'mixin kits') },
+        { label: 'Sandbox Kits', submenu: libSubmenu(sandboxKits.map((k) => k.name), 'kits', 'Show All Sandbox Kits', 'sandbox kits') }
       ]
     },
     {
       label: 'Window',
       submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+    },
+    {
+      role: 'help',
+      submenu: [
+        { label: 'den Website', click: () => shell.openExternal('https://den.studio') }
+      ]
     }
   ]
 
@@ -1183,6 +1311,7 @@ function setupIPC(): void {
     const zip = join(kitsRoot(), `${name}.zip`)
     // pack validates the spec and produces the ZIP artifact.
     const output = await sbx(['kit', 'pack', base, '-o', zip], { timeout: 30000 })
+    setAppMenu().catch(() => {})
     return { dir: base, zip, output }
   })
 
@@ -1255,33 +1384,12 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:list-kits', () => {
-    const fs = require('fs')
-    const base = kitsRoot()
-    try {
-      return (fs.readdirSync(base, { withFileTypes: true }) as { name: string; isDirectory: () => boolean }[])
-        .filter((d) => d.isDirectory())
-        .map((d) => {
-          const dir = join(base, d.name)
-          let kind = 'mixin'
-          try {
-            const spec = fs.readFileSync(join(dir, 'spec.yaml'), 'utf8') as string
-            const m = spec.match(/kind:\s*(\w+)/)
-            if (m) kind = m[1]
-          } catch {
-            return null
-          }
-          return { name: d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
-        })
-        .filter(Boolean)
-    } catch {
-      return []
-    }
-  })
+  ipcMain.handle('minipit:list-kits', () => listKits())
 
   ipcMain.handle('minipit:remove-kit', (_, dir: string) => {
     const fs = require('fs')
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch (err) { console.error(err) }
+    setAppMenu().catch(() => {})
   })
 
   // The logged-in Docker Hub account, read from the Docker credential helper
@@ -1736,12 +1844,14 @@ function setupIPC(): void {
     const dir = result.filePaths[0]
     const list = (store.get('projects') as string[]) ?? []
     if (!list.includes(dir)) { list.push(dir); store.set('projects', list) }
+    setAppMenu().catch(() => {})
     return dir
   })
 
   ipcMain.handle('minipit:remove-project', (_, dir: string, deleteFolder?: boolean) => {
     const list = ((store.get('projects') as string[]) ?? []).filter((d) => d !== dir)
     store.set('projects', list)
+    setAppMenu().catch(() => {})
     // Only touch disk when the user explicitly opted in.
     if (deleteFolder && dir) {
       try { require('fs').rmSync(dir, { recursive: true, force: true }) }
@@ -1852,6 +1962,10 @@ function startPolling(): void {
       const sandboxes = await listSandboxes()
       mainWindow?.webContents.send('minipit:sandboxes-updated', sandboxes)
       updateTrayMenu(sandboxes)
+      // Refresh the app menu's sandbox/project lists only when the sandbox set
+      // changes — this avoids running `sbx template ls` on every poll tick.
+      const sbxSig = JSON.stringify(sandboxes.map((s) => [s.name, s.status, s.workspace]))
+      if (sbxSig !== lastMenuSandboxSig) { lastMenuSandboxSig = sbxSig; setAppMenu(sandboxes).catch(() => {}) }
     } catch { /* silent */ }
     // Canonical block detection: diff `sbx policy log` and push new denials.
     try { for (const b of await fetchPolicyLog()) emitBlock(b) } catch { /* silent */ }
@@ -1909,7 +2023,7 @@ app.whenReady().then(() => {
     cb({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [CSP] } })
   })
 
-  setAppMenu()
+  setAppMenu().catch(() => {})
   createWindow()
   createTray()
   setupIPC()

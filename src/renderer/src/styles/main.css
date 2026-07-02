@@ -1543,10 +1543,13 @@ html, body, #root {
 /* Full-width update bar — top of the dashboard, primary CTA */
 .update-bar {
   flex-shrink: 0;
+  /* Match the sidebar Home band (.sb-nav-first) and .page-hdr height so the
+     bottom borders line up across the sidebar and content. */
+  height: 45px;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 16px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--primary) 10%, var(--bg));
 }
@@ -2246,15 +2249,17 @@ html, body, #root {
 .logs { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .logs-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .logs-follow { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--t2); cursor: pointer; }
+/* Match the log source dropdown (.finput): same background, border, height. */
 .logs-search {
   display: flex; align-items: center; gap: 6px;
-  padding: 4px 8px; min-width: 180px;
-  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 7px 10px; min-width: 200px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
 }
+.logs-search:focus-within { border-color: var(--t1); }
 .logs-search-ic { color: var(--t3); flex-shrink: 0; }
 .logs-search input {
   flex: 1; min-width: 0; background: none; border: none; outline: none;
-  font-size: 12px; color: var(--t1);
+  font-size: 13px; color: var(--t1);
 }
 .logs-search input::placeholder { color: var(--t3); }
 .logs-search-count { font-size: 11px; color: var(--t3); font-variant-numeric: tabular-nums; }

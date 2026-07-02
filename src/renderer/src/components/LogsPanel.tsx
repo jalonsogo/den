@@ -6,12 +6,33 @@ import { termTheme as resolveTermTheme } from '../lib/termThemes'
 const CAP = 200_000 // keep the last ~200 KB of log text
 const KIT_PREFIX = 'kit:' // sentinel for in-sandbox kit/startup log sources
 
+type Level = 'all' | 'error' | 'warn' | 'info' | 'debug'
+const LEVELS: { id: Level; label: string }[] = [
+  { id: 'all', label: 'All levels' },
+  { id: 'error', label: 'Error' },
+  { id: 'warn', label: 'Warning' },
+  { id: 'info', label: 'Info' },
+  { id: 'debug', label: 'Debug' }
+]
+
+// Best-effort severity of a single log line. Matches the common shapes: bare
+// words (ERROR, warn), bracketed/level tags ([info], level=debug), and a few
+// error synonyms. Lines that match nothing are only shown under "All levels".
+function classifyLevel(line: string): Exclude<Level, 'all'> | null {
+  if (/\b(error|err|fatal|panic|exception|fail(?:ed|ure)?)\b/i.test(line)) return 'error'
+  if (/\bwarn(?:ing)?\b/i.test(line)) return 'warn'
+  if (/\binfo(?:rmation)?\b/i.test(line)) return 'info'
+  if (/\b(?:debug|trace|verbose)\b/i.test(line)) return 'debug'
+  return null
+}
+
 export function LogsPanel() {
   const [logs, setLogs] = useState<{ name: string; path: string }[]>([])
   const [source, setSource] = useState('') // a host file path, or `kit:<sandbox>`
   const [text, setText] = useState('')
   const [follow, setFollow] = useState(true)
   const [query, setQuery] = useState('')
+  const [level, setLevel] = useState<Level>('all')
   const bodyRef = useRef<HTMLDivElement>(null)
 
   const sandboxes = useStore((s) => s.sandboxes)
@@ -70,17 +91,22 @@ export function LogsPanel() {
     return () => { alive = false; if (id) clearInterval(id) }
   }, [isKit, kitName, follow])
 
-  // Filter lines by the search query (case-insensitive substring).
+  // Filter lines by the search query (case-insensitive substring) and level.
   const q = query.trim().toLowerCase()
-  const shown = q
-    ? text.split('\n').filter((l) => l.toLowerCase().includes(q)).join('\n')
-    : text
-  const matchCount = q ? (shown ? shown.split('\n').length : 0) : 0
+  const filtering = !!q || level !== 'all'
+  const shownLines = filtering
+    ? text.split('\n').filter((l) =>
+        (!q || l.toLowerCase().includes(q)) &&
+        (level === 'all' || classifyLevel(l) === level))
+    : null
+  const shown = shownLines ? shownLines.join('\n') : text
+  const matchCount = shownLines ? shownLines.length : 0
 
-  // Auto-scroll to bottom while following (disabled when filtering).
+  // Auto-scroll to bottom while following (disabled when filtering — the
+  // filtered view is a subset, so jumping to its end would be misleading).
   useEffect(() => {
-    if (follow && !q && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
-  }, [shown, follow, q])
+    if (follow && !filtering && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+  }, [shown, follow, filtering])
 
   return (
     <div className="logs">
@@ -98,6 +124,9 @@ export function LogsPanel() {
             </optgroup>
           )}
         </select>
+        <select className="finput" style={{ width: 120, cursor: 'pointer' }} value={level} onChange={(e) => setLevel(e.target.value as Level)}>
+          {LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+        </select>
         <div className="logs-search">
           <Search size={13} className="logs-search-ic" />
           <input
@@ -106,7 +135,7 @@ export function LogsPanel() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') setQuery('') }}
           />
-          {q && <span className="logs-search-count">{matchCount}</span>}
+          {filtering && <span className="logs-search-count">{matchCount}</span>}
           {query && <button className="logs-search-x" onClick={() => setQuery('')} title="Clear"><X size={13} /></button>}
         </div>
         <label className="logs-follow">
@@ -123,7 +152,7 @@ export function LogsPanel() {
         {shown
           ? <pre className="logs-pre" style={{ color: fg }}>{shown}</pre>
           : <div className="files-empty" style={{ color: fg, opacity: 0.5 }}>
-              {q ? 'No matching lines' : 'Waiting for log output…'}
+              {filtering ? 'No matching lines' : 'Waiting for log output…'}
             </div>}
       </div>
     </div>

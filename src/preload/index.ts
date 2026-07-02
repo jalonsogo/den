@@ -128,6 +128,11 @@ const api = {
     ipcRenderer.on('minipit:open-project', handler)
     return () => ipcRenderer.removeListener('minipit:open-project', handler)
   },
+  onNewProject: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on('minipit:new-project', handler)
+    return () => ipcRenderer.removeListener('minipit:new-project', handler)
+  },
   onOpenModal: (cb: (modal: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, modal: string) => cb(modal)
     ipcRenderer.on('minipit:open-modal', handler)

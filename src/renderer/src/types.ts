@@ -29,7 +29,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'shell',          label: 'Shell' }
 ]
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
-export type PageType = 'home' | 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings'
+export type PageType = 'home' | 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings' | 'logs'
 export type TabType = 'terminal' | 'info'
 export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
 
@@ -286,6 +286,7 @@ declare global {
       onNavigate(cb: (page: string) => void): () => void
       onOpenSandbox(cb: (name: string) => void): () => void
       onOpenProject(cb: (workspace: string) => void): () => void
+      onNewProject(cb: () => void): () => void
       onOpenModal(cb: (modal: string) => void): () => void
       onSetTab(cb: (tab: string) => void): () => void
       onStopActive(cb: () => void): () => void
