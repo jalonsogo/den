@@ -12,9 +12,17 @@
   "build": {
     "appId": "studio.den.app",
     "productName": "den",
-    "publish": [{ "provider": "github" }],
-    "mac": { "icon": "resources/icon/dock.png" },
-    "win": { "icon": "resources/icon/dock.png" }
+    "publish": [
+      {
+        "provider": "github"
+      }
+    ],
+    "mac": {
+      "icon": "resources/icon/dock.png"
+    },
+    "win": {
+      "icon": "resources/icon/dock.png"
+    }
   },
   "scripts": {
     "dev": "electron-vite dev",
@@ -55,17 +63,17 @@
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^1.0.1",
-    "@electron/rebuild": "^3.6.0",
+    "@electron/rebuild": "4.1.0",
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8",
-    "electron-vite": "^2.3.0",
+    "electron": "43.0.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
-    "vite": "^5.0.0"
+    "vite": "8.1.3"
   }
 }
