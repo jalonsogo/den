@@ -71,7 +71,11 @@ function ProjectHover({
             <span className="sb-proj-pop-name">{name}</span>
             <span className="sb-proj-pop-count">{project.list.length}</span>
           </div>
-          <div className="sb-proj-pop-path">{project.workspace}</div>
+          <div
+            className="sb-proj-pop-path"
+            title="Double-click to reveal in Finder"
+            onDoubleClick={(e) => { e.stopPropagation(); window.minipit?.openInFinder(project.workspace) }}
+          >{project.workspace}</div>
           {showGit && git?.isRepo && (
             <div className="sb-proj-pop-git">
               <GitBranch size={12} />

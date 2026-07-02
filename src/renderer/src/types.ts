@@ -229,6 +229,8 @@ declare global {
       openPath(path: string): Promise<string>
       openFileWindow(name: string, path: string, fileName: string): Promise<void>
       deletePath(name: string, path: string): Promise<void>
+      copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
+      downloadFrom(name: string, path: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>
       signOut(): Promise<void>
       generatePalette(hex: string, size?: number): Promise<string[]>
       listTemplates(): Promise<Template[]>

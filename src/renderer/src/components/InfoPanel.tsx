@@ -148,7 +148,11 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       <AccordionSection id="workspaces" title="Workspaces" defaultOpen>
         <div className="info-row">
           <span className="ir-label">Primary (read-write)</span>
-          <span className="ir-val">{sandbox.workspace}</span>
+          <span
+            className="ir-val"
+            title="Double-click to reveal in Finder"
+            onDoubleClick={() => window.minipit?.openInFinder(sandbox.workspace)}
+          >{sandbox.workspace}</span>
         </div>
         {sandbox.additionalWorkspaces?.map((ws, i) => (
           <div className="info-row" key={i}>
