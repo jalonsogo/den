@@ -2168,10 +2168,10 @@ html, body, #root {
 
 .kit-dd { position: relative; }
 .kit-dd-trigger {
-  display: flex; align-items: center; gap: 7px; width: 100%;
-  font-size: 12.5px; color: var(--t2); cursor: pointer; text-align: left;
-  background: var(--bg); border: 1px dashed var(--border); border-radius: 7px;
-  padding: 8px 10px;
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  font-size: 13px; color: var(--t2); cursor: pointer; text-align: left;
+  background: var(--bg); border: 1px dashed var(--border); border-radius: var(--radius);
+  padding: 7px 10px;
 }
 .kit-dd-trigger:hover { border-color: var(--border-hi); color: var(--t1); }
 .kit-dd-menu {
@@ -3029,11 +3029,11 @@ html, body, #root {
 .agent-dd { position: relative; }
 .agent-dd-btn {
   width: 100%;
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 12px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg); color: var(--t1); cursor: pointer;
-  font-size: 13.5px; font-weight: 500; transition: border-color 0.12s;
+  font-size: 13px; font-weight: 500; transition: border-color 0.12s;
 }
 .agent-dd-btn:hover { border-color: var(--border-hi); }
 .agent-dd-label { font-weight: 500; }
