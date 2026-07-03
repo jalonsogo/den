@@ -14,6 +14,8 @@ interface ContextMenuState {
   sandboxId: string | null
   // When set, the menu targets a project (workspace path) instead of a sandbox.
   workspace?: string | null
+  // When set, the menu targets a named group.
+  groupId?: string | null
 }
 
 interface AppState {

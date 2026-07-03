@@ -60,6 +60,12 @@ export function ContextMenu() {
   const sandboxIsolation = useStore((s) => s.sandboxIsolation)
   const gitInfoMap = useStore((s) => s.gitInfo)
   const loadGitInfo = useStore((s) => s.loadGitInfo)
+  const groups = useStore((s) => s.groups)
+  const sandboxGroups = useStore((s) => s.sandboxGroups)
+  const setSandboxGroup = useStore((s) => s.setSandboxGroup)
+  const createGroup = useStore((s) => s.createGroup)
+  const renameGroup = useStore((s) => s.renameGroup)
+  const deleteGroup = useStore((s) => s.deleteGroup)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
 
@@ -86,6 +92,47 @@ export function ContextMenu() {
   }, [contextMenu.x, contextMenu.y, contextMenu.visible])
 
   if (!contextMenu.visible) return null
+
+  // ── Group context menu (right-click a group header) ───────────────────────
+  const groupId = contextMenu.groupId
+  if (groupId) {
+    const group = groups.find((g) => g.id === groupId)
+    if (!group) { setContextMenu({ visible: false }); return null }
+    const close = () => setContextMenu({ visible: false })
+    const members = sandboxes.filter((s) => sandboxGroups[s.name] === groupId)
+    const running = members.filter((s) => s.status === 'running')
+    const stopped = members.filter((s) => s.status === 'stopped')
+    const rename = () => {
+      close()
+      openPrompt({ title: 'Rename group', label: 'Group name', defaultValue: group.name, confirmText: 'Rename', onSubmit: (v) => renameGroup(groupId, v) })
+    }
+    const startAll = async () => { close(); for (const s of stopped) { try { await window.minipit?.runSandbox(s.name); updateSandbox(s.id, { status: 'running' }) } catch (e) { console.error(e) } } }
+    const stopAll = async () => {
+      close()
+      for (const s of running) {
+        updateSandbox(s.id, { status: 'stopping' })
+        try { await window.minipit?.stopSandbox(s.name); updateSandbox(s.id, { status: 'stopped', uptimeSeconds: undefined }) }
+        catch { updateSandbox(s.id, { status: 'running' }) }
+      }
+    }
+    const del = () => {
+      close()
+      if (members.length === 0) { if (confirm(`Delete group "${group.name}"?`)) deleteGroup(groupId, false); return }
+      if (!confirm(`Delete group "${group.name}"?`)) return
+      const alsoDelete = confirm(`Also delete the ${members.length} sandbox${members.length > 1 ? 'es' : ''} in this group?\n\nOK = delete them too · Cancel = keep them (just ungroup).`)
+      deleteGroup(groupId, alsoDelete)
+    }
+    return (
+      <div ref={ref} className="ctx-menu" style={{ top: pos.top, left: pos.left }} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ctx-item" onClick={rename}>Rename group…</div>
+        {(stopped.length > 0 || running.length > 0) && <div className="ctx-sep" />}
+        {stopped.length > 0 && <div className="ctx-item" onClick={startAll}>Start {stopped.length} sandbox{stopped.length > 1 ? 'es' : ''}</div>}
+        {running.length > 0 && <div className="ctx-item" onClick={stopAll}>Stop {running.length} sandbox{running.length > 1 ? 'es' : ''}</div>}
+        <div className="ctx-sep" />
+        <div className="ctx-item destructive" onClick={del}>Delete group…</div>
+      </div>
+    )
+  }
 
   // ── Project context menu (right-click a project row) ──────────────────────
   const projectWs = contextMenu.workspace
@@ -340,6 +387,30 @@ export function ContextMenu() {
       >
         Customize…
       </div>
+      <SubMenu label="Move to group">
+        {groups.map((g) => (
+          <div
+            key={g.id}
+            className="ctx-sub-item"
+            onClick={() => { setContextMenu({ visible: false }); setSandboxGroup(sandbox.name, sandboxGroups[sandbox.name] === g.id ? null : g.id) }}
+          >
+            {sandboxGroups[sandbox.name] === g.id ? '✓ ' : ''}{g.name}
+          </div>
+        ))}
+        {sandboxGroups[sandbox.name] && (
+          <div className="ctx-sub-item" onClick={() => { setContextMenu({ visible: false }); setSandboxGroup(sandbox.name, null) }}>Remove from group</div>
+        )}
+        {groups.length > 0 && <div className="ctx-sub-sep" />}
+        <div
+          className="ctx-sub-item"
+          onClick={() => {
+            setContextMenu({ visible: false })
+            openPrompt({ title: 'New group', label: 'Group name', placeholder: 'e.g. Feature work', confirmText: 'Create', onSubmit: (v) => { if (v.trim()) setSandboxGroup(sandbox.name, createGroup(v)) } })
+          }}
+        >
+          New group…
+        </div>
+      </SubMenu>
       {sandboxIsolation[sandbox.name] === true && (
         <SubMenu label="Feature changes">
           <div className="ctx-sub-label">Review changes in the Files → Changes tab</div>
