@@ -91,7 +91,9 @@ const api = {
   projectConfigSync: (local: unknown)   => ipcRenderer.invoke('minipit:project-config-sync', local),
   projectConfigSet: (field: string, workspace: string, value: string | null) => ipcRenderer.invoke('minipit:project-config-set', field, workspace, value),
   sandboxIsolation: ()                  => ipcRenderer.invoke('minipit:sandbox-isolation'),
-  sandboxMergeBack: (name: string, repoDir: string) => ipcRenderer.invoke('minipit:sandbox-merge-back', name, repoDir),
+  sandboxFetchWork: (name: string, repoDir: string) => ipcRenderer.invoke('minipit:sandbox-fetch-work', name, repoDir),
+  sandboxOpenPr: (repoDir: string, branch: string) => ipcRenderer.invoke('minipit:sandbox-open-pr', repoDir, branch),
+  sandboxMergeBranch: (repoDir: string, branch: string) => ipcRenderer.invoke('minipit:sandbox-merge-branch', repoDir, branch),
 
   onSandboxesUpdated: (cb: (sandboxes: unknown[]) => void) => {
     const handler = (_: Electron.IpcRendererEvent, s: unknown[]) => cb(s)

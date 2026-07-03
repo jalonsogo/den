@@ -315,12 +315,30 @@ export function ContextMenu() {
           className="ctx-item"
           onClick={async () => {
             setContextMenu({ visible: false })
-            const res = await window.minipit?.sandboxMergeBack(sandbox.name, sandbox.workspace).catch(() => null)
-            if (res?.ok) alert(`Merged the sandbox's commits${res.branch ? ` onto ${res.branch}` : ''}.\n${res.output ?? ''}`)
-            else alert(res?.error || 'Merge failed.')
+            // Review-first: fetch the agent's work into a local branch, never
+            // auto-merge onto the working branch. Then offer PR (preferred when
+            // there's a remote) or an explicit merge.
+            const ws = sandbox.workspace
+            const res = await window.minipit?.sandboxFetchWork(sandbox.name, ws).catch(() => null)
+            if (!res?.ok || !res.branch) { alert(res?.error || 'Could not fetch the sandbox\'s work.'); return }
+            const branch = res.branch
+            if (res.hasRemote) {
+              if (confirm(`Fetched the agent's work to branch "${branch}".\n\nOpen a pull request? (Cancel keeps the branch for you to review/merge.)`)) {
+                const pr = await window.minipit?.sandboxOpenPr(ws, branch).catch(() => null)
+                if (pr?.ok && pr.url) window.minipit?.openPath(pr.url)
+                else if (pr?.ok) alert(`Pushed "${branch}". Open a PR from your git host.`)
+                else alert(pr?.error || 'Push/PR failed.')
+              }
+            } else {
+              if (confirm(`Fetched the agent's work to branch "${branch}".\n\nNo git remote — merge it into your current branch now? (Cancel keeps the branch.)`)) {
+                const m = await window.minipit?.sandboxMergeBranch(ws, branch).catch(() => null)
+                if (m?.ok) alert(`Merged "${branch}"${m.base ? ` into ${m.base}` : ''}.`)
+                else alert(m?.error || 'Merge failed.')
+              }
+            }
           }}
         >
-          Merge work to host…
+          Bring work to host…
         </div>
       )}
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>

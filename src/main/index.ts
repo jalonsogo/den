@@ -1709,41 +1709,77 @@ function setupIPC(): void {
     })
   }))
 
-  // Initialize a Git repo in a host folder and commit its current contents, so a
-  // `--clone` sandbox has a repo (with the folder's files) to clone.
-  // Merge a clone-mode sandbox's commits back into the host repo. sbx exposes
-  // the sandbox's clone as a `sandbox-<name>` git remote (git daemon, live only
-  // while the sandbox runs). We fetch it and merge the branch matching the
-  // host's current branch, aborting cleanly on conflict so the tree is never
-  // left mid-merge.
-  ipcMain.handle('minipit:sandbox-merge-back', async (_, name: string, repoDir: string) => {
+  // ── Clone-mode "feature" fetch-back ───────────────────────────────────────
+  // A --clone sandbox exposes its private clone as a `sandbox-<name>` git remote
+  // on the host (git daemon, live only while the sandbox runs). Agent output is
+  // untrusted, so we never auto-merge onto the working branch: we fetch the work
+  // into a local review branch, then the user explicitly opens a PR or merges.
+  const gitIn = (repoDir: string) => (args: string[]) => new Promise<{ code: number; out: string; err: string }>((resolve) => {
+    execFile('git', args, { cwd: repoDir, timeout: 120000, env: guiEnv() },
+      (e, so, se) => resolve({ code: e ? ((e as { code?: number }).code ?? 1) : 0, out: (so || '').trim(), err: (se || '').trim() }))
+  })
+
+  // Fetch the sandbox's work into a local review branch `sandbox/<name>`.
+  ipcMain.handle('minipit:sandbox-fetch-work', async (_, name: string, repoDir: string) => {
     const remote = `sandbox-${name}`
-    const runGit = (args: string[]) => new Promise<{ code: number; out: string; err: string }>((resolve) => {
-      execFile('git', args, { cwd: repoDir, timeout: 60000, env: guiEnv() },
-        (err, stdout, stderr) => resolve({ code: err ? ((err as { code?: number }).code ?? 1) : 0, out: (stdout || '').trim(), err: (stderr || '').trim() }))
-    })
+    const git = gitIn(repoDir)
     try {
-      const remotes = await runGit(['remote'])
+      const remotes = await git(['remote'])
       if (!remotes.out.split('\n').includes(remote)) {
-        return { ok: false, error: `No "${remote}" remote on the host repo. Clone-mode fetch-back needs the sandbox to be running (its git daemon runs only while active).` }
+        return { ok: false, error: `No "${remote}" remote — clone-mode fetch-back needs the sandbox running (its git daemon runs only while active).` }
       }
-      const fetched = await runGit(['fetch', remote])
-      if (fetched.code !== 0) {
-        return { ok: false, error: fetched.err || `git fetch ${remote} failed — is the sandbox running?` }
-      }
-      const branch = (await runGit(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
-      const merged = await runGit(['merge', '--no-edit', `${remote}/${branch}`])
-      if (merged.code !== 0) {
-        await runGit(['merge', '--abort']) // best-effort; leave the tree clean
-        return { ok: false, conflict: true, branch, remote,
-          error: `Merge of ${remote}/${branch} hit conflicts and was aborted. The commits are fetched — merge manually:\n  git merge ${remote}/${branch}` }
-      }
-      return { ok: true, branch, output: merged.out || `Merged ${remote}/${branch}.` }
+      const fetched = await git(['fetch', remote])
+      if (fetched.code !== 0) return { ok: false, error: fetched.err || `git fetch ${remote} failed — is the sandbox running?` }
+      const srcBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+      const review = `sandbox/${name}`
+      const made = await git(['branch', '-f', review, `${remote}/${srcBranch}`])
+      if (made.code !== 0) return { ok: false, error: made.err || `Couldn't create review branch ${review}.` }
+      const hasRemote = (await git(['remote', 'get-url', 'origin'])).code === 0
+      return { ok: true, branch: review, hasRemote }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
+  // Push the review branch and open a PR (via gh, falling back to a compare URL).
+  ipcMain.handle('minipit:sandbox-open-pr', async (_, repoDir: string, branch: string) => {
+    const git = gitIn(repoDir)
+    try {
+      const pushed = await git(['push', '-u', 'origin', branch])
+      if (pushed.code !== 0) return { ok: false, error: pushed.err || 'git push failed.' }
+      const gh = await new Promise<{ code: number; out: string }>((resolve) => {
+        execFile('gh', ['pr', 'create', '--head', branch, '--fill'], { cwd: repoDir, timeout: 60000, env: guiEnv() },
+          (e, so) => resolve({ code: e ? 1 : 0, out: (so || '').trim() }))
+      })
+      if (gh.code === 0) return { ok: true, url: (gh.out.match(/https?:\/\/\S+/) || [])[0] }
+      // gh unavailable/failed — hand back a compare URL derived from origin.
+      const originUrl = (await git(['remote', 'get-url', 'origin'])).out
+      const m = originUrl.match(/^(?:git@|https?:\/\/)([^/:]+)[/:](.+?)(?:\.git)?$/)
+      const url = m ? `https://${m[1]}/${m[2]}/compare/${encodeURIComponent(branch)}?expand=1` : undefined
+      return { ok: true, url, pushedOnly: true }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Merge a review branch into the current branch, aborting cleanly on conflict.
+  ipcMain.handle('minipit:sandbox-merge-branch', async (_, repoDir: string, branch: string) => {
+    const git = gitIn(repoDir)
+    try {
+      const base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+      const merged = await git(['merge', '--no-edit', branch])
+      if (merged.code !== 0) {
+        await git(['merge', '--abort'])
+        return { ok: false, conflict: true, error: `Merge of ${branch} into ${base} hit conflicts and was aborted. Resolve manually:\n  git merge ${branch}` }
+      }
+      return { ok: true, base, output: merged.out || `Merged ${branch} into ${base}.` }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Initialize a Git repo in a host folder and commit its current contents, so a
+  // `--clone` sandbox has a repo (with the folder's files) to clone.
   ipcMain.handle('minipit:git-init', async (_, dir: string) => {
     const runGit = (args: string[]) => new Promise<string>((resolve, reject) => {
       execFile('git', args, { cwd: dir, timeout: 60000, env: guiEnv() },
