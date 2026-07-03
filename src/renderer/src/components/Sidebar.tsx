@@ -59,6 +59,8 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   return (
     <div
       className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}${justCreated ? ' just-created' : ''}`}
+      draggable={!collapsed && !isDeleting && !isCreating}
+      onDragStart={(e) => { e.dataTransfer.setData('text/den-sandbox', sandbox.name); e.dataTransfer.effectAllowed = 'move' }}
       onClick={() => !isDeleting && !isCreating && setActiveSandboxId(sandbox.id)}
       onContextMenu={(e) => openMenu(e, 'cursor')}
       onMouseEnter={showHover}
@@ -127,8 +129,10 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage,
     setNewSandboxWorkspace, sidebarCollapsed,
-    toggleSidebar, setContextMenu, groups, sandboxGroups
+    toggleSidebar, setContextMenu, groups, sandboxGroups, setSandboxGroup
   } = useStore()
+  // Which group section a dragged sandbox is hovering (for the drop highlight).
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null)
   const openGroupMenu = (e: React.MouseEvent, groupId: string) => {
     e.preventDefault(); e.stopPropagation()
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace: null, groupId })
@@ -512,7 +516,18 @@ export function Sidebar() {
             !collapsed && <div className="sb-empty">{sandboxes.length === 0 ? 'No sandboxes' : 'No matches'}</div>
           ) : grouped && !collapsed ? (
             grouped.map((sec) => (
-              <div className="sb-group" key={sec.key}>
+              <div
+                className={`sb-group${dragOverKey === sec.key ? ' drag-over' : ''}`}
+                key={sec.key}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverKey !== sec.key) setDragOverKey(sec.key) }}
+                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverKey((k) => (k === sec.key ? null : k)) }}
+                onDrop={(e) => {
+                  e.preventDefault(); setDragOverKey(null)
+                  const n = e.dataTransfer.getData('text/den-sandbox')
+                  // Drop on a named group assigns; drop on the ungrouped area removes.
+                  if (n) setSandboxGroup(n, sec.group ? sec.group.id : null)
+                }}
+              >
                 {/* Ungrouped section renders flat (no header). Named groups get a
                     header with an actions menu; agent sections a plain header. */}
                 {sec.key !== '__ungrouped' && (

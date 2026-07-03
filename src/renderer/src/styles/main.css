@@ -749,6 +749,11 @@ html, body, #root {
   border: none; background: none; color: var(--sb-muted); cursor: pointer;
   border-radius: 6px; opacity: 0; transition: opacity 0.1s, background 0.1s, color 0.1s;
 }
+.sb-group.drag-over {
+  background: color-mix(in srgb, var(--accent, var(--primary)) 9%, transparent);
+  outline: 1px dashed color-mix(in srgb, var(--accent, var(--primary)) 55%, transparent);
+  border-radius: 8px;
+}
 .sb-group-hd:hover .sb-group-add { opacity: 0.7; }
 .sb-group-add:hover { opacity: 1; background: var(--sb-active); color: var(--sb-fg); }
 /* Shared-working-tree warning on a project header (sidebar + dashboard). */
