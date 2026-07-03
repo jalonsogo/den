@@ -12,7 +12,13 @@ import { formatUptime } from '../lib/utils'
 import { AGENTS, type Sandbox, type PageType, type AgentType, type Group } from '../types'
 
 
-function SandboxItem({ sandbox, active, collapsed, onReorder }: { sandbox: Sandbox; active: boolean; collapsed: boolean; onReorder?: (dragName: string, beforeName: string) => void }) {
+// Tracks the sandbox currently being dragged (name + its group key). dragover
+// handlers can't read dataTransfer values, so this lets them tell a within-group
+// reorder from a move to another group without requiring a Shift modifier.
+let dragSbx: { name: string; groupKey: string } | null = null
+
+function SandboxItem({ sandbox, active, collapsed, onReorder, nextName, groupKey }: { sandbox: Sandbox; active: boolean; collapsed: boolean; onReorder?: (dragName: string, beforeName: string | null) => void; nextName?: string | null; groupKey?: string }) {
+  const gk = groupKey ?? '__flat'
   const { setActiveSandboxId, setContextMenu } = useStore()
   const isRunning = sandbox.status === 'running'
   const isDeleting = sandbox.status === 'deleting'
@@ -28,6 +34,8 @@ function SandboxItem({ sandbox, active, collapsed, onReorder }: { sandbox: Sandb
   // otherwise hidden when the sidebar is a thin icon rail.
   const [hover, setHover] = useState(false)
   const [hoverPos, setHoverPos] = useState({ top: 0, left: 0 })
+  // Same-group reorder shows an insertion line above/below this row.
+  const [dropPos, setDropPos] = useState<'before' | 'after' | null>(null)
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>()
   const showHover = (e: React.MouseEvent) => {
     if (!collapsed) return
@@ -58,17 +66,29 @@ function SandboxItem({ sandbox, active, collapsed, onReorder }: { sandbox: Sandb
 
   return (
     <div
-      className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}${justCreated ? ' just-created' : ''}`}
+      className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}${justCreated ? ' just-created' : ''}${dropPos ? ` drop-${dropPos}` : ''}`}
       draggable={!collapsed && !isDeleting && !isCreating}
-      onDragStart={(e) => { e.dataTransfer.setData('text/den-sandbox', sandbox.name); e.dataTransfer.effectAllowed = 'move' }}
-      // Shift+drag onto a row = reorder (place before it); plain drag falls
-      // through to the group section = move to that group.
-      onDragOver={onReorder ? (e) => { if (e.shiftKey) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move' } } : undefined}
+      onDragStart={(e) => { dragSbx = { name: sandbox.name, groupKey: gk }; e.dataTransfer.setData('text/den-sandbox', sandbox.name); e.dataTransfer.effectAllowed = 'move' }}
+      onDragEnd={() => { dragSbx = null; setDropPos(null) }}
+      // Drag within the same group = reorder (line marks the gap above/below);
+      // drag from another group falls through to the section = move here.
+      onDragOver={onReorder ? (e) => {
+        if (!dragSbx || dragSbx.name === sandbox.name || dragSbx.groupKey !== gk) { if (dropPos) setDropPos(null); return }
+        e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'
+        const r = e.currentTarget.getBoundingClientRect()
+        const pos = e.clientY > r.top + r.height / 2 ? 'after' : 'before'
+        if (dropPos !== pos) setDropPos(pos)
+      } : undefined}
+      onDragLeave={onReorder ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropPos(null) } : undefined}
       onDrop={onReorder ? (e) => {
-        if (!e.shiftKey) return
+        if (!dragSbx || dragSbx.groupKey !== gk) return
         e.preventDefault(); e.stopPropagation()
+        const r = e.currentTarget.getBoundingClientRect()
+        const after = e.clientY > r.top + r.height / 2
+        setDropPos(null)
         const n = e.dataTransfer.getData('text/den-sandbox')
-        if (n && n !== sandbox.name) onReorder(n, sandbox.name)
+        const before = after ? (nextName ?? null) : sandbox.name
+        if (n && n !== sandbox.name && n !== before) onReorder(n, before)
       } : undefined}
       onClick={() => !isDeleting && !isCreating && setActiveSandboxId(sandbox.id)}
       onContextMenu={(e) => openMenu(e, 'cursor')}
@@ -147,6 +167,9 @@ export function Sidebar() {
   })
   // Which group section a dragged sandbox is hovering (for the drop highlight).
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+  // When reordering a group, show an insertion line in the gap above/below the
+  // hovered group rather than illuminating the whole group section.
+  const [groupDrop, setGroupDrop] = useState<{ id: string; after: boolean } | null>(null)
   const openGroupMenu = (e: React.MouseEvent, groupId: string) => {
     e.preventDefault(); e.stopPropagation()
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace: null, groupId })
@@ -524,15 +547,48 @@ export function Sidebar() {
           ) : grouped && !collapsed ? (
             grouped.map((sec) => (
               <div
-                className={`sb-group${dragOverKey === sec.key ? ' drag-over' : ''}`}
+                className={`sb-group${dragOverKey === sec.key ? ' drag-over' : ''}${groupDrop?.id === sec.key ? (groupDrop.after ? ' drop-after' : ' drop-before') : ''}`}
                 key={sec.key}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverKey !== sec.key) setDragOverKey(sec.key) }}
-                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverKey((k) => (k === sec.key ? null : k)) }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  if (e.dataTransfer.types.includes('text/den-group')) {
+                    // Group reorder: mark an insertion gap above/below, don't
+                    // illuminate the whole group section.
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const after = e.clientY > rect.top + rect.height / 2
+                    if (groupDrop?.id !== sec.key || groupDrop.after !== after) setGroupDrop({ id: sec.key, after })
+                    if (dragOverKey) setDragOverKey(null)
+                  } else if (dragSbx && dragSbx.groupKey === sec.key) {
+                    // Reorder within this group — the rows draw the insertion
+                    // line; don't illuminate the section.
+                    if (dragOverKey) setDragOverKey(null)
+                  } else if (dragOverKey !== sec.key) {
+                    // Sandbox from another group: highlight this as a move target.
+                    setDragOverKey(sec.key)
+                  }
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                  setDragOverKey((k) => (k === sec.key ? null : k))
+                  setGroupDrop((g) => (g?.id === sec.key ? null : g))
+                }}
                 onDrop={(e) => {
-                  e.preventDefault(); setDragOverKey(null)
+                  e.preventDefault(); setDragOverKey(null); setGroupDrop(null)
+                  const gid = e.dataTransfer.getData('text/den-group')
+                  if (gid) {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const after = e.clientY > rect.top + rect.height / 2
+                    const named = grouped!.filter((g) => g.group).map((g) => g.group!.id)
+                    // Dropping on the ungrouped area = move to the end.
+                    const beforeId = !sec.group ? null : after ? (named[named.indexOf(sec.group.id) + 1] ?? null) : sec.group.id
+                    if (gid !== beforeId) reorderGroups(gid, beforeId)
+                    return
+                  }
                   const n = e.dataTransfer.getData('text/den-sandbox')
-                  // Drop on a named group assigns; drop on the ungrouped area removes.
-                  if (n) setSandboxGroup(n, sec.group ? sec.group.id : null)
+                  // Drop from another group assigns here (ungrouped area removes);
+                  // same-group drops are reorders handled by the rows.
+                  if (n && dragSbx?.groupKey !== sec.key) setSandboxGroup(n, sec.group ? sec.group.id : null)
                 }}
               >
                 {/* Named groups get a header + actions menu; agent sections a
@@ -548,11 +604,6 @@ export function Sidebar() {
                       draggable={!!sec.group}
                       onContextMenu={sec.group ? (e) => openGroupMenu(e, sec.group!.id) : undefined}
                       onDragStart={sec.group ? (e) => { e.dataTransfer.setData('text/den-group', sec.group!.id); e.dataTransfer.effectAllowed = 'move' } : undefined}
-                      onDragOver={sec.group ? (e) => { if (e.dataTransfer.types.includes('text/den-group')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move' } } : undefined}
-                      onDrop={sec.group ? (e) => {
-                        const id = e.dataTransfer.getData('text/den-group')
-                        if (id) { e.preventDefault(); e.stopPropagation(); if (id !== sec.group!.id) reorderGroups(id, sec.group!.id) }
-                      } : undefined}
                     >
                       <span className="sb-group-name">{sec.group ? sec.group.name : sec.key}</span>
                       {sec.group && (
@@ -562,16 +613,16 @@ export function Sidebar() {
                       )}
                     </div>
                   )}
-                {sec.list.map((s) => (
-                  <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} onReorder={(d, b) => { reorderSandbox(d, b); setSort('manual') }} />
+                {sec.list.map((s, i) => (
+                  <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} groupKey={sec.key} nextName={sec.list[i + 1]?.name ?? null} onReorder={(d, b) => { reorderSandbox(d, b); setSort('manual') }} />
                 ))}
               </div>
             ))
           ) : (
             // Collapsed rail can't show group headers, but keep the grouped
             // ordering so the sequence matches the expanded view.
-            (grouped ? grouped.flatMap((sec) => sec.list) : sorted).map((s) => (
-              <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} onReorder={collapsed ? undefined : (d, b) => { reorderSandbox(d, b); setSort('manual') }} />
+            (grouped ? grouped.flatMap((sec) => sec.list) : sorted).map((s, i, arr) => (
+              <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} nextName={arr[i + 1]?.name ?? null} onReorder={collapsed ? undefined : (d, b) => { reorderSandbox(d, b); setSort('manual') }} />
             ))
           )}
         </div>
