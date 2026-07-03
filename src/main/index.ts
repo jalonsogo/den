@@ -2119,14 +2119,22 @@ function setupIPC(): void {
   // which is scoped to the dev-server origin and lost when the port shifts).
   // `sandboxIcons` (keyed by sandbox name) rides along on the same durable store
   // as the project appearance maps.
-  type ProjectConfig = { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }
-  const CFG_KEYS = { colors: 'projectColors', icons: 'projectIcons', names: 'projectNames', sandboxIcons: 'sandboxIcons' } as const
+  // sandboxColors (name → hex) and sandboxGroups (name → group id) are per-sandbox
+  // maps that ride the same durable store as the (legacy) project appearance maps.
+  type ProjectConfig = { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }
+  const CFG_KEYS = { colors: 'projectColors', icons: 'projectIcons', names: 'projectNames', sandboxIcons: 'sandboxIcons', sandboxColors: 'sandboxColors', sandboxGroups: 'sandboxGroups' } as const
   const readProjectConfig = (): ProjectConfig => ({
     colors: (store.get(CFG_KEYS.colors) as Record<string, string>) ?? {},
     icons: (store.get(CFG_KEYS.icons) as Record<string, string>) ?? {},
     names: (store.get(CFG_KEYS.names) as Record<string, string>) ?? {},
-    sandboxIcons: (store.get(CFG_KEYS.sandboxIcons) as Record<string, string>) ?? {}
+    sandboxIcons: (store.get(CFG_KEYS.sandboxIcons) as Record<string, string>) ?? {},
+    sandboxColors: (store.get(CFG_KEYS.sandboxColors) as Record<string, string>) ?? {},
+    sandboxGroups: (store.get(CFG_KEYS.sandboxGroups) as Record<string, string>) ?? {}
   })
+
+  // Named sandbox groups (id + name only). Stored as a JSON array.
+  ipcMain.handle('minipit:groups-get', () => (store.get('groups') as { id: string; name: string }[]) ?? [])
+  ipcMain.handle('minipit:groups-set', (_, groups: { id: string; name: string }[]) => { store.set('groups', groups ?? []) })
 
   // One-time-per-origin sync from the renderer: merge any localStorage-cached
   // config into the store (the store wins on conflict — it's the source of

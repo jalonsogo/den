@@ -33,6 +33,13 @@ export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mix
 export type TabType = 'terminal' | 'info'
 export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
 
+// A named collection of sandboxes. Groups carry only a name (no folder, colour,
+// or icon); a sandbox belongs to at most one group.
+export interface Group {
+  id: string
+  name: string
+}
+
 export interface Port {
   host: number
   container: number
@@ -284,8 +291,10 @@ declare global {
       addProject(): Promise<string | null>
       removeProject(dir: string, deleteFolder?: boolean): Promise<{ ok: boolean; error?: string }>
       defaultWorkspace(): Promise<string>
-      projectConfigSync(local: { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }>
-      projectConfigSet(field: 'colors' | 'icons' | 'names' | 'sandboxIcons', workspace: string, value: string | null): Promise<void>
+      projectConfigSync(local: Record<string, Record<string, string>>): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }>
+      projectConfigSet(field: 'colors' | 'icons' | 'names' | 'sandboxIcons' | 'sandboxColors' | 'sandboxGroups', workspace: string, value: string | null): Promise<void>
+      groupsGet(): Promise<{ id: string; name: string }[]>
+      groupsSet(groups: { id: string; name: string }[]): Promise<void>
       sandboxIsolation(): Promise<Record<string, boolean>>
       sandboxFetchWork(name: string, repoDir: string): Promise<{ ok: boolean; branch?: string; hasRemote?: boolean; error?: string }>
       sandboxOpenPr(repoDir: string, branch: string): Promise<{ ok: boolean; url?: string; pushedOnly?: boolean; error?: string }>

@@ -32,6 +32,8 @@ export function App() {
     syncProjectConfig()
     // Per-sandbox working-tree isolation (for the shared-folder warning).
     loadSandboxIsolation()
+    // Named sandbox groups.
+    useStore.getState().loadGroups()
 
     // Live updates from main process
     const unsub1 = window.minipit?.onSandboxesUpdated((s) => {

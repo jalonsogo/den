@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { applyAccent, ensureRamp, savedAccents, writeSavedAccents, type SavedAccent } from './lib/accent'
-import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template } from './types'
+import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template, Group } from './types'
 
 type ThemePref = 'light' | 'dark' | 'system'
 const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -56,6 +56,11 @@ interface AppState {
   projectNames: Record<string, string>
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
+  // Per-sandbox custom colour (by name); absent → the default neutral avatar.
+  sandboxColors: Record<string, string>
+  // Named sandbox groups + membership (sandbox name → group id; one group max).
+  groups: Group[]
+  sandboxGroups: Record<string, string>
   // Per-sandbox working-tree isolation (by name): true = --clone (own tree),
   // false = direct mount of the host folder. Used to warn about shared folders.
   sandboxIsolation: Record<string, boolean>
@@ -111,9 +116,15 @@ interface AppState {
   setProjectIcon:     (workspace: string, icon: string | null) => void
   setProjectName:     (workspace: string, name: string | null) => void
   setSandboxIcon:     (name: string, iconKey: string | null) => void
+  setSandboxColor:    (name: string, hex: string | null) => void
   setCustomizeSandbox:(name: string | null) => void
   syncProjectConfig:  () => void
   loadSandboxIsolation: () => void
+  loadGroups:         () => void
+  createGroup:        (name: string) => string
+  renameGroup:        (id: string, name: string) => void
+  deleteGroup:        (id: string, deleteSandboxes: boolean) => void
+  setSandboxGroup:    (name: string, groupId: string | null) => void
   loadGitInfo:        (workspace: string, force?: boolean) => void
   refreshSandboxChanges: (name: string, workspace: string) => void
   setDisplay:         (key: 'agentBadge' | 'sandboxSub' | 'projectCounts' | 'gitBranch' | 'changeBadge', value: boolean) => void
@@ -176,6 +187,13 @@ export const useStore = create<AppState>((set) => ({
   })(),
   sandboxIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
+  })(),
+  sandboxColors: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:sandboxColors') ?? '{}') ?? {} } catch { return {} }
+  })(),
+  groups: [],
+  sandboxGroups: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:sandboxGroups') ?? '{}') ?? {} } catch { return {} }
   })(),
   sandboxIsolation: {},
   projectNames: (() => {
@@ -311,15 +329,16 @@ export const useStore = create<AppState>((set) => ({
       colors: readLS('minipit:projectColors'),
       icons: readLS('minipit:projectIcons'),
       names: readLS('minipit:projectNames'),
-      sandboxIcons: readLS('minipit:sandboxIcons')
+      sandboxIcons: readLS('minipit:sandboxIcons'),
+      sandboxColors: readLS('minipit:sandboxColors'),
+      sandboxGroups: readLS('minipit:sandboxGroups')
     }
     window.minipit?.projectConfigSync(local).then((cfg) => {
       if (!cfg) return
-      localStorage.setItem('minipit:projectColors', JSON.stringify(cfg.colors))
-      localStorage.setItem('minipit:projectIcons', JSON.stringify(cfg.icons))
-      localStorage.setItem('minipit:projectNames', JSON.stringify(cfg.names))
       localStorage.setItem('minipit:sandboxIcons', JSON.stringify(cfg.sandboxIcons))
-      set({ projectColors: cfg.colors, projectIcons: cfg.icons, projectNames: cfg.names, sandboxIcons: cfg.sandboxIcons })
+      localStorage.setItem('minipit:sandboxColors', JSON.stringify(cfg.sandboxColors))
+      localStorage.setItem('minipit:sandboxGroups', JSON.stringify(cfg.sandboxGroups))
+      set({ sandboxIcons: cfg.sandboxIcons, sandboxColors: cfg.sandboxColors, sandboxGroups: cfg.sandboxGroups })
     }).catch(() => {})
   },
 
@@ -379,6 +398,64 @@ export const useStore = create<AppState>((set) => ({
       localStorage.setItem('minipit:sandboxIcons', JSON.stringify(next))
       window.minipit?.projectConfigSet('sandboxIcons', name, iconKey ?? null)
       return { sandboxIcons: next }
+    }),
+
+  setSandboxColor: (name, hex) =>
+    set((state) => {
+      const next = { ...state.sandboxColors }
+      if (hex) next[name] = hex
+      else delete next[name]
+      localStorage.setItem('minipit:sandboxColors', JSON.stringify(next))
+      window.minipit?.projectConfigSet('sandboxColors', name, hex ?? null)
+      return { sandboxColors: next }
+    }),
+
+  // ── Groups ────────────────────────────────────────────────────────────────
+  loadGroups: () => {
+    window.minipit?.groupsGet().then((g) => set({ groups: g ?? [] })).catch(() => {})
+  },
+
+  createGroup: (name) => {
+    const id = (crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.round(Math.random() * 1e6)}`)
+    const groups = [...useStore.getState().groups, { id, name: name.trim() || 'Group' }]
+    set({ groups })
+    window.minipit?.groupsSet(groups)
+    return id
+  },
+
+  renameGroup: (id, name) => {
+    const groups = useStore.getState().groups.map((g) => (g.id === id ? { ...g, name: name.trim() || g.name } : g))
+    set({ groups })
+    window.minipit?.groupsSet(groups)
+  },
+
+  deleteGroup: (id, deleteSandboxes) => {
+    const state = useStore.getState()
+    const members = Object.entries(state.sandboxGroups).filter(([, gid]) => gid === id).map(([n]) => n)
+    // Drop the group + clear its members' membership (persist each removal).
+    const groups = state.groups.filter((g) => g.id !== id)
+    const nextMap = { ...state.sandboxGroups }
+    for (const n of members) { delete nextMap[n]; window.minipit?.projectConfigSet('sandboxGroups', n, null) }
+    localStorage.setItem('minipit:sandboxGroups', JSON.stringify(nextMap))
+    set({ groups, sandboxGroups: nextMap })
+    window.minipit?.groupsSet(groups)
+    if (deleteSandboxes) {
+      for (const n of members) {
+        const sb = state.sandboxes.find((s) => s.name === n)
+        if (sb) useStore.getState().updateSandbox(sb.id, { status: 'deleting' })
+        window.minipit?.deleteSandbox(n).catch(() => {})
+      }
+    }
+  },
+
+  setSandboxGroup: (name, groupId) =>
+    set((state) => {
+      const next = { ...state.sandboxGroups }
+      if (groupId) next[name] = groupId
+      else delete next[name]
+      localStorage.setItem('minipit:sandboxGroups', JSON.stringify(next))
+      window.minipit?.projectConfigSet('sandboxGroups', name, groupId ?? null)
+      return { sandboxGroups: next }
     }),
 
   setPickerOpen: (open) => set({ pickerOpen: open }),
