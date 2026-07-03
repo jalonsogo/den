@@ -959,8 +959,20 @@ html, body, #root {
 .ds-folder { color: var(--t2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ds-branch { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .ds-branch > svg { opacity: 0.7; }
-.ds-changes { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; color: var(--t2); }
+.ds-changes-wrap { position: relative; flex-shrink: 0; }
+.ds-changes {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; font-size: 11.5px; color: var(--t2);
+  background: none; border: none; cursor: pointer; padding: 2px 4px; border-radius: 5px;
+}
+.ds-changes:hover, .ds-changes.open { background: var(--bg-subtle); color: var(--t1); }
 .ds-changes > svg { opacity: 0.7; }
+.ds-changes-menu {
+  position: absolute; top: calc(100% + 5px); left: 0; z-index: 50;
+  min-width: 260px; max-width: 380px; max-height: 320px; overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.18); padding: 4px;
+}
 .ds-remote { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin-left: auto; color: var(--t3); cursor: pointer; text-decoration: none; }
 .ds-remote:hover { color: var(--accent, var(--primary)); }
 .ds-remote > svg { opacity: 0.7; }
@@ -1517,6 +1529,36 @@ html, body, #root {
   background: color-mix(in srgb, var(--primary) 16%, var(--bg));
 }
 .files-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 32px 16px; }
+
+/* Files | Changes tab bar */
+.files-tabs { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.files-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; font-family: inherit;
+  padding: 4px 10px; border: none; border-radius: 6px; background: none; color: var(--t3); cursor: pointer;
+}
+.files-tab:hover { color: var(--t1); background: var(--bg-subtle); }
+.files-tab.on { color: var(--t1); background: var(--bg-subtle); }
+.files-tab-badge {
+  font-size: 10px; font-weight: 600; color: var(--t2);
+  background: var(--bg-muted); border-radius: 100px; padding: 0 6px; min-width: 16px; text-align: center;
+}
+
+/* Changes list (Files-panel tab + subheader dropdown) */
+.files-changes { padding: 4px; }
+.changes-list { display: flex; flex-direction: column; }
+.changes-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 8px; border: none; background: none; cursor: pointer; border-radius: 6px;
+  font: inherit; text-align: left; color: var(--t1);
+}
+.changes-row:hover { background: var(--bg-subtle); }
+.changes-row.static { cursor: default; }
+.changes-row.static:hover { background: none; }
+.changes-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 55%; }
+.changes-dir { font-size: 11px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 1; min-width: 0; }
+.changes-tag { font-size: 10px; font-weight: 700; font-family: 'SF Mono','Menlo',monospace; flex-shrink: 0; margin-left: auto; }
+.changes-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 28px 16px; }
 .files-footer {
   height: 30px;
   flex-shrink: 0;

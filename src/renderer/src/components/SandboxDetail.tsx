@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
-import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal, ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
 import { FilesPanel } from './FilesPanel'
 import { SandboxAvatar } from './SandboxAvatar'
+import { ChangesList } from './ChangesList'
 import { formatUptime } from '../lib/utils'
+import type { FileChange } from '../types'
 
 type Dock = 'files' | 'info' | null
 
@@ -18,6 +20,16 @@ export function SandboxDetail() {
   useEffect(() => { if (sandbox?.workspace) loadGitInfo(sandbox.workspace) }, [sandbox?.workspace, loadGitInfo])
   const [dock, setDock] = useState<Dock>(null)
   const [dockWidth, setDockWidth] = useState(340)
+  // Subheader "N changed" dropdown — the changed-file list, fetched on open.
+  const [changesOpen, setChangesOpen] = useState(false)
+  const [changeFiles, setChangeFiles] = useState<FileChange[]>([])
+  const changesRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!changesOpen) return
+    const onDown = (e: MouseEvent) => { if (changesRef.current && !changesRef.current.contains(e.target as Node)) setChangesOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [changesOpen])
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -150,9 +162,28 @@ export function SandboxDetail() {
               </span>
             )}
             {sandbox.status === 'running' && changes > 0 && (
-              <span className="ds-changes" title={`${changes} uncommitted change${changes > 1 ? 's' : ''}`}>
-                <GitCommitHorizontal size={12} />{changes} changed
-              </span>
+              <div className="ds-changes-wrap" ref={changesRef}>
+                <button
+                  className={`ds-changes${changesOpen ? ' open' : ''}`}
+                  title={`${changes} uncommitted change${changes > 1 ? 's' : ''}`}
+                  onClick={() => {
+                    const open = !changesOpen
+                    setChangesOpen(open)
+                    if (open) window.minipit?.gitStatus(sandbox.name, sandbox.workspace)
+                      .then((r) => setChangeFiles(r?.changes ?? [])).catch(() => {})
+                  }}
+                >
+                  <GitCommitHorizontal size={12} />{changes} changed<ChevronDown size={11} />
+                </button>
+                {changesOpen && (
+                  <div className="ds-changes-menu">
+                    <ChangesList
+                      changes={changeFiles}
+                      onOpen={(rel, name) => { window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name); setChangesOpen(false) }}
+                    />
+                  </div>
+                )}
+              </div>
             )}
             {gi?.remoteUrl && (
               <a className="ds-remote" title={gi.remote || gi.remoteUrl} onClick={() => window.minipit?.openPath(gi.remoteUrl!)}>
