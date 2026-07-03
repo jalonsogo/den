@@ -1061,12 +1061,6 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
       click: () => navigateFromTray('minipit:open-sandbox', s.name)
     })),
     { type: 'separator' },
-    { label: projects.length ? 'Projects' : 'No projects', enabled: false },
-    ...projects.map((p) => ({
-      label: `${p.workspace.split('/').pop() || p.workspace}  (${p.count})`,
-      click: () => navigateFromTray('minipit:open-project', p.workspace)
-    })),
-    { type: 'separator' },
     { label: 'New Sandbox…', click: () => navigateFromTray('minipit:open-modal', 'new-sandbox') },
     { type: 'separator' },
     { label: 'Quit den', role: 'quit' }
@@ -1095,19 +1089,9 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
   const mixinKits = kits.filter((k) => k.kind === 'mixin')
   const sandboxKits = kits.filter((k) => k.kind === 'sandbox')
 
-  // Projects = folders the user added (persisted) ∪ workspaces in use by a
-  // sandbox. Labels use the folder basename, matching the tray menu.
-  const projectDirs = Array.from(new Set([
-    ...(((store.get('projects') as string[]) ?? [])),
-    ...sandboxes.map((s) => s.workspace)
-  ])).filter(Boolean)
-  const projCount = (ws: string) => sandboxes.filter((s) => s.workspace === ws).length
-  const base = (dir: string) => dir.split('/').pop() || dir
-
   // Skip the rebuild when nothing menu-relevant changed.
   const sig = JSON.stringify({
     s: sandboxes.map((s) => [s.name, s.status]),
-    p: projectDirs.map((ws) => [ws, projCount(ws)]),
     t: templates.map((t) => `${t.repository}:${t.tag}`),
     m: kits.map((k) => [k.name, k.kind])
   })
@@ -1129,13 +1113,6 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
         click: () => go('minipit:open-sandbox', s.name)
       }), 'sandboxes')
     : [{ label: 'No sandboxes yet', enabled: false }]
-
-  const projectItems: Electron.MenuItemConstructorOptions[] = projectDirs.length
-    ? capped(projectDirs, (ws) => {
-        const c = projCount(ws)
-        return { label: c ? `${base(ws)}  (${c})` : base(ws), click: () => go('minipit:open-project', ws) }
-      }, 'projects')
-    : [{ label: 'No projects yet', enabled: false }]
 
   // A Library submenu: "Show all" + the list (each opens the management page,
   // which is where individual items are edited/run).
@@ -1167,7 +1144,6 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       label: 'File',
       submenu: [
         { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
-        { label: 'New Project…', accelerator: 'Shift+Cmd+N', click: () => go('minipit:new-project') },
         { type: 'separator' },
         { label: 'Close Window', accelerator: 'Cmd+W', role: 'close' }
       ]
@@ -1209,15 +1185,6 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
         { label: 'Logs', accelerator: 'Cmd+L', click: () => go('minipit:navigate', 'logs') },
         { type: 'separator' },
         ...sandboxItems
-      ]
-    },
-    {
-      label: 'Projects',
-      submenu: [
-        { label: 'Show All Projects', accelerator: 'Shift+Cmd+P', click: () => go('minipit:navigate', 'sandboxes') },
-        { label: 'New Project…', click: () => go('minipit:new-project') },
-        { type: 'separator' },
-        ...projectItems
       ]
     },
     {

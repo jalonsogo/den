@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal, Search, X } from 'lucide-react'
 import { AgentIcon } from './AgentIcon'
-import { PROJECT_ICONS, PROJECT_PALETTE, resolveIcon, LUCIDE_ICONS, ALL_ICON_NAMES } from './ProjectAvatar'
+import { PROJECT_ICONS, PROJECT_PALETTE, resolveIcon, LUCIDE_ICONS, ALL_ICON_NAMES } from '../lib/iconSet'
 import { useStore } from '../store'
 import type { Sandbox, AgentState } from '../types'
 
