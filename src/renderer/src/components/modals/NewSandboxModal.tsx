@@ -289,7 +289,7 @@ export function NewSandboxModal() {
             <label className="flabel">Agent</label>
             <div className="agent-dd" ref={ddRef}>
               <button className="agent-dd-btn" onClick={() => setDdOpen((v) => !v)}>
-                <AgentIcon agent={agent} size={20} />
+                <AgentIcon agent={agent} size={18} />
                 <span className="agent-dd-label">{agentLabel}</span>
                 <ChevronDown size={16} style={{ marginLeft: 'auto', color: 'var(--t3)' }} />
               </button>

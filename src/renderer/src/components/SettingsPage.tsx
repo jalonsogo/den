@@ -151,7 +151,7 @@ export function SettingsPage() {
               {([
                 { id: 'light', label: 'Light', Icon: Sun },
                 { id: 'dark', label: 'Dark', Icon: Moon },
-                { id: 'system', label: 'Computer', Icon: Monitor }
+                { id: 'system', label: 'System', Icon: Monitor }
               ] as const).map(({ id, label, Icon }) => (
                 <button
                   key={id}

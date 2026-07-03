@@ -140,7 +140,7 @@ export function SbxRuntimePanel({
               {account === null
                 ? 'Checking…'
                 : account.loggedIn
-                  ? `Signed in${account.username ? ` as ${account.username}` : ''}`
+                  ? account.username ? <>Signed in as <strong className="ss-user">{account.username}</strong></> : 'Signed in'
                   : 'Not signed in — authenticate the runtime with sbx login.'}
             </div>
           </div>

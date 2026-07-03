@@ -30,7 +30,7 @@ export const DEFAULT_TERM_THEME = 'minipit'
 export const TERM_THEMES: TermTheme[] = [
   {
     id: 'minipit',
-    label: 'den (default · follows app)',
+    label: 'den (default · adaptive)',
     mode: 'dark',
     theme: DEN_DARK
   },
