@@ -22,7 +22,6 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const activity = useStore((s) => s.agentActivity[sandbox.name] ?? null)
   const justCreated = useStore((s) => s.highlightSandbox === sandbox.name)
   const showSub = useStore((s) => s.display.sandboxSub)
-  const subLineMode = useStore((s) => s.display.subLineMode)
   const agentLabel = AGENTS.find((a) => a.id === sandbox.agent)?.label ?? sandbox.agent
 
   // Collapsed-rail hover flyout: surfaces name/project/status/duration that are
@@ -102,15 +101,13 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
                   ? 'Creating…'
                   : isDeleting
                   ? 'Deleting…'
-                  : subLineMode === 'project'
-                    ? folder
-                    : !isRunning
-                      ? 'Stopped'
-                      : activity === 'working'
-                        ? 'Working…'
-                        : activity === 'waiting'
-                          ? 'Waiting for you'
-                          : 'Running'}
+                  : !isRunning
+                    ? 'Stopped'
+                    : activity === 'working'
+                      ? 'Working…'
+                      : activity === 'waiting'
+                        ? 'Waiting for you'
+                        : 'Running'}
               </div>
             )}
           </div>

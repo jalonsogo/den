@@ -27,7 +27,7 @@ export function SettingsPage() {
   const {
     themePref, setThemePref, accent, accentColor, customAccents,
     setAccent, setCustomAccent, saveCustomAccent, removeCustomAccent,
-    termTheme, setTermTheme, display, setDisplay, setSubLineMode
+    termTheme, setTermTheme, display, setDisplay
   } = useStore()
   const [tab, setTab] = useState<'general' | 'runtime' | 'secrets'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
@@ -261,28 +261,6 @@ export function SettingsPage() {
               />
             </div>
           ))}
-          {display.sandboxSub && (
-            <div className="ss-row">
-              <div>
-                <div className="ss-lbl">Status line shows</div>
-                <div className="ss-sub">Agent status (Working…, Waiting) or the project folder name.</div>
-              </div>
-              <div className="seg" role="group" aria-label="Status line content">
-                {([
-                  { id: 'status', label: 'Agent status' },
-                  { id: 'project', label: 'Project name' },
-                ] as const).map(({ id, label }) => (
-                  <button
-                    key={id}
-                    className={`seg-opt${display.subLineMode === id ? ' on' : ''}`}
-                    onClick={() => setSubLineMode(id)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="ss">
