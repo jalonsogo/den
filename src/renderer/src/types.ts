@@ -287,12 +287,9 @@ declare global {
       policyLog(name?: string): Promise<PolicyBlock[]>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>
-      listProjects(): Promise<string[]>
-      addProject(): Promise<string | null>
-      removeProject(dir: string, deleteFolder?: boolean): Promise<{ ok: boolean; error?: string }>
       defaultWorkspace(): Promise<string>
-      projectConfigSync(local: Record<string, Record<string, string>>): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }>
-      projectConfigSet(field: 'colors' | 'icons' | 'names' | 'sandboxIcons' | 'sandboxColors' | 'sandboxGroups', workspace: string, value: string | null): Promise<void>
+      projectConfigSync(local: Record<string, Record<string, string>>): Promise<{ sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }>
+      projectConfigSet(field: 'sandboxIcons' | 'sandboxColors' | 'sandboxGroups', name: string, value: string | null): Promise<void>
       groupsGet(): Promise<{ id: string; name: string }[]>
       groupsSet(groups: { id: string; name: string }[]): Promise<void>
       sandboxIsolation(): Promise<Record<string, boolean>>
@@ -307,8 +304,6 @@ declare global {
       onFilesChanged(cb: (name: string) => void): () => void
       onNavigate(cb: (page: string) => void): () => void
       onOpenSandbox(cb: (name: string) => void): () => void
-      onOpenProject(cb: (workspace: string) => void): () => void
-      onNewProject(cb: () => void): () => void
       onOpenModal(cb: (modal: string) => void): () => void
       onSetTab(cb: (tab: string) => void): () => void
       onStopActive(cb: () => void): () => void

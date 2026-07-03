@@ -84,9 +84,6 @@ const api = {
     return () => ipcRenderer.removeListener('minipit:login-output', handler)
   },
   showOpenDialog:()                     => ipcRenderer.invoke('minipit:show-open-dialog'),
-  listProjects:  ()                     => ipcRenderer.invoke('minipit:list-projects'),
-  addProject:    ()                     => ipcRenderer.invoke('minipit:add-project'),
-  removeProject: (dir: string, deleteFolder?: boolean) => ipcRenderer.invoke('minipit:remove-project', dir, deleteFolder),
   defaultWorkspace: ()                  => ipcRenderer.invoke('minipit:default-workspace'),
   projectConfigSync: (local: unknown)   => ipcRenderer.invoke('minipit:project-config-sync', local),
   projectConfigSet: (field: string, workspace: string, value: string | null) => ipcRenderer.invoke('minipit:project-config-set', field, workspace, value),
@@ -136,16 +133,6 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, name: string) => cb(name)
     ipcRenderer.on('minipit:open-sandbox', handler)
     return () => ipcRenderer.removeListener('minipit:open-sandbox', handler)
-  },
-  onOpenProject: (cb: (workspace: string) => void) => {
-    const handler = (_: Electron.IpcRendererEvent, workspace: string) => cb(workspace)
-    ipcRenderer.on('minipit:open-project', handler)
-    return () => ipcRenderer.removeListener('minipit:open-project', handler)
-  },
-  onNewProject: (cb: () => void) => {
-    const handler = () => cb()
-    ipcRenderer.on('minipit:new-project', handler)
-    return () => ipcRenderer.removeListener('minipit:new-project', handler)
   },
   onOpenModal: (cb: (modal: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, modal: string) => cb(modal)

@@ -2078,22 +2078,16 @@ function setupIPC(): void {
     return result.canceled ? null : result.filePaths[0]
   })
 
-  // ── Projects (empty workspaces, persisted independently of sandboxes) ───────
-  ipcMain.handle('minipit:list-projects', () => (store.get('projects') as string[]) ?? [])
-
-  // ── Per-project appearance (color / icon / display name) ──────────────────
+  // ── Per-sandbox appearance (color / icon) + group membership ──────────────
   // Persisted in the file-based electron-store (not the renderer's localStorage,
   // which is scoped to the dev-server origin and lost when the port shifts).
   // `sandboxIcons` (keyed by sandbox name) rides along on the same durable store
   // as the project appearance maps.
   // sandboxColors (name → hex) and sandboxGroups (name → group id) are per-sandbox
   // maps that ride the same durable store as the (legacy) project appearance maps.
-  type ProjectConfig = { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }
-  const CFG_KEYS = { colors: 'projectColors', icons: 'projectIcons', names: 'projectNames', sandboxIcons: 'sandboxIcons', sandboxColors: 'sandboxColors', sandboxGroups: 'sandboxGroups' } as const
+  type ProjectConfig = { sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }
+  const CFG_KEYS = { sandboxIcons: 'sandboxIcons', sandboxColors: 'sandboxColors', sandboxGroups: 'sandboxGroups' } as const
   const readProjectConfig = (): ProjectConfig => ({
-    colors: (store.get(CFG_KEYS.colors) as Record<string, string>) ?? {},
-    icons: (store.get(CFG_KEYS.icons) as Record<string, string>) ?? {},
-    names: (store.get(CFG_KEYS.names) as Record<string, string>) ?? {},
     sandboxIcons: (store.get(CFG_KEYS.sandboxIcons) as Record<string, string>) ?? {},
     sandboxColors: (store.get(CFG_KEYS.sandboxColors) as Record<string, string>) ?? {},
     sandboxGroups: (store.get(CFG_KEYS.sandboxGroups) as Record<string, string>) ?? {}
@@ -2125,32 +2119,6 @@ function setupIPC(): void {
     if (value) map[workspace] = value
     else delete map[workspace]
     store.set(key, map)
-  })
-
-  ipcMain.handle('minipit:add-project', async () => {
-    // Pick or create a folder; the OS panel's "New Folder" covers creation.
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      properties: ['openDirectory', 'createDirectory'],
-      buttonLabel: 'Add Project'
-    })
-    if (result.canceled || !result.filePaths[0]) return null
-    const dir = result.filePaths[0]
-    const list = (store.get('projects') as string[]) ?? []
-    if (!list.includes(dir)) { list.push(dir); store.set('projects', list) }
-    setAppMenu().catch(() => {})
-    return dir
-  })
-
-  ipcMain.handle('minipit:remove-project', (_, dir: string, deleteFolder?: boolean) => {
-    const list = ((store.get('projects') as string[]) ?? []).filter((d) => d !== dir)
-    store.set('projects', list)
-    setAppMenu().catch(() => {})
-    // Only touch disk when the user explicitly opted in.
-    if (deleteFolder && dir) {
-      try { require('fs').rmSync(dir, { recursive: true, force: true }) }
-      catch (err) { console.error('delete project folder failed:', err); return { ok: false, error: String(err) } }
-    }
-    return { ok: true }
   })
 
   // ── Shell PTY ──────────────────────────────────────────────────────────────

@@ -20,14 +20,13 @@ import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, loadProjects, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
 
   useEffect(() => {
     // Initial load
     window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
-    loadProjects()
-    // Pull durable per-project appearance from the main-process store (and
-    // migrate any localStorage-cached config into it on first run).
+    // Pull durable per-sandbox appearance (color/icon) + group membership from
+    // the main-process store, migrating any localStorage cache on first run.
     syncProjectConfig()
     // Per-sandbox working-tree isolation (for the shared-folder warning).
     loadSandboxIsolation()
@@ -86,12 +85,8 @@ export function App() {
       if (sb) useStore.getState().refreshSandboxChanges(name, sb.workspace)
     })
 
-    // Menu-bar (tray) quick-open: jump to a sandbox or a project.
+    // Menu-bar (tray) quick-open: jump to a sandbox.
     const unsub6 = window.minipit?.onOpenSandbox((name) => setActiveSandboxId(name))
-    // Projects were replaced by groups; menu-bar "open project" just shows the
-    // sandboxes dashboard, and "New Project…" opens New Sandbox.
-    const unsub7 = window.minipit?.onOpenProject(() => setActivePage('sandboxes'))
-    const unsub8 = window.minipit?.onNewProject?.(() => setModal('new-sandbox'))
 
     return () => {
       unsub1?.()
@@ -103,8 +98,6 @@ export function App() {
       unsub4?.()
       unsub5?.()
       unsub6?.()
-      unsub7?.()
-      unsub8?.()
       unsubFiles?.()
     }
   }, [])
