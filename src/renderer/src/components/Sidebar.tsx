@@ -4,7 +4,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
-  ArrowUp, ArrowDown
+  ArrowUp, ArrowDown, Plug
 } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
@@ -611,9 +611,11 @@ export function Sidebar() {
       </div>
 
       <div className="sb-foot">
-        {!collapsed && (
+        {collapsed ? (
+          tip('sbx · connected', <span className="sb-foot-icon"><Plug size={14} className="sb-foot-plug" /></span>)
+        ) : (
           <span className="sb-foot-text">
-            <span className="sb-foot-dot" />
+            <Plug size={12} className="sb-foot-plug" />
             sbx · connected
           </span>
         )}

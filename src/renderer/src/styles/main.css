@@ -458,6 +458,7 @@ html, body, #root {
 }
 .sb-foot-text { display: flex; align-items: center; gap: 7px; }
 .sb-foot-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.sb-foot-plug { color: var(--green); flex-shrink: 0; }
 
 /* ── Sidebar header (collapse control, no logo) ── */
 .sb-head {
@@ -2697,6 +2698,7 @@ html, body, #root {
 }
 .ss-lbl { font-size: 13px; font-weight: 500; color: var(--t1); }
 .ss-sub { font-size: 11.5px; color: var(--t3); margin-top: 2px; }
+.ss-user { color: var(--t1); font-weight: 600; }
 
 /* Accent color swatches */
 .accent-swatches { display: flex; gap: 9px; }
