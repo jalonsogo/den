@@ -1359,13 +1359,13 @@ html, body, #root {
   display: flex; align-items: center; gap: 10px;
   margin-top: 10px; padding: 8px 10px;
   border-radius: var(--radius); font-size: 12px; line-height: 1.4;
-  border: 1px solid var(--border); border-left-width: 3px;
+  border: 1px solid var(--border);
 }
 .np-banner-txt { flex: 1; }
 .np-banner .btn { flex-shrink: 0; }
-.np-banner.ok   { border-left-color: var(--green); color: var(--t1); background: var(--green-dim); }
-.np-banner.err  { border-left-color: var(--destruct); color: var(--t1); background: color-mix(in srgb, var(--destruct) 10%, transparent); }
-.np-banner.warn { border-left-color: var(--yellow); color: var(--t2); background: color-mix(in srgb, var(--yellow) 12%, transparent); }
+.np-banner.ok   { color: var(--t1); background: var(--green-dim); border-color: color-mix(in srgb, var(--green) 30%, var(--border)); }
+.np-banner.err  { color: var(--t1); background: color-mix(in srgb, var(--destruct) 10%, transparent); border-color: color-mix(in srgb, var(--destruct) 30%, var(--border)); }
+.np-banner.warn { color: var(--t2); background: color-mix(in srgb, var(--yellow) 12%, transparent); border-color: color-mix(in srgb, var(--yellow) 32%, var(--border)); }
 
 .info-actions {
   display: flex;
@@ -1947,10 +1947,9 @@ html, body, #root {
   display: flex; flex-direction: column; gap: 10px; max-width: 380px;
 }
 .toast {
-  display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 12px 14px;
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px;
   border: 1px solid var(--border-hi); border-radius: 10px; background: var(--bg);
   box-shadow: 0 8px 28px rgba(0,0,0,0.22); position: relative;
-  border-left: 3px solid var(--destruct);
 }
 .toast-ic { color: var(--destruct); flex-shrink: 0; margin-top: 1px; }
 .toast-main { flex: 1; min-width: 0; padding-right: 14px; }

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, Boxes,
+  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
   ArrowUp, ArrowDown
 } from 'lucide-react'
@@ -510,7 +510,7 @@ export function Sidebar() {
                   </div>
                 )}
               </div>
-              <button className="sb-add" onClick={newGroup} title="New group"><Boxes size={15} /></button>
+              <button className="sb-add" onClick={newGroup} title="New group"><FolderPlus size={16} /></button>
               <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
             </div>
           </>
