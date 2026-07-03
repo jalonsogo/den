@@ -281,6 +281,34 @@ export function ContextMenu() {
     }
   }
 
+  // Clone-mode "feature" integrate flow: review-first (fetch to a branch), then
+  // open a PR (preferred when there's a remote) or merge. Optionally delete the
+  // sandbox afterward ("finish"). Nothing lands without a confirm.
+  const bringToHost = async (deleteAfter: boolean) => {
+    setContextMenu({ visible: false })
+    const ws = sandbox.workspace
+    const res = await window.minipit?.sandboxFetchWork(sandbox.name, ws).catch(() => null)
+    if (!res?.ok || !res.branch) { alert(res?.error || 'Could not fetch the sandbox\'s changes.'); return }
+    const branch = res.branch
+    let done = false
+    if (res.hasRemote) {
+      if (confirm(`Fetched changes to "${branch}".\n\nOpen a pull request? (Cancel keeps the branch for review.)`)) {
+        const pr = await window.minipit?.sandboxOpenPr(ws, branch).catch(() => null)
+        if (pr?.ok && pr.url) { window.minipit?.openPath(pr.url); done = true }
+        else if (pr?.ok) { alert(`Pushed "${branch}". Open a PR from your git host.`); done = true }
+        else alert(pr?.error || 'Push / PR failed.')
+      }
+    } else if (confirm(`Fetched changes to "${branch}".\n\nMerge into your current branch? (Cancel keeps the branch.)`)) {
+      const m = await window.minipit?.sandboxMergeBranch(ws, branch).catch(() => null)
+      if (m?.ok) { alert(`Merged "${branch}"${m.base ? ` into ${m.base}` : ''}.`); done = true }
+      else alert(m?.error || 'Merge failed.')
+    }
+    if (done && deleteAfter && confirm(`Delete the sandbox "${sandbox.name}" now?`)) {
+      updateSandbox(sandbox.id, { status: 'deleting' })
+      window.minipit?.deleteSandbox(sandbox.name).catch(() => {})
+    }
+  }
+
   return (
     <div
       ref={ref}
@@ -289,9 +317,11 @@ export function ContextMenu() {
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="ctx-item" onClick={handleStartStop}>
-        {sandbox.status === 'running' ? 'Stop' : 'Start'} <span className="ctx-kbd">⌘.</span>
+        {sandbox.status === 'running'
+          ? <>Stop <span className="ctx-kbd">⌘S</span></>
+          : 'Start'}
       </div>
-      <div className="ctx-item" onClick={handleRestart}>Restart</div>
+      <div className="ctx-item" onClick={handleRestart}>Restart <span className="ctx-kbd">⌘R</span></div>
       <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleOpenInFinder}>
         Open in Finder <span className="ctx-kbd">⇧⌘F</span>
@@ -311,38 +341,15 @@ export function ContextMenu() {
         Customize…
       </div>
       {sandboxIsolation[sandbox.name] === true && (
-        <div
-          className="ctx-item"
-          onClick={async () => {
-            setContextMenu({ visible: false })
-            // Review-first: fetch the agent's work into a local branch, never
-            // auto-merge onto the working branch. Then offer PR (preferred when
-            // there's a remote) or an explicit merge.
-            const ws = sandbox.workspace
-            const res = await window.minipit?.sandboxFetchWork(sandbox.name, ws).catch(() => null)
-            if (!res?.ok || !res.branch) { alert(res?.error || 'Could not fetch the sandbox\'s work.'); return }
-            const branch = res.branch
-            if (res.hasRemote) {
-              if (confirm(`Fetched the agent's work to branch "${branch}".\n\nOpen a pull request? (Cancel keeps the branch for you to review/merge.)`)) {
-                const pr = await window.minipit?.sandboxOpenPr(ws, branch).catch(() => null)
-                if (pr?.ok && pr.url) window.minipit?.openPath(pr.url)
-                else if (pr?.ok) alert(`Pushed "${branch}". Open a PR from your git host.`)
-                else alert(pr?.error || 'Push/PR failed.')
-              }
-            } else {
-              if (confirm(`Fetched the agent's work to branch "${branch}".\n\nNo git remote — merge it into your current branch now? (Cancel keeps the branch.)`)) {
-                const m = await window.minipit?.sandboxMergeBranch(ws, branch).catch(() => null)
-                if (m?.ok) alert(`Merged "${branch}"${m.base ? ` into ${m.base}` : ''}.`)
-                else alert(m?.error || 'Merge failed.')
-              }
-            }
-          }}
-        >
-          Bring work to host…
-        </div>
+        <SubMenu label="Feature changes">
+          <div className="ctx-sub-label">Review changes in the Files → Changes tab</div>
+          <div className="ctx-sub-sep" />
+          <div className="ctx-sub-item" onClick={() => bringToHost(false)}>Merge changes to your repo…</div>
+          <div className="ctx-sub-item" onClick={() => bringToHost(true)}>Merge, then delete sandbox…</div>
+        </SubMenu>
       )}
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs</div>
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs <span className="ctx-kbd">⌘L</span></div>
       <div className="ctx-sep" />
       <SubMenu label="Terminal theme">
         {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
@@ -363,7 +370,7 @@ export function ContextMenu() {
       </SubMenu>
       <div className="ctx-sep" />
       <div className="ctx-item destructive" onClick={handleDelete}>
-        Delete Sandbox…
+        Delete Sandbox… <span className="ctx-kbd">⌘X</span>
       </div>
     </div>
   )

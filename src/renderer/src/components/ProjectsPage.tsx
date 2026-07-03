@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ChevronLeft, Plus, Trash2, GitBranch, Github } from 'lucide-react'
+import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { AgentIcon } from './AgentIcon'
 import { SandboxAvatar } from './SandboxAvatar'
@@ -12,7 +12,6 @@ export function ProjectsPage() {
   const policyBlocks = useStore((s) => s.policyBlocks)
   const blocksSeenAt = useStore((s) => s.blocksSeenAt)
   const agentActivity = useStore((s) => s.agentActivity)
-  const gitInfo = useStore((s) => s.gitInfo)
   const loadGitInfo = useStore((s) => s.loadGitInfo)
   const [delFor, setDelFor] = useState<string | null>(null)
   const [delFolder, setDelFolder] = useState(false)
@@ -127,22 +126,6 @@ export function ProjectsPage() {
                         onDoubleClick={(e) => { e.stopPropagation(); window.minipit?.openInFinder(workspace) }}
                       >{workspace}</span>
                     </div>
-                    {gitInfo[workspace]?.isRepo && (
-                      <div className="proj-git">
-                        <span className="proj-git-branch">
-                          <GitBranch size={11} />{gitInfo[workspace]!.branch || 'detached'}
-                        </span>
-                        {gitInfo[workspace]!.remoteUrl && (
-                          <button
-                            className="proj-git-remote"
-                            title={`Open ${gitInfo[workspace]!.remote ?? 'remote'} on the web`}
-                            onClick={(e) => { e.stopPropagation(); window.minipit?.openPath(gitInfo[workspace]!.remoteUrl!) }}
-                          >
-                            <Github size={11} /><span>Remote</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
                   </div>
                   {list.length === 0 && (
                     <button

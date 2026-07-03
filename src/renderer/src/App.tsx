@@ -114,6 +114,56 @@ export function App() {
     }
   }, [])
 
+  // Cmd shortcuts. Cmd (not Ctrl) so terminal/shell control keys are untouched.
+  // Sandbox actions act on the open sandbox; New Sandbox works anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      const k = e.key.toLowerCase()
+      const s = useStore.getState()
+
+      if (k === 'n') { e.preventDefault(); s.setModal('new-sandbox'); return }
+      if (typing || s.activePage !== 'sandbox') return
+
+      const sb = s.sandboxes.find((x) => x.id === s.activeSandboxId)
+      if (!sb) return
+      const running = sb.status === 'running'
+
+      switch (k) {
+        case 's':
+          if (running) { e.preventDefault(); s.updateSandbox(sb.id, { status: 'stopping' })
+            window.minipit?.stopSandbox(sb.name)
+              .then(() => s.updateSandbox(sb.id, { status: 'stopped', uptimeSeconds: undefined }))
+              .catch(() => s.updateSandbox(sb.id, { status: 'running' })) }
+          break
+        case 'r':
+          e.preventDefault(); s.updateSandbox(sb.id, { status: 'stopping' })
+          ;(async () => {
+            try { await window.minipit?.stopSandbox(sb.name); await window.minipit?.runSandbox(sb.name); s.updateSandbox(sb.id, { status: 'running' }) }
+            catch { s.updateSandbox(sb.id, { status: 'running' }) }
+          })()
+          break
+        case 'x':
+          e.preventDefault()
+          if (confirm(`Delete sandbox "${sb.name}"? This can't be undone.`)) {
+            s.updateSandbox(sb.id, { status: 'deleting' })
+            window.minipit?.deleteSandbox(sb.name).catch(() => {})
+          }
+          break
+        case 'l':
+          e.preventDefault(); s.setLogsSandbox(sb.name); s.setLogsReturn(sb.id); s.setActivePage('logs'); break
+        case 'f':
+          e.preventDefault(); window.dispatchEvent(new CustomEvent('den:toggle-dock', { detail: 'files' })); break
+        case 'i':
+          e.preventDefault(); window.dispatchEvent(new CustomEvent('den:toggle-dock', { detail: 'info' })); break
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   return (
     <div className="app-root" onContextMenu={(e) => e.preventDefault()}>
       <Toolbar />
