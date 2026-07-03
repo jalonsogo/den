@@ -51,7 +51,9 @@ export function HomePage() {
     const list = byGroup.get(g.id)
     if (list?.length) treeSections.push({ key: g.id, label: g.name, list: orderList(list) })
   }
-  if (ungrouped.length) treeSections.push({ key: '__ungrouped', label: null, list: orderList(ungrouped) })
+  // Label the ungrouped section only when there are named groups to distinguish
+  // it from (otherwise it's just the whole flat list).
+  if (ungrouped.length) treeSections.push({ key: '__ungrouped', label: treeSections.length ? 'Ungrouped' : null, list: orderList(ungrouped) })
 
   const [version, setVersion] = useState<string | null>(null)
   const [release, setRelease] = useState<SbxRelease | null>(null)

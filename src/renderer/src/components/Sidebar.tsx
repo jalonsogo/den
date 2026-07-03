@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown,
+  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, Boxes,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
   ArrowUp, ArrowDown
 } from 'lucide-react'
@@ -129,8 +129,12 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage,
     setNewSandboxWorkspace, sidebarCollapsed,
-    toggleSidebar, setContextMenu, groups, sandboxGroups, setSandboxGroup
+    toggleSidebar, setContextMenu, groups, sandboxGroups, setSandboxGroup, createGroup, openPrompt
   } = useStore()
+  const newGroup = () => openPrompt({
+    title: 'New group', label: 'Group name', placeholder: 'e.g. Feature work',
+    confirmText: 'Create', onSubmit: (v) => { if (v.trim()) createGroup(v) }
+  })
   // Which group section a dragged sandbox is hovering (for the drop highlight).
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
   const openGroupMenu = (e: React.MouseEvent, groupId: string) => {
@@ -506,6 +510,7 @@ export function Sidebar() {
                   </div>
                 )}
               </div>
+              <button className="sb-add" onClick={newGroup} title="New group"><Boxes size={15} /></button>
               <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
             </div>
           </>
@@ -528,21 +533,26 @@ export function Sidebar() {
                   if (n) setSandboxGroup(n, sec.group ? sec.group.id : null)
                 }}
               >
-                {/* Ungrouped section renders flat (no header). Named groups get a
-                    header with an actions menu; agent sections a plain header. */}
-                {sec.key !== '__ungrouped' && (
-                  <div
-                    className={`sb-group-hd${sec.group ? ' is-group' : ''}`}
-                    onContextMenu={sec.group ? (e) => openGroupMenu(e, sec.group!.id) : undefined}
-                  >
-                    <span className="sb-group-name">{sec.group ? sec.group.name : sec.key}</span>
-                    {sec.group && (
-                      <button className="sb-group-add" title="Group actions" onClick={(e) => openGroupMenu(e, sec.group!.id)}>
-                        <MoreVertical size={13} />
-                      </button>
-                    )}
-                  </div>
-                )}
+                {/* Named groups get a header + actions menu; agent sections a
+                    plain header. The ungrouped section gets an "Ungrouped" header
+                    only when there are named groups to distinguish it from. */}
+                {sec.key === '__ungrouped'
+                  ? (grouped!.some((g) => g.group) && (
+                      <div className="sb-group-hd"><span className="sb-group-name">Ungrouped</span></div>
+                    ))
+                  : (
+                    <div
+                      className={`sb-group-hd${sec.group ? ' is-group' : ''}`}
+                      onContextMenu={sec.group ? (e) => openGroupMenu(e, sec.group!.id) : undefined}
+                    >
+                      <span className="sb-group-name">{sec.group ? sec.group.name : sec.key}</span>
+                      {sec.group && (
+                        <button className="sb-group-add" title="Group actions" onClick={(e) => openGroupMenu(e, sec.group!.id)}>
+                          <MoreVertical size={13} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 {sec.list.map((s) => (
                   <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
                 ))}
