@@ -59,6 +59,9 @@ interface AppState {
   // Named sandbox groups + membership (sandbox name → group id; one group max).
   groups: Group[]
   sandboxGroups: Record<string, string>
+  // Manual sandbox order (by name) for Order-by: Manual. Groups' own order is the
+  // `groups` array order. Both are user-arranged via drag.
+  sandboxOrder: string[]
   // Per-sandbox working-tree isolation (by name): true = --clone (own tree),
   // false = direct mount of the host folder. Used to warn about shared folders.
   sandboxIsolation: Record<string, boolean>
@@ -115,6 +118,8 @@ interface AppState {
   renameGroup:        (id: string, name: string) => void
   deleteGroup:        (id: string, deleteSandboxes: boolean) => void
   setSandboxGroup:    (name: string, groupId: string | null) => void
+  reorderGroups:      (dragId: string, beforeId: string | null) => void
+  reorderSandbox:     (dragName: string, beforeName: string | null) => void
   loadGitInfo:        (workspace: string, force?: boolean) => void
   refreshSandboxChanges: (name: string, workspace: string) => void
   setDisplay:         (key: 'agentBadge' | 'sandboxSub' | 'projectCounts' | 'gitBranch' | 'changeBadge', value: boolean) => void
@@ -173,6 +178,9 @@ export const useStore = create<AppState>((set) => ({
   groups: [],
   sandboxGroups: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxGroups') ?? '{}') ?? {} } catch { return {} }
+  })(),
+  sandboxOrder: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:sandboxOrder') ?? '[]') ?? [] } catch { return [] }
   })(),
   sandboxIsolation: {},
   gitInfo: {},
@@ -393,6 +401,30 @@ export const useStore = create<AppState>((set) => ({
       window.minipit?.projectConfigSet('sandboxGroups', name, groupId ?? null)
       return { sandboxGroups: next }
     }),
+
+  // Move group `dragId` to just before `beforeId` (null = end); persist order.
+  reorderGroups: (dragId, beforeId) => {
+    const cur = useStore.getState().groups
+    const dragged = cur.find((g) => g.id === dragId)
+    if (!dragged) return
+    const rest = cur.filter((g) => g.id !== dragId)
+    const idx = beforeId ? rest.findIndex((g) => g.id === beforeId) : -1
+    const next = idx < 0 ? [...rest, dragged] : [...rest.slice(0, idx), dragged, ...rest.slice(idx)]
+    set({ groups: next })
+    window.minipit?.groupsSet(next)
+  },
+
+  // Move sandbox `dragName` before `beforeName` (null = end) in the manual order.
+  // Names not yet in the order are appended in their current listing order first.
+  reorderSandbox: (dragName, beforeName) => {
+    const s = useStore.getState()
+    const base = [...new Set([...s.sandboxOrder, ...s.sandboxes.map((x) => x.name)])].filter((n) => s.sandboxes.some((x) => x.name === n))
+    const rest = base.filter((n) => n !== dragName)
+    const idx = beforeName ? rest.indexOf(beforeName) : -1
+    const next = idx < 0 ? [...rest, dragName] : [...rest.slice(0, idx), dragName, ...rest.slice(idx)]
+    localStorage.setItem('minipit:sandboxOrder', JSON.stringify(next))
+    set({ sandboxOrder: next })
+  },
 
   setPickerOpen: (open) => set({ pickerOpen: open }),
 
