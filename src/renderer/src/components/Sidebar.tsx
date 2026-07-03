@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
+  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
   ArrowUp, ArrowDown
 } from 'lucide-react'
@@ -127,20 +127,11 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage,
     setNewSandboxWorkspace, sidebarCollapsed,
-    toggleSidebar, setContextMenu, groups, sandboxGroups, createGroup, openPrompt
+    toggleSidebar, setContextMenu, groups, sandboxGroups
   } = useStore()
   const openGroupMenu = (e: React.MouseEvent, groupId: string) => {
     e.preventDefault(); e.stopPropagation()
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace: null, groupId })
-  }
-  const newGroup = () => {
-    openPrompt({
-      title: 'New group',
-      label: 'Group name',
-      placeholder: 'e.g. Feature work',
-      confirmText: 'Create',
-      onSubmit: (v) => { if (v.trim()) createGroup(v) }
-    })
   }
   const collapsed = sidebarCollapsed
 
@@ -511,7 +502,6 @@ export function Sidebar() {
                   </div>
                 )}
               </div>
-              <button className="sb-add" onClick={newGroup} title="New group"><FolderPlus size={16} /></button>
               <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
             </div>
           </>
