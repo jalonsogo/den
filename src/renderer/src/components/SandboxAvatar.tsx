@@ -44,20 +44,24 @@ export function SandboxAvatar({
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const [browseOpen, setBrowseOpen] = useState(false)
   const [iconQuery, setIconQuery] = useState('')
+  // Render icons in pages so opening Browse stays snappy across 1500+ icons;
+  // scrolling near the bottom reveals more (see onScroll below).
+  const PAGE = 300
+  const [cap, setCap] = useState(PAGE)
   const popRef = useRef<HTMLDivElement>(null)
   const avRef = useRef<HTMLDivElement>(null)
   const setOpen = (v: boolean) => {
     setOpenState(v); setPickerOpen(v)
     if (!v) { setBrowseOpen(false); setIconQuery('') }
   }
+  // Reset paging when the query changes or the browse panel toggles.
+  useEffect(() => { setCap(PAGE) }, [iconQuery, browseOpen])
 
-  // Filtered full-browse list (capped so rendering stays snappy across 1500+ icons).
-  const CAP = 300
   const browseList = useMemo(() => {
     const q = iconQuery.trim().toLowerCase()
     const all = q ? ALL_ICON_NAMES.filter((n) => n.toLowerCase().includes(q)) : ALL_ICON_NAMES
-    return { items: all.slice(0, CAP), total: all.length }
-  }, [iconQuery])
+    return { items: all.slice(0, cap), total: all.length }
+  }, [iconQuery, cap])
 
   const style: React.CSSProperties = { width: size, height: size }
   if (projColor) {
@@ -178,7 +182,17 @@ export function SandboxAvatar({
                 {browseList.items.length === 0 ? (
                   <div className="proj-cpick-browse-empty">No icons match “{iconQuery}”.</div>
                 ) : (
-                  <div className="proj-cpick-browse-grid">
+                  <div
+                    className="proj-cpick-browse-grid"
+                    onScroll={(e) => {
+                      const el = e.currentTarget
+                      // Reveal the next page when scrolled near the bottom.
+                      if (browseList.total > browseList.items.length &&
+                          el.scrollTop + el.clientHeight >= el.scrollHeight - 40) {
+                        setCap((c) => c + PAGE)
+                      }
+                    }}
+                  >
                     {browseList.items.map((name) => {
                       const I = LUCIDE_ICONS[name]
                       return (
@@ -197,7 +211,7 @@ export function SandboxAvatar({
                 )}
                 {browseList.total > browseList.items.length && (
                   <div className="proj-cpick-browse-more">
-                    Showing {browseList.items.length} of {browseList.total} — keep typing to narrow.
+                    Showing {browseList.items.length} of {browseList.total} — scroll for more, or type to narrow.
                   </div>
                 )}
               </div>
