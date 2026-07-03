@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
-import { MoreVertical, Play, Square, GitBranch, FolderGit2 } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
 import { FilesPanel } from './FilesPanel'
-import { AgentIcon } from './AgentIcon'
 import { SandboxAvatar } from './SandboxAvatar'
+import { formatUptime } from '../lib/utils'
 
 type Dock = 'files' | 'info' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
 
   // Load the workspace's host-side git info (branch/remote) — the project git
@@ -75,6 +75,18 @@ export function SandboxDetail() {
     }
   }
 
+  const handleRestart = async () => {
+    updateSandbox(sandbox.id, { status: 'stopping' })
+    try {
+      await window.minipit?.stopSandbox(sandbox.name)
+      await window.minipit?.runSandbox(sandbox.name)
+      updateSandbox(sandbox.id, { status: 'running' })
+    } catch (e) {
+      console.error(e)
+      updateSandbox(sandbox.id, { status: 'running' })
+    }
+  }
+
   const handleMenu = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     // Anchor the menu's right edge under the button (menu is 200px wide).
@@ -89,23 +101,26 @@ export function SandboxDetail() {
       <div className="detail-header">
         <SandboxAvatar sandbox={sandbox} size={22} editable linkToContextMenu />
         <div className="d-name">{sandbox.name}</div>
-        <span className="d-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <AgentIcon agent={sandbox.agent} size={12} />
-          {sandbox.agent}
-        </span>
-        <span className="d-uptime">
-          {sandbox.status === 'running'  ? 'Running' :
-           sandbox.status === 'creating' ? 'Creating…' :
-           sandbox.status === 'starting' ? 'Starting…' :
-           sandbox.status === 'stopping' ? 'Stopping…' :
-           sandbox.status === 'deleting' ? 'Deleting…' : 'Stopped'}
+        <span className={`d-status ${sandbox.status === 'running' ? 'on' : 'off'}`}>
+          {sandbox.status === 'running'
+            ? `Running${sandbox.uptimeSeconds ? ` · ${formatUptime(sandbox.uptimeSeconds)}` : ''}`
+           : sandbox.status === 'creating' ? 'Creating…'
+           : sandbox.status === 'starting' ? 'Starting…'
+           : sandbox.status === 'stopping' ? 'Stopping…'
+           : sandbox.status === 'deleting' ? 'Deleting…' : 'Stopped'}
         </span>
         <div className="d-actions">
           {sandbox.status === 'running' ? (
-            <button className="btn btn-default btn-sm" onClick={handleStop} disabled={isTransitioning}>
-              <Square size={11} fill="currentColor" strokeWidth={0} />
-              Stop
-            </button>
+            <div className="seg-btn">
+              <button className="seg-btn-item" onClick={handleStop} disabled={isTransitioning}>
+                <Square size={11} fill="currentColor" strokeWidth={0} />
+                Stop
+              </button>
+              <button className="seg-btn-item" onClick={handleRestart} disabled={isTransitioning}>
+                <RotateCcw size={12} />
+                Restart
+              </button>
+            </div>
           ) : (
             <button className="btn btn-primary btn-sm" onClick={handleStart} disabled={isTransitioning}>
               <Play size={11} fill="currentColor" strokeWidth={0} />
@@ -119,17 +134,34 @@ export function SandboxDetail() {
         </div>
       </div>
 
-      {/* Workspace git summary (folder + branch) — the project git info that the
-          removed sidebar Projects section used to show. */}
-      <div className="detail-subhdr">
-        <FolderGit2 size={12} />
-        <span className="ds-folder" title={sandbox.workspace}>{sandbox.workspace.split('/').pop() || sandbox.workspace}</span>
-        {gitInfo[sandbox.workspace]?.branch && (
-          <span className="ds-branch" title={`On branch ${gitInfo[sandbox.workspace]!.branch}`}>
-            <GitBranch size={12} />{gitInfo[sandbox.workspace]!.branch}
-          </span>
-        )}
-      </div>
+      {/* All Git info, condensed here: folder · branch · uncommitted changes ·
+          remote link. This is the single place git context lives now. */}
+      {(() => {
+        const gi = gitInfo[sandbox.workspace]
+        const changes = sandboxChanges[sandbox.name] ?? 0
+        const repoShort = gi?.remoteUrl?.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '')
+        return (
+          <div className="detail-subhdr">
+            <FolderGit2 size={12} />
+            <span className="ds-folder" title={sandbox.workspace}>{sandbox.workspace.split('/').pop() || sandbox.workspace}</span>
+            {gi?.branch && (
+              <span className="ds-branch" title={`On branch ${gi.branch}`}>
+                <GitBranch size={12} />{gi.branch}
+              </span>
+            )}
+            {sandbox.status === 'running' && changes > 0 && (
+              <span className="ds-changes" title={`${changes} uncommitted change${changes > 1 ? 's' : ''}`}>
+                <GitCommitHorizontal size={12} />{changes} changed
+              </span>
+            )}
+            {gi?.remoteUrl && (
+              <a className="ds-remote" title={gi.remote || gi.remoteUrl} onClick={() => window.minipit?.openPath(gi.remoteUrl!)}>
+                <Github size={12} />{repoShort || 'remote'}
+              </a>
+            )}
+          </div>
+        )
+      })()}
 
       <div className="detail-body">
         <div className="detail-main">

@@ -23,8 +23,6 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
   const justCreated = useStore((s) => s.highlightSandbox === sandbox.name)
   const showSub = useStore((s) => s.display.sandboxSub)
   const subLineMode = useStore((s) => s.display.subLineMode)
-  const showChanges = useStore((s) => s.display.changeBadge)
-  const changes = useStore((s) => s.sandboxChanges[sandbox.name] ?? 0)
   const agentLabel = AGENTS.find((a) => a.id === sandbox.agent)?.label ?? sandbox.agent
 
   // Collapsed-rail hover flyout: surfaces name/project/status/duration that are
@@ -84,9 +82,6 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
           <div className="sb-item-pop-row"><FolderGit2 size={12} /> {folder}</div>
           <div className="sb-item-pop-row">{agentLabel}</div>
           {sandbox.branch && <div className="sb-item-pop-row"><GitBranch size={12} /> {sandbox.branch}</div>}
-          {showChanges && isRunning && changes > 0 && (
-            <div className="sb-item-pop-row">{changes} uncommitted change{changes > 1 ? 's' : ''}</div>
-          )}
           {isRunning && sandbox.uptimeSeconds != null && (
             <>
               <div className="sb-item-pop-sep" />
@@ -120,11 +115,6 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
             )}
           </div>
 
-          {showChanges && isRunning && changes > 0 && (
-            <span className="sb-item-changes" title={`${changes} uncommitted change${changes > 1 ? 's' : ''}`}>
-              <GitBranch size={10} />{changes}
-            </span>
-          )}
           {!isDeleting && !isCreating && (
             <button className="sb-item-menu" onClick={(e) => openMenu(e, 'button')} title="Actions">
               <MoreVertical size={15} />
@@ -140,7 +130,7 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage,
     setNewSandboxWorkspace, setActiveProject, sidebarCollapsed,
-    addProject, toggleSidebar, setContextMenu, projectNames, display, sandboxIsolation
+    addProject, toggleSidebar, setContextMenu, projectNames, sandboxIsolation
   } = useStore()
   const openProjectMenu = (e: React.MouseEvent, workspace: string) => {
     e.preventDefault(); e.stopPropagation()
@@ -525,7 +515,6 @@ export function Sidebar() {
                   onContextMenu={groupBy === 'project' ? (e) => openProjectMenu(e, list[0].workspace) : undefined}
                 >
                   <span className="sb-group-name">{key}</span>
-                  {display.projectCounts && <span className="sb-group-count">{list.length}</span>}
                   {groupBy === 'project' && list.filter((s) => sandboxIsolation[s.name] === false).length >= 2 && (
                     <span
                       className="sb-group-warn"

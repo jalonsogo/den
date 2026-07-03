@@ -216,7 +216,6 @@ export function HomePage() {
             >
               <ProjectAvatar workspace={workspace} size={18} editable={false} />
               <span className="home-tree-proj-name">{projectName(workspace)}</span>
-              <span className="home-tree-proj-count">{list.length}</span>
               {list.filter((s) => sandboxIsolation[s.name] === false).length >= 2 && (
                 <span
                   className="sb-group-warn"

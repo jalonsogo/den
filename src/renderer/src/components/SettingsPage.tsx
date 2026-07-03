@@ -249,9 +249,6 @@ export function SettingsPage() {
           {([
             { key: 'agentBadge', lbl: 'Agent badge on avatars', sub: 'The agent glyph in each sandbox avatar’s corner.' },
             { key: 'sandboxSub', lbl: 'Sandbox status line', sub: 'The second line under each sandbox name (project · status).' },
-            { key: 'projectCounts', lbl: 'Project counts', sub: 'The sandbox-count pill on projects and grouped headers.' },
-            { key: 'gitBranch', lbl: 'Git info', sub: 'Branch and repo info shown next to Git-tracked projects.' },
-            { key: 'changeBadge', lbl: 'Uncommitted changes', sub: 'The change-count badge on running sandboxes.' },
           ] as const).map(({ key, lbl, sub }) => (
             <div className="ss-row" key={key}>
               <div>
