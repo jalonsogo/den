@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-03
+
+### Added
+- Feature workflow on `--clone` (sbx doesn't support git worktrees): **New feature…** on a project starts an isolated clone-mode sandbox, and **Bring work to host…** fetches its commits into a `sandbox/<name>` review branch, then offers to open a PR (via `gh`) or merge — review-first, never auto-merging your working branch, with conflict-safe aborts.
+- **Keep computer awake** setting (Settings → App, default on): holds a `powerSaveBlocker` while any sandbox is running so long agent runs aren't interrupted by system sleep.
+
+### Changed
+- Dashboard redesign: a compact overview strip (box icon + total + running/stopped pills, with Projects/Disk as chips) replaces the three stat cards, so the sandbox list is the focus. Added a page title.
+
+### Fixed
+- Icon browse loads more on scroll instead of stopping at a hard 300-icon cap.
+- InfoPanel Workspaces rows stack the label above the path, so long paths wrap cleanly instead of cramming beside the label.
+
+## [0.5.0] - 2026-07-03
+
+### Added
+- Per-sandbox **custom icons** (curated set + full Lucide browse), or the two-letter initials — set from the detail avatar or right-click → Customize.
+- **1Password sourcing** for secrets: a "Load from 1Password" switch resolves an `op://` reference on the host via `op read`.
+- Shared-working-tree **safety**: den records each sandbox's isolation, warns when multiple sandboxes mount one folder directly, and guards New Sandbox creation into an already-used folder.
+
+### Changed
+- **Removed the Home page** — the Sandboxes view is now the dashboard and default landing, listing all sandboxes grouped by project (running first, then stopped).
+- **Removed the sidebar Projects section**; "Add project" moves to the Sandboxes header, and project group headers gain a hover + and a right-click menu.
+- Project **Customize** promoted to the top of the menu and is now color-only.
+- The sandbox detail view shows the workspace **git branch** below the status.
+
+### Fixed
+- Per-project appearance (color/name/icon) persists in the file-based store instead of `localStorage`, surviving dev-server port changes; existing config is migrated on first launch.
+- Stopped sandboxes keep their project color (no longer fully grayscaled).
+- The New Sandbox folder picker can create a new folder on Windows/Linux.
+
 ## [0.4.0] - 2026-07-03
 
 ### Added
@@ -89,7 +120,10 @@ Initial release — the first automated, cross-platform build (macOS + Windows).
 - Theme submenu and den branding.
 - GitHub Actions release pipeline that builds and publishes macOS (`.dmg`/`.zip`) and Windows (NSIS `.exe`) installers on each `v*` tag.
 
-[Unreleased]: https://github.com/jalonsogo/den/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/jalonsogo/den/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jalonsogo/den/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/jalonsogo/den/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/jalonsogo/den/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/jalonsogo/den/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jalonsogo/den/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jalonsogo/den/compare/v0.1.1...v0.2.0
