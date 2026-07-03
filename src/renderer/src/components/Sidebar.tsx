@@ -50,9 +50,9 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
     if (isDeleting || isCreating) return
     if (anchor === 'button') {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-      setContextMenu({ visible: true, x: r.right - 200, y: r.bottom + 4, sandboxId: sandbox.id, workspace: null })
+      setContextMenu({ visible: true, x: r.right - 200, y: r.bottom + 4, sandboxId: sandbox.id, workspace: null, groupId: null })
     } else {
-      setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: sandbox.id, workspace: null })
+      setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: sandbox.id, workspace: null, groupId: null })
     }
   }
 

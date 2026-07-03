@@ -112,7 +112,7 @@ export function SandboxDetail() {
   const handleMenu = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     // Anchor the menu's right edge under the button (menu is 200px wide).
-    setContextMenu({ visible: true, x: rect.right - 200, y: rect.bottom + 4, sandboxId: sandbox.id })
+    setContextMenu({ visible: true, x: rect.right - 200, y: rect.bottom + 4, sandboxId: sandbox.id, workspace: null, groupId: null })
   }
 
   const isTransitioning =
