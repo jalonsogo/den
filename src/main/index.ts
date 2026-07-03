@@ -1061,12 +1061,6 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
       click: () => navigateFromTray('minipit:open-sandbox', s.name)
     })),
     { type: 'separator' },
-    { label: projects.length ? 'Projects' : 'No projects', enabled: false },
-    ...projects.map((p) => ({
-      label: `${p.workspace.split('/').pop() || p.workspace}  (${p.count})`,
-      click: () => navigateFromTray('minipit:open-project', p.workspace)
-    })),
-    { type: 'separator' },
     { label: 'New Sandbox…', click: () => navigateFromTray('minipit:open-modal', 'new-sandbox') },
     { type: 'separator' },
     { label: 'Quit den', role: 'quit' }
@@ -1095,19 +1089,9 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
   const mixinKits = kits.filter((k) => k.kind === 'mixin')
   const sandboxKits = kits.filter((k) => k.kind === 'sandbox')
 
-  // Projects = folders the user added (persisted) ∪ workspaces in use by a
-  // sandbox. Labels use the folder basename, matching the tray menu.
-  const projectDirs = Array.from(new Set([
-    ...(((store.get('projects') as string[]) ?? [])),
-    ...sandboxes.map((s) => s.workspace)
-  ])).filter(Boolean)
-  const projCount = (ws: string) => sandboxes.filter((s) => s.workspace === ws).length
-  const base = (dir: string) => dir.split('/').pop() || dir
-
   // Skip the rebuild when nothing menu-relevant changed.
   const sig = JSON.stringify({
     s: sandboxes.map((s) => [s.name, s.status]),
-    p: projectDirs.map((ws) => [ws, projCount(ws)]),
     t: templates.map((t) => `${t.repository}:${t.tag}`),
     m: kits.map((k) => [k.name, k.kind])
   })
@@ -1129,13 +1113,6 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
         click: () => go('minipit:open-sandbox', s.name)
       }), 'sandboxes')
     : [{ label: 'No sandboxes yet', enabled: false }]
-
-  const projectItems: Electron.MenuItemConstructorOptions[] = projectDirs.length
-    ? capped(projectDirs, (ws) => {
-        const c = projCount(ws)
-        return { label: c ? `${base(ws)}  (${c})` : base(ws), click: () => go('minipit:open-project', ws) }
-      }, 'projects')
-    : [{ label: 'No projects yet', enabled: false }]
 
   // A Library submenu: "Show all" + the list (each opens the management page,
   // which is where individual items are edited/run).
@@ -1167,7 +1144,6 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       label: 'File',
       submenu: [
         { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
-        { label: 'New Project…', accelerator: 'Shift+Cmd+N', click: () => go('minipit:new-project') },
         { type: 'separator' },
         { label: 'Close Window', accelerator: 'Cmd+W', role: 'close' }
       ]
@@ -1209,15 +1185,6 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
         { label: 'Logs', accelerator: 'Cmd+L', click: () => go('minipit:navigate', 'logs') },
         { type: 'separator' },
         ...sandboxItems
-      ]
-    },
-    {
-      label: 'Projects',
-      submenu: [
-        { label: 'Show All Projects', accelerator: 'Shift+Cmd+P', click: () => go('minipit:navigate', 'projects') },
-        { label: 'New Project…', click: () => go('minipit:new-project') },
-        { type: 'separator' },
-        ...projectItems
       ]
     },
     {
@@ -2111,22 +2078,24 @@ function setupIPC(): void {
     return result.canceled ? null : result.filePaths[0]
   })
 
-  // ── Projects (empty workspaces, persisted independently of sandboxes) ───────
-  ipcMain.handle('minipit:list-projects', () => (store.get('projects') as string[]) ?? [])
-
-  // ── Per-project appearance (color / icon / display name) ──────────────────
+  // ── Per-sandbox appearance (color / icon) + group membership ──────────────
   // Persisted in the file-based electron-store (not the renderer's localStorage,
   // which is scoped to the dev-server origin and lost when the port shifts).
   // `sandboxIcons` (keyed by sandbox name) rides along on the same durable store
   // as the project appearance maps.
-  type ProjectConfig = { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }
-  const CFG_KEYS = { colors: 'projectColors', icons: 'projectIcons', names: 'projectNames', sandboxIcons: 'sandboxIcons' } as const
+  // sandboxColors (name → hex) and sandboxGroups (name → group id) are per-sandbox
+  // maps that ride the same durable store as the (legacy) project appearance maps.
+  type ProjectConfig = { sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }
+  const CFG_KEYS = { sandboxIcons: 'sandboxIcons', sandboxColors: 'sandboxColors', sandboxGroups: 'sandboxGroups' } as const
   const readProjectConfig = (): ProjectConfig => ({
-    colors: (store.get(CFG_KEYS.colors) as Record<string, string>) ?? {},
-    icons: (store.get(CFG_KEYS.icons) as Record<string, string>) ?? {},
-    names: (store.get(CFG_KEYS.names) as Record<string, string>) ?? {},
-    sandboxIcons: (store.get(CFG_KEYS.sandboxIcons) as Record<string, string>) ?? {}
+    sandboxIcons: (store.get(CFG_KEYS.sandboxIcons) as Record<string, string>) ?? {},
+    sandboxColors: (store.get(CFG_KEYS.sandboxColors) as Record<string, string>) ?? {},
+    sandboxGroups: (store.get(CFG_KEYS.sandboxGroups) as Record<string, string>) ?? {}
   })
+
+  // Named sandbox groups (id + name only). Stored as a JSON array.
+  ipcMain.handle('minipit:groups-get', () => (store.get('groups') as { id: string; name: string }[]) ?? [])
+  ipcMain.handle('minipit:groups-set', (_, groups: { id: string; name: string }[]) => { store.set('groups', groups ?? []) })
 
   // One-time-per-origin sync from the renderer: merge any localStorage-cached
   // config into the store (the store wins on conflict — it's the source of
@@ -2150,32 +2119,6 @@ function setupIPC(): void {
     if (value) map[workspace] = value
     else delete map[workspace]
     store.set(key, map)
-  })
-
-  ipcMain.handle('minipit:add-project', async () => {
-    // Pick or create a folder; the OS panel's "New Folder" covers creation.
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      properties: ['openDirectory', 'createDirectory'],
-      buttonLabel: 'Add Project'
-    })
-    if (result.canceled || !result.filePaths[0]) return null
-    const dir = result.filePaths[0]
-    const list = (store.get('projects') as string[]) ?? []
-    if (!list.includes(dir)) { list.push(dir); store.set('projects', list) }
-    setAppMenu().catch(() => {})
-    return dir
-  })
-
-  ipcMain.handle('minipit:remove-project', (_, dir: string, deleteFolder?: boolean) => {
-    const list = ((store.get('projects') as string[]) ?? []).filter((d) => d !== dir)
-    store.set('projects', list)
-    setAppMenu().catch(() => {})
-    // Only touch disk when the user explicitly opted in.
-    if (deleteFolder && dir) {
-      try { require('fs').rmSync(dir, { recursive: true, force: true }) }
-      catch (err) { console.error('delete project folder failed:', err); return { ok: false, error: String(err) } }
-    }
-    return { ok: true }
   })
 
   // ── Shell PTY ──────────────────────────────────────────────────────────────

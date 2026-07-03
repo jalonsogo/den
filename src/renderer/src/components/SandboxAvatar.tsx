@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal, Search, X } from 'lucide-react'
 import { AgentIcon } from './AgentIcon'
-import { PROJECT_ICONS, resolveIcon, LUCIDE_ICONS, ALL_ICON_NAMES } from './ProjectAvatar'
+import { PROJECT_ICONS, PROJECT_PALETTE, resolveIcon, LUCIDE_ICONS, ALL_ICON_NAMES } from '../lib/iconSet'
 import { useStore } from '../store'
 import type { Sandbox, AgentState } from '../types'
 
@@ -32,10 +32,11 @@ export function SandboxAvatar({
   // "Customize" (via the store's customizeSandbox signal).
   linkToContextMenu?: boolean
 }) {
-  const projColor = useStore((s) => s.projectColors[sandbox.workspace])
+  const projColor = useStore((s) => s.sandboxColors[sandbox.name])
   const showBadge = useStore((s) => s.display.agentBadge)
   const iconKey = useStore((s) => s.sandboxIcons[sandbox.name])
   const setSandboxIcon = useStore((s) => s.setSandboxIcon)
+  const setSandboxColor = useStore((s) => s.setSandboxColor)
   const setPickerOpen = useStore((s) => s.setPickerOpen)
   const customizeSandbox = useStore((s) => s.customizeSandbox)
   const setCustomizeSandbox = useStore((s) => s.setCustomizeSandbox)
@@ -104,7 +105,7 @@ export function SandboxAvatar({
       className={`sbx-avatar${editable ? ' sbx-avatar-editable' : ''}`}
       style={style}
       onClick={editable ? toggle : undefined}
-      title={editable ? 'Customize icon' : undefined}
+      title={editable ? 'Customize' : undefined}
     >
       {deleting
         ? <div className="sbx-avatar-spinner" />
@@ -135,6 +136,24 @@ export function SandboxAvatar({
         <>
           <div className="proj-cpick-scrim" onClick={(e) => { e.stopPropagation(); setOpen(false) }} />
           <div ref={popRef} className="proj-cpick" style={{ top: pos.top, left: pos.left }} onClick={(e) => e.stopPropagation()}>
+            <div className="proj-cpick-lblrow">
+              <div className="proj-cpick-lbl">Color</div>
+              <label className="proj-cpick-more" title="Custom color…">
+                <MoreHorizontal size={14} />
+                <input type="color" value={projColor ?? '#3b82f6'} onChange={(e) => setSandboxColor(sandbox.name, e.target.value)} />
+              </label>
+            </div>
+            <div className="proj-cpick-row">
+              {PROJECT_PALETTE.map((c) => (
+                <button
+                  key={c}
+                  className={`proj-cpick-sw${projColor === c ? ' on' : ''}`}
+                  style={{ background: c }}
+                  onClick={() => setSandboxColor(sandbox.name, c)}
+                />
+              ))}
+            </div>
+
             <div className="proj-cpick-lblrow">
               <div className="proj-cpick-lbl">Icon</div>
               <button
@@ -220,9 +239,9 @@ export function SandboxAvatar({
             <div className="proj-cpick-foot">
               <button
                 className="proj-cpick-reset"
-                onClick={() => { setSandboxIcon(sandbox.name, null); setOpen(false) }}
+                onClick={() => { setSandboxIcon(sandbox.name, null); setSandboxColor(sandbox.name, null); setOpen(false) }}
               >
-                Use initials
+                Reset
               </button>
             </div>
           </div>

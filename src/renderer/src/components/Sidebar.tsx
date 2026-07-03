@@ -2,14 +2,14 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
-  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
+  Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
-  ArrowUp, ArrowDown, AlertTriangle
+  ArrowUp, ArrowDown
 } from 'lucide-react'
-import { useStore, unackedBlockCount, projectDisplayName } from '../store'
+import { useStore, unackedBlockCount } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
-import { AGENTS, type Sandbox, type PageType, type AgentType } from '../types'
+import { AGENTS, type Sandbox, type PageType, type AgentType, type Group } from '../types'
 
 
 function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active: boolean; collapsed: boolean }) {
@@ -50,15 +50,17 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
     if (isDeleting || isCreating) return
     if (anchor === 'button') {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-      setContextMenu({ visible: true, x: r.right - 200, y: r.bottom + 4, sandboxId: sandbox.id, workspace: null })
+      setContextMenu({ visible: true, x: r.right - 200, y: r.bottom + 4, sandboxId: sandbox.id, workspace: null, groupId: null })
     } else {
-      setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: sandbox.id, workspace: null })
+      setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: sandbox.id, workspace: null, groupId: null })
     }
   }
 
   return (
     <div
       className={`sb-item${active ? ' active' : ''}${isRunning ? '' : ' is-stopped'}${isDeleting || isCreating ? ' is-deleting' : ''}${justCreated ? ' just-created' : ''}`}
+      draggable={!collapsed && !isDeleting && !isCreating}
+      onDragStart={(e) => { e.dataTransfer.setData('text/den-sandbox', sandbox.name); e.dataTransfer.effectAllowed = 'move' }}
       onClick={() => !isDeleting && !isCreating && setActiveSandboxId(sandbox.id)}
       onContextMenu={(e) => openMenu(e, 'cursor')}
       onMouseEnter={showHover}
@@ -126,12 +128,14 @@ function SandboxItem({ sandbox, active, collapsed }: { sandbox: Sandbox; active:
 export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage,
-    setNewSandboxWorkspace, setActiveProject, sidebarCollapsed,
-    addProject, toggleSidebar, setContextMenu, projectNames, sandboxIsolation
+    setNewSandboxWorkspace, sidebarCollapsed,
+    toggleSidebar, setContextMenu, groups, sandboxGroups, setSandboxGroup
   } = useStore()
-  const openProjectMenu = (e: React.MouseEvent, workspace: string) => {
+  // Which group section a dragged sandbox is hovering (for the drop highlight).
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+  const openGroupMenu = (e: React.MouseEvent, groupId: string) => {
     e.preventDefault(); e.stopPropagation()
-    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace })
+    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace: null, groupId })
   }
   const collapsed = sidebarCollapsed
 
@@ -171,9 +175,10 @@ export function Sidebar() {
   }
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
-  const [groupBy, setGroupBy] = useState<'none' | 'project' | 'agent'>(
-    () => (localStorage.getItem('minipit:sbxGroupBy') as 'none' | 'project' | 'agent') ?? 'project'
-  )
+  const [groupBy, setGroupBy] = useState<'none' | 'group' | 'agent'>(() => {
+    const v = localStorage.getItem('minipit:sbxGroupBy')
+    return v === 'agent' ? 'agent' : v === 'none' ? 'none' : 'group' // migrate legacy 'project'
+  })
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'stopped'>(
     () => (localStorage.getItem('minipit:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
   )
@@ -182,9 +187,10 @@ export function Sidebar() {
     try { return JSON.parse(localStorage.getItem('minipit:sbxAgents') ?? '[]') } catch { return [] }
   })
   // Sort order for the sandbox list. 'none' keeps the runtime's own ordering.
-  const [sortBy, setSortBy] = useState<'none' | 'name' | 'status' | 'project'>(
-    () => (localStorage.getItem('minipit:sbxSortBy') as 'none' | 'name' | 'status' | 'project') ?? 'none'
-  )
+  const [sortBy, setSortBy] = useState<'none' | 'name' | 'status'>(() => {
+    const v = localStorage.getItem('minipit:sbxSortBy')
+    return v === 'name' || v === 'status' ? v : 'none'
+  })
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
     () => (localStorage.getItem('minipit:sbxSortDir') as 'asc' | 'desc') ?? 'asc'
   )
@@ -199,7 +205,7 @@ export function Sidebar() {
   const toggleSbx = () =>
     setSbxOpen((o) => { const n = !o; localStorage.setItem('minipit:sandboxesOpen', n ? '1' : '0'); return n })
 
-  const setGrouping = (g: 'none' | 'project' | 'agent') => {
+  const setGrouping = (g: 'none' | 'group' | 'agent') => {
     setGroupBy(g)
     localStorage.setItem('minipit:sbxGroupBy', g)
   }
@@ -215,8 +221,8 @@ export function Sidebar() {
   }
   // Click a sort field: select it (ascending) when inactive, otherwise cycle
   // its direction asc → desc → off, so a third click clears the sort.
-  const setSort = (field: 'name' | 'status' | 'project') => {
-    let nextBy: 'none' | 'name' | 'status' | 'project' = field
+  const setSort = (field: 'name' | 'status') => {
+    let nextBy: 'none' | 'name' | 'status' = field
     let nextDir: 'asc' | 'desc' = 'asc'
     if (sortBy === field) {
       if (sortDir === 'asc') { nextBy = field; nextDir = 'desc' }
@@ -255,10 +261,7 @@ export function Sidebar() {
   // Optional explicit ordering. 'none' preserves the runtime's own order.
   const sorted = (() => {
     if (sortBy === 'none') return filtered
-    const key = (s: Sandbox) =>
-      sortBy === 'name' ? s.name
-        : sortBy === 'status' ? s.status
-          : projectDisplayName(projectNames, s.workspace)
+    const key = (s: Sandbox) => (sortBy === 'name' ? s.name : s.status)
     const dir = sortDir === 'asc' ? 1 : -1
     return [...filtered].sort((a, b) => {
       const r = key(a).localeCompare(key(b), undefined, { sensitivity: 'base', numeric: true })
@@ -267,17 +270,33 @@ export function Sidebar() {
     })
   })()
 
-  // Optional grouping for the sandbox list (by project folder or by agent).
-  const grouped: [string, Sandbox[]][] | null = (() => {
+  // Grouping for the sandbox list. By group: ungrouped sandboxes render flat at
+  // the top (key '__ungrouped'), then a section per named group. By agent: one
+  // section per agent. `group` is set only for real named groups (drives the
+  // header menu); a null group with a key is an agent/ungrouped section.
+  const grouped: { key: string; group: Group | null; list: Sandbox[] }[] | null = (() => {
     if (groupBy === 'none') return null
-    const map = new Map<string, Sandbox[]>()
-    for (const s of sorted) {
-      const key = groupBy === 'project' ? projectDisplayName(projectNames, s.workspace) : s.agent
-      const list = map.get(key) ?? []
-      list.push(s)
-      map.set(key, list)
+    if (groupBy === 'agent') {
+      const m = new Map<string, Sandbox[]>()
+      for (const s of sorted) { if (!m.has(s.agent)) m.set(s.agent, []); m.get(s.agent)!.push(s) }
+      return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, list]) => ({ key, group: null, list }))
     }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    const byId = new Map(groups.map((g) => [g.id, g]))
+    const ungrouped: Sandbox[] = []
+    const byGroup = new Map<string, Sandbox[]>()
+    for (const s of sorted) {
+      const gid = sandboxGroups[s.name]
+      if (gid && byId.has(gid)) { if (!byGroup.has(gid)) byGroup.set(gid, []); byGroup.get(gid)!.push(s) }
+      else ungrouped.push(s)
+    }
+    const sections: { key: string; group: Group | null; list: Sandbox[] }[] = []
+    for (const g of [...groups].sort((a, b) => a.name.localeCompare(b.name))) {
+      const list = byGroup.get(g.id)
+      if (list?.length) sections.push({ key: g.id, group: g, list })
+    }
+    // Ungrouped sandboxes render flat, after the named groups.
+    if (ungrouped.length) sections.push({ key: '__ungrouped', group: null, list: ungrouped })
+    return sections
   })()
 
   // Close the filter dropdown on outside click.
@@ -304,10 +323,6 @@ export function Sidebar() {
     return () => clearInterval(id)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningKeys])
-
-  const newProject = () => {
-    addProject().then((dir) => { if (dir) { setActiveProject(dir); setActivePage('projects') } })
-  }
 
   const openNew = (workspace?: string) => {
     setNewSandboxWorkspace(workspace ?? null)
@@ -420,13 +435,13 @@ export function Sidebar() {
                     <div className="sb-filter-grp">
                       <span className="sb-filter-lbl">Group by</span>
                       <div className="sb-filter-seg">
-                        {(['project', 'agent'] as const).map((g) => (
+                        {(['group', 'agent'] as const).map((g) => (
                           <button
                             key={g}
                             className={`sb-filter-seg-btn${groupBy === g ? ' active' : ''}`}
                             onClick={() => setGrouping(groupBy === g ? 'none' : g)}
                           >
-                            {g === 'project' ? 'Project' : 'Agent'}
+                            {g === 'group' ? 'Group' : 'Agent'}
                           </button>
                         ))}
                       </div>
@@ -438,7 +453,6 @@ export function Sidebar() {
                         {([
                           { id: 'name', label: 'Name' },
                           { id: 'status', label: 'Status' },
-                          { id: 'project', label: 'Project' },
                         ] as const).map(({ id, label }) => (
                           <button
                             key={id}
@@ -492,7 +506,6 @@ export function Sidebar() {
                   </div>
                 )}
               </div>
-              <button className="sb-add" onClick={newProject} title="New project — pick or create a folder"><FolderPlus size={16} /></button>
               <button className="sb-add" onClick={() => openNew()} title="New Sandbox"><Plus size={16} /></button>
             </div>
           </>
@@ -502,35 +515,35 @@ export function Sidebar() {
           {filtered.length === 0 ? (
             !collapsed && <div className="sb-empty">{sandboxes.length === 0 ? 'No sandboxes' : 'No matches'}</div>
           ) : grouped && !collapsed ? (
-            grouped.map(([key, list]) => (
-              <div className="sb-group" key={key}>
-                {/* When grouped by project, the header is a project: name,
-                    count, and a hover + to add a sandbox. Right-click opens the
-                    project context menu (all sandboxes share one workspace). */}
-                <div
-                  className="sb-group-hd"
-                  onContextMenu={groupBy === 'project' ? (e) => openProjectMenu(e, list[0].workspace) : undefined}
-                >
-                  <span className="sb-group-name">{key}</span>
-                  {groupBy === 'project' && list.filter((s) => sandboxIsolation[s.name] === false).length >= 2 && (
-                    <span
-                      className="sb-group-warn"
-                      title="Multiple sandboxes mount this folder directly — their edits can collide. Use clone isolation for new ones."
-                    >
-                      <AlertTriangle size={12} />
-                    </span>
-                  )}
-                  {groupBy === 'project' && (
-                    <button
-                      className="sb-group-add"
-                      title="New sandbox in this project"
-                      onClick={() => openNew(list[0].workspace)}
-                    >
-                      <Plus size={13} />
-                    </button>
-                  )}
-                </div>
-                {list.map((s) => (
+            grouped.map((sec) => (
+              <div
+                className={`sb-group${dragOverKey === sec.key ? ' drag-over' : ''}`}
+                key={sec.key}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverKey !== sec.key) setDragOverKey(sec.key) }}
+                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverKey((k) => (k === sec.key ? null : k)) }}
+                onDrop={(e) => {
+                  e.preventDefault(); setDragOverKey(null)
+                  const n = e.dataTransfer.getData('text/den-sandbox')
+                  // Drop on a named group assigns; drop on the ungrouped area removes.
+                  if (n) setSandboxGroup(n, sec.group ? sec.group.id : null)
+                }}
+              >
+                {/* Ungrouped section renders flat (no header). Named groups get a
+                    header with an actions menu; agent sections a plain header. */}
+                {sec.key !== '__ungrouped' && (
+                  <div
+                    className={`sb-group-hd${sec.group ? ' is-group' : ''}`}
+                    onContextMenu={sec.group ? (e) => openGroupMenu(e, sec.group!.id) : undefined}
+                  >
+                    <span className="sb-group-name">{sec.group ? sec.group.name : sec.key}</span>
+                    {sec.group && (
+                      <button className="sb-group-add" title="Group actions" onClick={(e) => openGroupMenu(e, sec.group!.id)}>
+                        <MoreVertical size={13} />
+                      </button>
+                    )}
+                  </div>
+                )}
+                {sec.list.map((s) => (
                   <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
                 ))}
               </div>
@@ -538,7 +551,7 @@ export function Sidebar() {
           ) : (
             // Collapsed rail can't show group headers, but keep the grouped
             // ordering so the sequence matches the expanded view.
-            (grouped ? grouped.flatMap(([, l]) => l) : sorted).map((s) => (
+            (grouped ? grouped.flatMap((sec) => sec.list) : sorted).map((s) => (
               <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
             ))
           )}

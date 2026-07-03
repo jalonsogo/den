@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { applyAccent, ensureRamp, savedAccents, writeSavedAccents, type SavedAccent } from './lib/accent'
-import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template } from './types'
+import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template, Group } from './types'
 
 type ThemePref = 'light' | 'dark' | 'system'
 const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -14,6 +14,8 @@ interface ContextMenuState {
   sandboxId: string | null
   // When set, the menu targets a project (workspace path) instead of a sandbox.
   workspace?: string | null
+  // When set, the menu targets a named group.
+  groupId?: string | null
 }
 
 interface AppState {
@@ -43,7 +45,6 @@ interface AppState {
   // When set, the kit modal ('new-kit') opens as a visual EDITOR for this kit
   // instead of creating a new one. Cleared when the modal closes.
   editKit: { dir: string; name: string } | null
-  activeProject: string | null
   themePref: 'light' | 'dark' | 'system'
   theme: 'light' | 'dark'   // resolved from themePref (system → OS preference)
   sidebarCollapsed: boolean
@@ -51,11 +52,13 @@ interface AppState {
   accentColor: string
   customAccents: SavedAccent[]
   termTheme: string
-  projectColors: Record<string, string>
-  projectIcons: Record<string, string>
-  projectNames: Record<string, string>
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
+  // Per-sandbox custom colour (by name); absent → the default neutral avatar.
+  sandboxColors: Record<string, string>
+  // Named sandbox groups + membership (sandbox name → group id; one group max).
+  groups: Group[]
+  sandboxGroups: Record<string, string>
   // Per-sandbox working-tree isolation (by name): true = --clone (own tree),
   // false = direct mount of the host folder. Used to warn about shared folders.
   sandboxIsolation: Record<string, boolean>
@@ -67,12 +70,8 @@ interface AppState {
   // whether the sandbox sub-line shows the agent status or the project name.
   display: { agentBadge: boolean; sandboxSub: boolean; projectCounts: boolean; gitBranch: boolean; changeBadge: boolean; subLineMode: 'status' | 'project' }
   pickerOpen: boolean
-  // Signal for the sidebar project avatar to open its customize picker (set by
-  // the project right-click menu). Cleared once the picker opens.
-  customizeProject: string | null
-  // Same, for a sandbox's icon picker (the detail-view avatar listens).
+  // Signal for a sandbox's icon picker (the detail-view avatar listens).
   customizeSandbox: string | null
-  customProjects: string[]
   // Network-policy denials, newest-first per sandbox name, with a per-sandbox
   // "seen" watermark so attention badges clear once the user looks.
   policyBlocks: Record<string, PolicyBlock[]>
@@ -99,7 +98,6 @@ interface AppState {
   setNewSandboxTemplate: (ref: string | null) => void
   setNewSandboxFeature: (v: boolean) => void
   setEditKit: (kit: { dir: string; name: string } | null) => void
-  setActiveProject:   (workspace: string | null) => void
   setThemePref:       (pref: 'light' | 'dark' | 'system') => void
   toggleSidebar:      () => void
   setAccent:          (id: string) => void
@@ -107,22 +105,21 @@ interface AppState {
   saveCustomAccent:   (hex: string) => void
   removeCustomAccent: (id: string) => void
   setTermTheme:       (id: string) => void
-  setProjectColor:    (workspace: string, hex: string | null) => void
-  setProjectIcon:     (workspace: string, icon: string | null) => void
-  setProjectName:     (workspace: string, name: string | null) => void
   setSandboxIcon:     (name: string, iconKey: string | null) => void
+  setSandboxColor:    (name: string, hex: string | null) => void
   setCustomizeSandbox:(name: string | null) => void
   syncProjectConfig:  () => void
   loadSandboxIsolation: () => void
+  loadGroups:         () => void
+  createGroup:        (name: string) => string
+  renameGroup:        (id: string, name: string) => void
+  deleteGroup:        (id: string, deleteSandboxes: boolean) => void
+  setSandboxGroup:    (name: string, groupId: string | null) => void
   loadGitInfo:        (workspace: string, force?: boolean) => void
   refreshSandboxChanges: (name: string, workspace: string) => void
   setDisplay:         (key: 'agentBadge' | 'sandboxSub' | 'projectCounts' | 'gitBranch' | 'changeBadge', value: boolean) => void
   setSubLineMode:     (mode: 'status' | 'project') => void
-  setCustomizeProject:(workspace: string | null) => void
   setPickerOpen:      (open: boolean) => void
-  loadProjects:       () => void
-  addProject:         () => Promise<string | null>
-  removeProject:      (dir: string, deleteFolder?: boolean) => void
   setDeleting:        (id: string, on: boolean) => void
   updateSandbox:      (id: string, updates: Partial<Sandbox>) => void
   setActiveSandboxId: (id: string | null) => void
@@ -160,7 +157,6 @@ export const useStore = create<AppState>((set) => ({
   newSandboxTemplate: null,
   newSandboxFeature: false,
   editKit: null,
-  activeProject: null,
   themePref: initialThemePref,
   theme: resolveTheme(initialThemePref),
   sidebarCollapsed: localStorage.getItem('minipit:sidebarCollapsed') === '1',
@@ -168,19 +164,17 @@ export const useStore = create<AppState>((set) => ({
   accentColor: localStorage.getItem('minipit:accentColor') ?? '#3b82f6',
   customAccents: savedAccents(),
   termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
-  projectColors: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:projectColors') ?? '{}') ?? {} } catch { return {} }
-  })(),
-  projectIcons: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:projectIcons') ?? '{}') ?? {} } catch { return {} }
-  })(),
   sandboxIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
-  sandboxIsolation: {},
-  projectNames: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:projectNames') ?? '{}') ?? {} } catch { return {} }
+  sandboxColors: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:sandboxColors') ?? '{}') ?? {} } catch { return {} }
   })(),
+  groups: [],
+  sandboxGroups: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:sandboxGroups') ?? '{}') ?? {} } catch { return {} }
+  })(),
+  sandboxIsolation: {},
   gitInfo: {},
   sandboxChanges: {},
   display: (() => {
@@ -188,9 +182,7 @@ export const useStore = create<AppState>((set) => ({
     try { return { ...d, ...JSON.parse(localStorage.getItem('minipit:display') ?? '{}') } } catch { return d }
   })(),
   pickerOpen: false,
-  customizeProject: null,
   customizeSandbox: null,
-  customProjects: [],
   policyBlocks: {},
   blocksSeenAt: {},
   toasts: [],
@@ -221,7 +213,6 @@ export const useStore = create<AppState>((set) => ({
 
   setEditKit: (kit) => set({ editKit: kit }),
 
-  setActiveProject: (workspace) => set({ activeProject: workspace }),
 
   setAccent: (id) =>
     set((state) => {
@@ -277,28 +268,6 @@ export const useStore = create<AppState>((set) => ({
       return { termTheme: id }
     }),
 
-  setProjectColor: (workspace, hex) =>
-    set((state) => {
-      const next = { ...state.projectColors }
-      if (hex) next[workspace] = hex
-      else delete next[workspace]
-      // localStorage is a per-origin cache for instant paint; the file-based
-      // electron-store (via IPC) is the durable source of truth.
-      localStorage.setItem('minipit:projectColors', JSON.stringify(next))
-      window.minipit?.projectConfigSet('colors', workspace, hex ?? null)
-      return { projectColors: next }
-    }),
-
-  setProjectIcon: (workspace, icon) =>
-    set((state) => {
-      const next = { ...state.projectIcons }
-      if (icon) next[workspace] = icon
-      else delete next[workspace]
-      localStorage.setItem('minipit:projectIcons', JSON.stringify(next))
-      window.minipit?.projectConfigSet('icons', workspace, icon ?? null)
-      return { projectIcons: next }
-    }),
-
   // Merge this origin's localStorage cache into the durable store (store wins),
   // then hydrate the in-memory maps + refresh the cache from the authoritative
   // result. Called once at startup — this is what makes config survive a
@@ -308,18 +277,16 @@ export const useStore = create<AppState>((set) => ({
       try { return JSON.parse(localStorage.getItem(k) ?? '{}') ?? {} } catch { return {} }
     }
     const local = {
-      colors: readLS('minipit:projectColors'),
-      icons: readLS('minipit:projectIcons'),
-      names: readLS('minipit:projectNames'),
-      sandboxIcons: readLS('minipit:sandboxIcons')
+      sandboxIcons: readLS('minipit:sandboxIcons'),
+      sandboxColors: readLS('minipit:sandboxColors'),
+      sandboxGroups: readLS('minipit:sandboxGroups')
     }
     window.minipit?.projectConfigSync(local).then((cfg) => {
       if (!cfg) return
-      localStorage.setItem('minipit:projectColors', JSON.stringify(cfg.colors))
-      localStorage.setItem('minipit:projectIcons', JSON.stringify(cfg.icons))
-      localStorage.setItem('minipit:projectNames', JSON.stringify(cfg.names))
       localStorage.setItem('minipit:sandboxIcons', JSON.stringify(cfg.sandboxIcons))
-      set({ projectColors: cfg.colors, projectIcons: cfg.icons, projectNames: cfg.names, sandboxIcons: cfg.sandboxIcons })
+      localStorage.setItem('minipit:sandboxColors', JSON.stringify(cfg.sandboxColors))
+      localStorage.setItem('minipit:sandboxGroups', JSON.stringify(cfg.sandboxGroups))
+      set({ sandboxIcons: cfg.sandboxIcons, sandboxColors: cfg.sandboxColors, sandboxGroups: cfg.sandboxGroups })
     }).catch(() => {})
   },
 
@@ -337,17 +304,6 @@ export const useStore = create<AppState>((set) => ({
       .catch(() => {})
   },
 
-  setProjectName: (workspace, name) =>
-    set((state) => {
-      const next = { ...state.projectNames }
-      const trimmed = name?.trim()
-      if (trimmed) next[workspace] = trimmed
-      else delete next[workspace]
-      localStorage.setItem('minipit:projectNames', JSON.stringify(next))
-      window.minipit?.projectConfigSet('names', workspace, trimmed ?? null)
-      return { projectNames: next }
-    }),
-
   setDisplay: (key, value) =>
     set((state) => {
       const next = { ...state.display, [key]: value }
@@ -362,7 +318,6 @@ export const useStore = create<AppState>((set) => ({
       return { display: next }
     }),
 
-  setCustomizeProject: (workspace) => set({ customizeProject: workspace }),
   setCustomizeSandbox: (name) => set({ customizeSandbox: name }),
 
   loadSandboxIsolation: () => {
@@ -381,25 +336,65 @@ export const useStore = create<AppState>((set) => ({
       return { sandboxIcons: next }
     }),
 
-  setPickerOpen: (open) => set({ pickerOpen: open }),
+  setSandboxColor: (name, hex) =>
+    set((state) => {
+      const next = { ...state.sandboxColors }
+      if (hex) next[name] = hex
+      else delete next[name]
+      localStorage.setItem('minipit:sandboxColors', JSON.stringify(next))
+      window.minipit?.projectConfigSet('sandboxColors', name, hex ?? null)
+      return { sandboxColors: next }
+    }),
 
-  loadProjects: async () => {
-    const p = await window.minipit?.listProjects().catch(() => [])
-    set({ customProjects: p ?? [] })
+  // ── Groups ────────────────────────────────────────────────────────────────
+  loadGroups: () => {
+    window.minipit?.groupsGet().then((g) => set({ groups: g ?? [] })).catch(() => {})
   },
 
-  addProject: async () => {
-    const dir = await window.minipit?.addProject().catch(() => null)
-    if (dir) {
-      set((s) => ({ customProjects: s.customProjects.includes(dir) ? s.customProjects : [...s.customProjects, dir] }))
+  createGroup: (name) => {
+    const id = `g-${Date.now().toString(36)}-${Math.round(Math.random() * 1e9).toString(36)}`
+    const groups = [...useStore.getState().groups, { id, name: name.trim() || 'Group' }]
+    set({ groups })
+    window.minipit?.groupsSet(groups)
+    return id
+  },
+
+  renameGroup: (id, name) => {
+    const groups = useStore.getState().groups.map((g) => (g.id === id ? { ...g, name: name.trim() || g.name } : g))
+    set({ groups })
+    window.minipit?.groupsSet(groups)
+  },
+
+  deleteGroup: (id, deleteSandboxes) => {
+    const state = useStore.getState()
+    const members = Object.entries(state.sandboxGroups).filter(([, gid]) => gid === id).map(([n]) => n)
+    // Drop the group + clear its members' membership (persist each removal).
+    const groups = state.groups.filter((g) => g.id !== id)
+    const nextMap = { ...state.sandboxGroups }
+    for (const n of members) { delete nextMap[n]; window.minipit?.projectConfigSet('sandboxGroups', n, null) }
+    localStorage.setItem('minipit:sandboxGroups', JSON.stringify(nextMap))
+    set({ groups, sandboxGroups: nextMap })
+    window.minipit?.groupsSet(groups)
+    if (deleteSandboxes) {
+      for (const n of members) {
+        const sb = state.sandboxes.find((s) => s.name === n)
+        if (sb) useStore.getState().updateSandbox(sb.id, { status: 'deleting' })
+        window.minipit?.deleteSandbox(n).catch(() => {})
+      }
     }
-    return dir ?? null
   },
 
-  removeProject: (dir, deleteFolder) => {
-    window.minipit?.removeProject(dir, deleteFolder).catch(() => {})
-    set((s) => ({ customProjects: s.customProjects.filter((d) => d !== dir) }))
-  },
+  setSandboxGroup: (name, groupId) =>
+    set((state) => {
+      const next = { ...state.sandboxGroups }
+      if (groupId) next[name] = groupId
+      else delete next[name]
+      localStorage.setItem('minipit:sandboxGroups', JSON.stringify(next))
+      window.minipit?.projectConfigSet('sandboxGroups', name, groupId ?? null)
+      return { sandboxGroups: next }
+    }),
+
+  setPickerOpen: (open) => set({ pickerOpen: open }),
 
   setThemePref: (pref) =>
     set((state) => {
@@ -608,10 +603,4 @@ export function unackedBlockCount(
 ): number {
   const seen = seenAt[name] ?? 0
   return (blocks[name] ?? []).filter((b) => b.at > seen).length
-}
-
-// Display name for a project: the user's rename alias if set, else the folder
-// basename of the workspace path.
-export function projectDisplayName(names: Record<string, string>, workspace: string): string {
-  return names[workspace]?.trim() || workspace.split('/').pop() || workspace
 }

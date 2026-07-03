@@ -4,7 +4,6 @@ import { useStore } from './store'
 import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
 import { HomePage } from './components/HomePage'
-import { ProjectsPage } from './components/ProjectsPage'
 import { SandboxDetail } from './components/SandboxDetail'
 import { TemplatesPage } from './components/TemplatesPage'
 import { KitsPage } from './components/KitsPage'
@@ -21,17 +20,18 @@ import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
 
   useEffect(() => {
     // Initial load
     window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
-    loadProjects()
-    // Pull durable per-project appearance from the main-process store (and
-    // migrate any localStorage-cached config into it on first run).
+    // Pull durable per-sandbox appearance (color/icon) + group membership from
+    // the main-process store, migrating any localStorage cache on first run.
     syncProjectConfig()
     // Per-sandbox working-tree isolation (for the shared-folder warning).
     loadSandboxIsolation()
+    // Named sandbox groups.
+    useStore.getState().loadGroups()
 
     // Live updates from main process
     const unsub1 = window.minipit?.onSandboxesUpdated((s) => {
@@ -85,18 +85,8 @@ export function App() {
       if (sb) useStore.getState().refreshSandboxChanges(name, sb.workspace)
     })
 
-    // Menu-bar (tray) quick-open: jump to a sandbox or a project.
+    // Menu-bar (tray) quick-open: jump to a sandbox.
     const unsub6 = window.minipit?.onOpenSandbox((name) => setActiveSandboxId(name))
-    const unsub7 = window.minipit?.onOpenProject((workspace) => {
-      setActiveProject(workspace)
-      setActivePage('projects')
-    })
-    // Menu-bar "New Project…": run the same pick-folder flow as the sidebar.
-    const unsub8 = window.minipit?.onNewProject?.(() => {
-      useStore.getState().addProject().then((dir) => {
-        if (dir) { setActiveProject(dir); setActivePage('projects') }
-      })
-    })
 
     return () => {
       unsub1?.()
@@ -108,8 +98,6 @@ export function App() {
       unsub4?.()
       unsub5?.()
       unsub6?.()
-      unsub7?.()
-      unsub8?.()
       unsubFiles?.()
     }
   }, [])
@@ -170,7 +158,6 @@ export function App() {
       <div className="body">
         <Sidebar />
         <div className="content">
-          {activePage === 'projects'  && <ProjectsPage />}
           {activePage === 'sandboxes' && <HomePage />}
           {activePage === 'sandbox'   && <SandboxDetail />}
           {activePage === 'templates' && <TemplatesPage />}

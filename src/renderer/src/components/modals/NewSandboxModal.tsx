@@ -19,7 +19,7 @@ function deriveName(agent: string, workspace: string): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, defaultKits, sandboxes } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, defaultKits, sandboxes, groups, createGroup, setSandboxGroup } = useStore()
   const feature = newSandboxFeature
   // Feature mode always isolates (a feature is an isolated clone you merge back).
   const closeModal = () => { setNewSandboxFeature(false); setModal(null) }
@@ -44,6 +44,9 @@ export function NewSandboxModal() {
   // A session inside a project shares that one folder, so isolate by default to
   // keep concurrent sandboxes from stomping the same working tree (toggleable).
   const [clone, setClone]             = useState(!!newSandboxWorkspace || newSandboxFeature)
+  // Optional group assignment. '' = no group, '__new' = create one from newGroupName.
+  const [groupSel, setGroupSel]       = useState('')
+  const [newGroupName, setNewGroupName] = useState('')
   // For --clone: whether the workspace is a Git repo (null = unknown/checking).
   const [wsIsRepo, setWsIsRepo]       = useState<boolean | null>(null)
   const [gitIniting, setGitIniting]   = useState(false)
@@ -204,6 +207,9 @@ export function NewSandboxModal() {
         })
         const sandboxes = await window.minipit?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
+        // Assign to a group if one was chosen (or created inline).
+        const gid = groupSel === '__new' ? (newGroupName.trim() ? createGroup(newGroupName) : null) : (groupSel || null)
+        if (gid) setSandboxGroup(finalName, gid)
         removeCreatingSandbox(finalName)
         setHighlightSandbox(finalName)
         unsub?.()
@@ -257,6 +263,25 @@ export function NewSandboxModal() {
                 <RefreshCw size={13} />
               </button>
             </div>
+          </div>
+
+          {/* Group — optional; assign to an existing group or create one */}
+          <div className="fg">
+            <label className="flabel">Group <span className="flabel-hint">optional</span></label>
+            <select className="finput" value={groupSel} onChange={(e) => setGroupSel(e.target.value)}>
+              <option value="">No group</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              <option value="__new">＋ New group…</option>
+            </select>
+            {groupSel === '__new' && (
+              <input
+                className="finput"
+                style={{ marginTop: 6 }}
+                value={newGroupName}
+                placeholder="New group name"
+                onChange={(e) => setNewGroupName(e.target.value)}
+              />
+            )}
           </div>
 
           {/* Agent — big dropdown (always shown) */}

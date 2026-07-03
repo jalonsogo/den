@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../../store'
 
 // Reusable single-input dialog driven by the store's `prompt` config, so any
@@ -10,6 +10,15 @@ export function PromptModal() {
   const [value, setValue] = useState(prompt?.defaultValue ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  // The modal returns null while closed but stays mounted, so reset local state
+  // whenever a new prompt opens — otherwise a prior submit's busy=true (never
+  // cleared on success) would leave the next prompt stuck on "Working…".
+  useEffect(() => {
+    setBusy(false)
+    setError('')
+    setValue(prompt?.defaultValue ?? '')
+  }, [prompt])
 
   if (!prompt) return null
 
