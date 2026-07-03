@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-07-03
+## [0.5.5] - 2026-07-03
 
 ### Added
 - Feature workflow on `--clone` (sbx doesn't support git worktrees): **New feature…** on a project starts an isolated clone-mode sandbox, and **Bring work to host…** fetches its commits into a `sandbox/<name>` review branch, then offers to open a PR (via `gh`) or merge — review-first, never auto-merging your working branch, with conflict-safe aborts.
@@ -120,8 +120,8 @@ Initial release — the first automated, cross-platform build (macOS + Windows).
 - Theme submenu and den branding.
 - GitHub Actions release pipeline that builds and publishes macOS (`.dmg`/`.zip`) and Windows (NSIS `.exe`) installers on each `v*` tag.
 
-[Unreleased]: https://github.com/jalonsogo/den/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/jalonsogo/den/compare/v0.5.0...v0.6.0
+[Unreleased]: https://github.com/jalonsogo/den/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/jalonsogo/den/compare/v0.5.0...v0.5.5
 [0.5.0]: https://github.com/jalonsogo/den/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jalonsogo/den/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/jalonsogo/den/compare/v0.3.0...v0.3.1
