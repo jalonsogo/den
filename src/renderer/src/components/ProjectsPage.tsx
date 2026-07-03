@@ -57,7 +57,7 @@ export function ProjectsPage() {
           <button className="fv-back" onClick={() => setActiveProject(null)} title="All projects">
             <ChevronLeft size={16} />
           </button>
-          <ProjectAvatar workspace={activeProject} size={24} />
+          <ProjectAvatar workspace={activeProject} size={24} linkToContextMenu />
           <span className="page-title">{name}</span>
           <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => openNew(activeProject)}>
             <Plus size={13} /> New sandbox

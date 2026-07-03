@@ -1924,12 +1924,15 @@ function setupIPC(): void {
   // ── Per-project appearance (color / icon / display name) ──────────────────
   // Persisted in the file-based electron-store (not the renderer's localStorage,
   // which is scoped to the dev-server origin and lost when the port shifts).
-  type ProjectConfig = { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string> }
-  const CFG_KEYS = { colors: 'projectColors', icons: 'projectIcons', names: 'projectNames' } as const
+  // `sandboxIcons` (keyed by sandbox name) rides along on the same durable store
+  // as the project appearance maps.
+  type ProjectConfig = { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }
+  const CFG_KEYS = { colors: 'projectColors', icons: 'projectIcons', names: 'projectNames', sandboxIcons: 'sandboxIcons' } as const
   const readProjectConfig = (): ProjectConfig => ({
     colors: (store.get(CFG_KEYS.colors) as Record<string, string>) ?? {},
     icons: (store.get(CFG_KEYS.icons) as Record<string, string>) ?? {},
-    names: (store.get(CFG_KEYS.names) as Record<string, string>) ?? {}
+    names: (store.get(CFG_KEYS.names) as Record<string, string>) ?? {},
+    sandboxIcons: (store.get(CFG_KEYS.sandboxIcons) as Record<string, string>) ?? {}
   })
 
   // One-time-per-origin sync from the renderer: merge any localStorage-cached

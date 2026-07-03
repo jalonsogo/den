@@ -37,14 +37,18 @@ export function HomePage() {
   // Projects = distinct workspaces across sandboxes, plus empty custom projects.
   const projectCount = new Set([...sandboxes.map((s) => s.workspace), ...customProjects]).size
 
-  // Group running sandboxes under their project (workspace) for the tree view.
-  const runningByProject = new Map<string, typeof running>()
-  for (const s of running) {
-    if (!runningByProject.has(s.workspace)) runningByProject.set(s.workspace, [])
-    runningByProject.get(s.workspace)!.push(s)
+  // Group ALL sandboxes (running + stopped) under their project (workspace) for
+  // the tree view — running first within each project, then alphabetical.
+  const byProject = new Map<string, typeof sandboxes>()
+  for (const s of sandboxes) {
+    if (!byProject.has(s.workspace)) byProject.set(s.workspace, [])
+    byProject.get(s.workspace)!.push(s)
   }
-  const runningGroups = [...runningByProject.entries()].sort((a, b) =>
-    projectName(a[0]).localeCompare(projectName(b[0])))
+  const groups = [...byProject.entries()]
+    .map(([ws, list]) => [ws, [...list].sort((a, b) =>
+      (a.status === 'running' ? 0 : 1) - (b.status === 'running' ? 0 : 1) || a.name.localeCompare(b.name)
+    )] as const)
+    .sort((a, b) => projectName(a[0]).localeCompare(projectName(b[0])))
 
   const [version, setVersion] = useState<string | null>(null)
   const [release, setRelease] = useState<SbxRelease | null>(null)
@@ -218,33 +222,34 @@ export function HomePage() {
           </div>
         </div>
 
-        <div className="ss-hdr" style={{ marginTop: 26 }}>Running now</div>
-        {running.length === 0 ? (
-          <div style={{ color: 'var(--t3)', fontSize: 13, padding: '14px 2px' }}>
-            Nothing running. Create a sandbox to get started.
-          </div>
-        ) : (
-          runningGroups.map(([workspace, list]) => (
-            <div key={workspace} className="home-tree">
-              <div
-                className="home-tree-proj"
-                onClick={() => { setActiveProject(workspace); setActivePage('projects') }}
-              >
-                <ProjectAvatar workspace={workspace} size={18} editable={false} />
-                <span className="home-tree-proj-name">{projectName(workspace)}</span>
-                <span className="home-tree-proj-count">{list.length}</span>
-              </div>
-              {list.map((s) => (
-                <div key={s.id} className="home-row home-tree-row" onClick={() => setActiveSandboxId(s.id)}>
-                  <SandboxAvatar sandbox={s} size={26} alert={hasUnacked(s.name)} activity={agentActivity[s.name] ?? null} />
-                  <span className="home-row-name">{s.name}</span>
-                  <span className="home-row-sub">{s.agent}</span>
-                  {s.uptimeSeconds ? <span className="home-row-up" style={{ marginLeft: 'auto' }}>{formatUptime(s.uptimeSeconds)}</span> : null}
-                </div>
-              ))}
+        <div className="ss-hdr" style={{ marginTop: 26 }}>Sandboxes</div>
+        {groups.map(([workspace, list]) => (
+          <div key={workspace} className="home-tree">
+            <div
+              className="home-tree-proj"
+              onClick={() => { setActiveProject(workspace); setActivePage('projects') }}
+            >
+              <ProjectAvatar workspace={workspace} size={18} editable={false} />
+              <span className="home-tree-proj-name">{projectName(workspace)}</span>
+              <span className="home-tree-proj-count">{list.length}</span>
             </div>
-          ))
-        )}
+            {list.map((s) => {
+              const isRunning = s.status === 'running'
+              return (
+                <div
+                  key={s.id}
+                  className={`home-row home-tree-row${isRunning ? '' : ' is-stopped'}`}
+                  onClick={() => setActiveSandboxId(s.id)}
+                >
+                  <SandboxAvatar sandbox={s} size={26} alert={hasUnacked(s.name)} activity={isRunning ? (agentActivity[s.name] ?? null) : null} />
+                  <span className="home-row-name">{s.name}</span>
+                  <span className="home-row-sub">{isRunning ? s.agent : 'Stopped'}</span>
+                  {isRunning && s.uptimeSeconds ? <span className="home-row-up" style={{ marginLeft: 'auto' }}>{formatUptime(s.uptimeSeconds)}</span> : null}
+                </div>
+              )
+            })}
+          </div>
+        ))}
       </div>
     </div>
   )

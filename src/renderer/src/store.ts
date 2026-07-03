@@ -51,6 +51,8 @@ interface AppState {
   projectColors: Record<string, string>
   projectIcons: Record<string, string>
   projectNames: Record<string, string>
+  // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
+  sandboxIcons: Record<string, string>
   // Host-side git summary per workspace path (lazy-loaded, cached).
   gitInfo: Record<string, { isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
   // Uncommitted-change counts per sandbox name (running sandboxes only).
@@ -62,6 +64,8 @@ interface AppState {
   // Signal for the sidebar project avatar to open its customize picker (set by
   // the project right-click menu). Cleared once the picker opens.
   customizeProject: string | null
+  // Same, for a sandbox's icon picker (the detail-view avatar listens).
+  customizeSandbox: string | null
   customProjects: string[]
   // Network-policy denials, newest-first per sandbox name, with a per-sandbox
   // "seen" watermark so attention badges clear once the user looks.
@@ -95,6 +99,8 @@ interface AppState {
   setProjectColor:    (workspace: string, hex: string | null) => void
   setProjectIcon:     (workspace: string, icon: string | null) => void
   setProjectName:     (workspace: string, name: string | null) => void
+  setSandboxIcon:     (name: string, iconKey: string | null) => void
+  setCustomizeSandbox:(name: string | null) => void
   syncProjectConfig:  () => void
   loadGitInfo:        (workspace: string, force?: boolean) => void
   refreshSandboxChanges: (name: string, workspace: string) => void
@@ -126,7 +132,7 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   sandboxes: [],
   activeSandboxId: null,
-  activePage: 'home',
+  activePage: 'sandboxes',
   activeTab: 'terminal',
   modal: null,
   prompt: null,
@@ -153,6 +159,9 @@ export const useStore = create<AppState>((set) => ({
   projectIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:projectIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
+  sandboxIcons: (() => {
+    try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
+  })(),
   projectNames: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:projectNames') ?? '{}') ?? {} } catch { return {} }
   })(),
@@ -164,6 +173,7 @@ export const useStore = create<AppState>((set) => ({
   })(),
   pickerOpen: false,
   customizeProject: null,
+  customizeSandbox: null,
   customProjects: [],
   policyBlocks: {},
   blocksSeenAt: {},
@@ -281,14 +291,16 @@ export const useStore = create<AppState>((set) => ({
     const local = {
       colors: readLS('minipit:projectColors'),
       icons: readLS('minipit:projectIcons'),
-      names: readLS('minipit:projectNames')
+      names: readLS('minipit:projectNames'),
+      sandboxIcons: readLS('minipit:sandboxIcons')
     }
     window.minipit?.projectConfigSync(local).then((cfg) => {
       if (!cfg) return
       localStorage.setItem('minipit:projectColors', JSON.stringify(cfg.colors))
       localStorage.setItem('minipit:projectIcons', JSON.stringify(cfg.icons))
       localStorage.setItem('minipit:projectNames', JSON.stringify(cfg.names))
-      set({ projectColors: cfg.colors, projectIcons: cfg.icons, projectNames: cfg.names })
+      localStorage.setItem('minipit:sandboxIcons', JSON.stringify(cfg.sandboxIcons))
+      set({ projectColors: cfg.colors, projectIcons: cfg.icons, projectNames: cfg.names, sandboxIcons: cfg.sandboxIcons })
     }).catch(() => {})
   },
 
@@ -332,6 +344,17 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   setCustomizeProject: (workspace) => set({ customizeProject: workspace }),
+  setCustomizeSandbox: (name) => set({ customizeSandbox: name }),
+
+  setSandboxIcon: (name, iconKey) =>
+    set((state) => {
+      const next = { ...state.sandboxIcons }
+      if (iconKey) next[name] = iconKey
+      else delete next[name]
+      localStorage.setItem('minipit:sandboxIcons', JSON.stringify(next))
+      window.minipit?.projectConfigSet('sandboxIcons', name, iconKey ?? null)
+      return { sandboxIcons: next }
+    }),
 
   setPickerOpen: (open) => set({ pickerOpen: open }),
 

@@ -49,7 +49,7 @@ export function Toolbar() {
   }
 
   const getTitle = () => {
-    if (activePage === 'home')       return { title: 'Home', sub: 'Overview' }
+    if (activePage === 'sandboxes')  return { title: 'Sandboxes', sub: 'Overview' }
     if (activePage === 'projects')   return { title: 'Projects', sub: 'Workspaces & their sandboxes' }
     if (activePage === 'templates')  return { title: 'Templates', sub: 'Reusable sandbox images' }
     if (activePage === 'mixins')     return { title: 'Mixin Kits', sub: 'Add-ons layered onto an agent' }

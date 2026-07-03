@@ -4,7 +4,6 @@ import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
 import { HomePage } from './components/HomePage'
 import { ProjectsPage } from './components/ProjectsPage'
-import { SandboxesPage } from './components/SandboxesPage'
 import { SandboxDetail } from './components/SandboxDetail'
 import { TemplatesPage } from './components/TemplatesPage'
 import { KitsPage } from './components/KitsPage'
@@ -116,9 +115,8 @@ export function App() {
       <div className="body">
         <Sidebar />
         <div className="content">
-          {activePage === 'home'      && <HomePage />}
           {activePage === 'projects'  && <ProjectsPage />}
-          {activePage === 'sandboxes' && <SandboxesPage />}
+          {activePage === 'sandboxes' && <HomePage />}
           {activePage === 'sandbox'   && <SandboxDetail />}
           {activePage === 'templates' && <TemplatesPage />}
           {activePage === 'mixins'    && <KitsPage variant="mixin" />}

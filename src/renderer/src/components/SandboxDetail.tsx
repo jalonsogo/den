@@ -5,6 +5,7 @@ import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
 import { FilesPanel } from './FilesPanel'
 import { AgentIcon } from './AgentIcon'
+import { SandboxAvatar } from './SandboxAvatar'
 
 type Dock = 'files' | 'info' | null
 
@@ -82,7 +83,7 @@ export function SandboxDetail() {
   return (
     <div className="detail">
       <div className="detail-header">
-        <div className={`d-dot ${sandbox.status === 'running' ? 'running' : 'stopped'}`} />
+        <SandboxAvatar sandbox={sandbox} size={22} editable linkToContextMenu />
         <div className="d-name">{sandbox.name}</div>
         <span className="d-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <AgentIcon agent={sandbox.agent} size={12} />

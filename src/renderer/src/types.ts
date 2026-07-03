@@ -29,7 +29,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'shell',          label: 'Shell' }
 ]
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
-export type PageType = 'home' | 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings' | 'logs'
+export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings' | 'logs'
 export type TabType = 'terminal' | 'info'
 export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
 
@@ -279,8 +279,8 @@ declare global {
       addProject(): Promise<string | null>
       removeProject(dir: string, deleteFolder?: boolean): Promise<{ ok: boolean; error?: string }>
       defaultWorkspace(): Promise<string>
-      projectConfigSync(local: { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string> }): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string> }>
-      projectConfigSet(field: 'colors' | 'icons' | 'names', workspace: string, value: string | null): Promise<void>
+      projectConfigSync(local: { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }>
+      projectConfigSet(field: 'colors' | 'icons' | 'names' | 'sandboxIcons', workspace: string, value: string | null): Promise<void>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
