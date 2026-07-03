@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Plus, FolderOpen, ArrowUp, X, HardDrive, ShieldAlert, Zap, ShieldCheck, Boxes, Terminal, AlertTriangle } from 'lucide-react'
+import { Plus, ArrowUp, X, HardDrive, ShieldAlert, Zap, ShieldCheck, Boxes, Terminal } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import type { SbxRelease, StorageUsage } from '../types'
-import { ProjectAvatar } from './ProjectAvatar'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime, formatBytes } from '../lib/utils'
 import brandLight from '../assets/brand-light.svg'
@@ -18,14 +17,14 @@ function isOlder(a: number[] | null, b: number[] | null): boolean {
   return false
 }
 
-const projectName = (workspace: string): string => workspace.split('/').pop() || workspace
 
 export function HomePage() {
-  const { sandboxes, customProjects, setModal, setActiveSandboxId, setActivePage, setActiveProject } = useStore()
+  const { sandboxes, setModal, setActiveSandboxId, setActivePage } = useStore()
   const policyBlocks = useStore((s) => s.policyBlocks)
   const blocksSeenAt = useStore((s) => s.blocksSeenAt)
   const agentActivity = useStore((s) => s.agentActivity)
-  const sandboxIsolation = useStore((s) => s.sandboxIsolation)
+  const groups = useStore((s) => s.groups)
+  const sandboxGroups = useStore((s) => s.sandboxGroups)
   const theme = useStore((s) => s.theme)
   const brandMark = theme === 'dark' ? brandDark : brandLight
   const running = sandboxes.filter((s) => s.status === 'running')
@@ -35,21 +34,24 @@ export function HomePage() {
   const blocked = sandboxes.filter((s) => (policyBlocks[s.name] ?? []).length > 0)
   const hasUnacked = (name: string) => unackedBlockCount(policyBlocks, blocksSeenAt, name) > 0
 
-  // Projects = distinct workspaces across sandboxes, plus empty custom projects.
-  const projectCount = new Set([...sandboxes.map((s) => s.workspace), ...customProjects]).size
-
-  // Group ALL sandboxes (running + stopped) under their project (workspace) for
-  // the tree view — running first within each project, then alphabetical.
-  const byProject = new Map<string, typeof sandboxes>()
+  // Group the sandboxes by group membership for the tree view (running first
+  // within each). Named groups first, then ungrouped sandboxes (label null).
+  const orderList = (list: typeof sandboxes) => [...list].sort((a, b) =>
+    (a.status === 'running' ? 0 : 1) - (b.status === 'running' ? 0 : 1) || a.name.localeCompare(b.name))
+  const byId = new Map(groups.map((g) => [g.id, g]))
+  const ungrouped: typeof sandboxes = []
+  const byGroup = new Map<string, typeof sandboxes>()
   for (const s of sandboxes) {
-    if (!byProject.has(s.workspace)) byProject.set(s.workspace, [])
-    byProject.get(s.workspace)!.push(s)
+    const gid = sandboxGroups[s.name]
+    if (gid && byId.has(gid)) { if (!byGroup.has(gid)) byGroup.set(gid, []); byGroup.get(gid)!.push(s) }
+    else ungrouped.push(s)
   }
-  const groups = [...byProject.entries()]
-    .map(([ws, list]) => [ws, [...list].sort((a, b) =>
-      (a.status === 'running' ? 0 : 1) - (b.status === 'running' ? 0 : 1) || a.name.localeCompare(b.name)
-    )] as const)
-    .sort((a, b) => projectName(a[0]).localeCompare(projectName(b[0])))
+  const treeSections: { key: string; label: string | null; list: typeof sandboxes }[] = []
+  for (const g of [...groups].sort((a, b) => a.name.localeCompare(b.name))) {
+    const list = byGroup.get(g.id)
+    if (list?.length) treeSections.push({ key: g.id, label: g.name, list: orderList(list) })
+  }
+  if (ungrouped.length) treeSections.push({ key: '__ungrouped', label: null, list: orderList(ungrouped) })
 
   const [version, setVersion] = useState<string | null>(null)
   const [release, setRelease] = useState<SbxRelease | null>(null)
@@ -195,9 +197,6 @@ export function HomePage() {
             <span className="home-ov-pill"><i className="home-ov-dot" />{stopped.length} stopped</span>
           </div>
           <div className="home-ov-meta">
-            <button className="home-ov-chip" onClick={() => setActivePage('projects')} title="View projects">
-              <FolderOpen size={13} />{projectCount} project{projectCount === 1 ? '' : 's'}
-            </button>
             <span
               className="home-ov-chip home-ov-chip-static"
               title={showBreakdown ? `Sandboxes ${fmtBytes(storage!.sandboxes.bytes)} · Templates ${fmtBytes(storage!.templates.bytes)}` : undefined}
@@ -208,24 +207,14 @@ export function HomePage() {
         </div>
 
         <div className="ss-hdr" style={{ marginTop: 22 }}>Your sandboxes</div>
-        {groups.map(([workspace, list]) => (
-          <div key={workspace} className="home-tree">
-            <div
-              className="home-tree-proj"
-              onClick={() => { setActiveProject(workspace); setActivePage('projects') }}
-            >
-              <ProjectAvatar workspace={workspace} size={18} editable={false} />
-              <span className="home-tree-proj-name">{projectName(workspace)}</span>
-              {list.filter((s) => sandboxIsolation[s.name] === false).length >= 2 && (
-                <span
-                  className="sb-group-warn"
-                  title="Multiple sandboxes mount this folder directly — their edits can collide."
-                >
-                  <AlertTriangle size={13} />
-                </span>
-              )}
-            </div>
-            {list.map((s) => {
+        {treeSections.map((sec) => (
+          <div key={sec.key} className="home-tree">
+            {sec.label && (
+              <div className="home-tree-proj home-tree-group">
+                <span className="home-tree-proj-name">{sec.label}</span>
+              </div>
+            )}
+            {sec.list.map((s) => {
               const isRunning = s.status === 'running'
               return (
                 <div

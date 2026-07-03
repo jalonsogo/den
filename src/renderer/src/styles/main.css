@@ -1825,6 +1825,8 @@ html, body, #root {
   display: flex; align-items: center; gap: 8px; padding: 6px 2px; cursor: pointer; border-radius: 6px;
 }
 .home-tree-proj:hover { background: var(--bg-subtle); }
+.home-tree-group { cursor: default; }
+.home-tree-group:hover { background: none; }
 .home-tree-proj-name { font-size: 12px; font-weight: 600; color: var(--t2); letter-spacing: -0.01em; }
 .home-tree-proj-count {
   font-size: 10.5px; font-weight: 600; color: var(--t3); font-variant-numeric: tabular-nums;
