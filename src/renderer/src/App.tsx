@@ -5,7 +5,6 @@ import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
 import { HomePage } from './components/HomePage'
 import { ProjectsPage } from './components/ProjectsPage'
-import { SandboxesPage } from './components/SandboxesPage'
 import { SandboxDetail } from './components/SandboxDetail'
 import { TemplatesPage } from './components/TemplatesPage'
 import { KitsPage } from './components/KitsPage'
@@ -22,7 +21,7 @@ import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects, addPolicyBlock, setAgentActivity, syncProjectConfig } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
 
   useEffect(() => {
     // Initial load
@@ -31,10 +30,14 @@ export function App() {
     // Pull durable per-project appearance from the main-process store (and
     // migrate any localStorage-cached config into it on first run).
     syncProjectConfig()
+    // Per-sandbox working-tree isolation (for the shared-folder warning).
+    loadSandboxIsolation()
 
     // Live updates from main process
     const unsub1 = window.minipit?.onSandboxesUpdated((s) => {
       setSandboxes(s as Sandbox[])
+      // A create/delete changes the isolation map — keep it fresh.
+      loadSandboxIsolation()
     })
 
     // Stream real log lines from sbx processes
@@ -117,9 +120,8 @@ export function App() {
       <div className="body">
         <Sidebar />
         <div className="content">
-          {activePage === 'home'      && <HomePage />}
           {activePage === 'projects'  && <ProjectsPage />}
-          {activePage === 'sandboxes' && <SandboxesPage />}
+          {activePage === 'sandboxes' && <HomePage />}
           {activePage === 'sandbox'   && <SandboxDetail />}
           {activePage === 'templates' && <TemplatesPage />}
           {activePage === 'mixins'    && <KitsPage variant="mixin" />}

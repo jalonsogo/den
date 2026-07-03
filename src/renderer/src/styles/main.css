@@ -299,6 +299,8 @@ html, body, #root {
   /* Surface the badge ring blends into; overridden off the sidebar. */
   --avatar-surface: var(--sb);
 }
+.sbx-avatar-editable { cursor: pointer; transition: filter 0.1s; }
+.sbx-avatar-editable:hover { filter: brightness(1.08); }
 .sbx-avatar-txt { font-size: 11px; font-weight: 600; color: inherit; letter-spacing: 0.2px; }
 .sbx-avatar-badge {
   position: absolute; right: -3px; bottom: -3px;
@@ -327,7 +329,9 @@ html, body, #root {
   50% { opacity: 0.45; transform: scale(0.78); }
 }
 .sb-item-sub.is-working { color: var(--yellow); }
-.sb-item.is-stopped .sbx-avatar { filter: grayscale(1); opacity: 0.5; }
+/* Dim (but don't grayscale) stopped avatars, so the project color still reads —
+   the grey status dot + muted name already signal "stopped". */
+.sb-item.is-stopped .sbx-avatar { opacity: 0.7; }
 
 /* Toolbar active-sandbox status dot */
 .tb-status-dot {
@@ -738,6 +742,20 @@ html, body, #root {
   margin-left: 2px; font-size: 10px; font-weight: 500; color: var(--sb-muted);
   background: var(--sb-active); border-radius: 9px; padding: 1px 6px; flex-shrink: 0;
 }
+/* Project group header: name + count + hover-reveal add button. */
+.sb-group-add {
+  width: 20px; height: 20px; flex-shrink: 0; margin-left: auto;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: none; color: var(--sb-muted); cursor: pointer;
+  border-radius: 6px; opacity: 0; transition: opacity 0.1s, background 0.1s, color 0.1s;
+}
+.sb-group-hd:hover .sb-group-add { opacity: 0.7; }
+.sb-group-add:hover { opacity: 1; background: var(--sb-active); color: var(--sb-fg); }
+/* Shared-working-tree warning on a project header (sidebar + dashboard). */
+.sb-group-warn { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--yellow); }
+
+/* First sidebar section (Sandboxes) — replaces the old Home band's top spacing. */
+.sb-section-first { padding-top: 10px; }
 
 /* Section header whose title navigates */
 .sb-sec-head { display: flex; align-items: center; gap: 6px; padding: 0 8px 5px; }
@@ -919,6 +937,16 @@ html, body, #root {
   padding: 0 16px;
   gap: 9px;
 }
+/* Workspace git summary row under the detail header. */
+.detail-subhdr {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 5px 16px; border-bottom: 1px solid var(--border);
+  font-size: 11.5px; color: var(--t3);
+}
+.detail-subhdr > svg { flex-shrink: 0; }
+.ds-folder { color: var(--t2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-branch { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.ds-branch > svg { opacity: 0.7; }
 
 .d-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .d-dot.running { background: var(--green); animation: pulse 2s infinite; }
@@ -1708,6 +1736,9 @@ html, body, #root {
   display: inline-flex; align-items: center; justify-content: center; background: var(--bg-subtle);
 }
 .home-tree-row { margin-left: 9px; padding-left: 12px; border-left: 1px solid var(--border); border-radius: 0 6px 6px 0; }
+/* Dim stopped rows (keep the avatar hue, mirroring the sidebar). */
+.home-tree-row.is-stopped .sbx-avatar { opacity: 0.7; }
+.home-tree-row.is-stopped .home-row-name { color: var(--t2); }
 .home-row-stop {
   display: flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 5px;

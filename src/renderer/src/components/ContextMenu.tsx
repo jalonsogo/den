@@ -54,6 +54,8 @@ export function ContextMenu() {
   const setNewSandboxWorkspace = useStore((s) => s.setNewSandboxWorkspace)
   const setModal = useStore((s) => s.setModal)
   const setCustomizeProject = useStore((s) => s.setCustomizeProject)
+  const setCustomizeSandbox = useStore((s) => s.setCustomizeSandbox)
+  const setActiveSandboxId = useStore((s) => s.setActiveSandboxId)
   const gitInfoMap = useStore((s) => s.gitInfo)
   const loadGitInfo = useStore((s) => s.loadGitInfo)
   const ref = useRef<HTMLDivElement>(null)
@@ -96,7 +98,9 @@ export function ContextMenu() {
     const newSandbox = () => { close(); setNewSandboxWorkspace(projectWs); setModal('new-sandbox') }
     const reveal = () => { close(); window.minipit?.openInFinder(projectWs) }
     const copyPath = () => { close(); navigator.clipboard?.writeText(projectWs).catch(() => {}) }
-    const customize = () => { close(); setCustomizeProject(projectWs) }
+    // Open the color picker on the Projects page (whose avatar listens for the
+    // customize signal) — the sidebar no longer shows a per-project swatch.
+    const customize = () => { close(); setActiveProject(projectWs); setActivePage('projects'); setCustomizeProject(projectWs) }
     const git = gitInfoMap[projectWs]
     const initGit = async () => {
       close()
@@ -155,7 +159,6 @@ export function ContextMenu() {
         <div className="ctx-sep" />
         <SubMenu label="Manage">
           <div className="ctx-sub-item" onClick={rename}>Rename…</div>
-          <div className="ctx-sub-sep" />
           <div className="ctx-sub-item" onClick={reveal}>Reveal in Finder <span className="ctx-kbd">⇧⌘F</span></div>
           <div className="ctx-sub-item" onClick={copyPath}>Copy path</div>
         </SubMenu>
@@ -291,6 +294,18 @@ export function ContextMenu() {
       </div>
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(sandbox.workspace).catch(() => {}) }}>Copy Path</div>
       <div className="ctx-sep" />
+      <div
+        className="ctx-item"
+        onClick={() => {
+          // Open the sandbox and signal its detail-view avatar to open the picker.
+          setContextMenu({ visible: false })
+          setActiveSandboxId(sandbox.id)
+          setActivePage('sandbox')
+          setCustomizeSandbox(sandbox.name)
+        }}
+      >
+        Customize…
+      </div>
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs</div>
       <div className="ctx-sep" />

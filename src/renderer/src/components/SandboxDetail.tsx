@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react'
-import { MoreVertical, Play, Square } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, FolderGit2 } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
 import { FilesPanel } from './FilesPanel'
 import { AgentIcon } from './AgentIcon'
+import { SandboxAvatar } from './SandboxAvatar'
 
 type Dock = 'files' | 'info' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
+
+  // Load the workspace's host-side git info (branch/remote) — the project git
+  // summary that used to live in the (now-removed) sidebar Projects section.
+  useEffect(() => { if (sandbox?.workspace) loadGitInfo(sandbox.workspace) }, [sandbox?.workspace, loadGitInfo])
   const [dock, setDock] = useState<Dock>(null)
   const [dockWidth, setDockWidth] = useState(340)
 
@@ -82,7 +87,7 @@ export function SandboxDetail() {
   return (
     <div className="detail">
       <div className="detail-header">
-        <div className={`d-dot ${sandbox.status === 'running' ? 'running' : 'stopped'}`} />
+        <SandboxAvatar sandbox={sandbox} size={22} editable linkToContextMenu />
         <div className="d-name">{sandbox.name}</div>
         <span className="d-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <AgentIcon agent={sandbox.agent} size={12} />
@@ -112,6 +117,18 @@ export function SandboxDetail() {
             <MoreVertical size={14} />
           </button>
         </div>
+      </div>
+
+      {/* Workspace git summary (folder + branch) — the project git info that the
+          removed sidebar Projects section used to show. */}
+      <div className="detail-subhdr">
+        <FolderGit2 size={12} />
+        <span className="ds-folder" title={sandbox.workspace}>{sandbox.workspace.split('/').pop() || sandbox.workspace}</span>
+        {gitInfo[sandbox.workspace]?.branch && (
+          <span className="ds-branch" title={`On branch ${gitInfo[sandbox.workspace]!.branch}`}>
+            <GitBranch size={12} />{gitInfo[sandbox.workspace]!.branch}
+          </span>
+        )}
       </div>
 
       <div className="detail-body">
