@@ -295,11 +295,12 @@ export function Sidebar() {
       else ungrouped.push(s)
     }
     const sections: { key: string; group: Group | null; list: Sandbox[] }[] = []
-    if (ungrouped.length) sections.push({ key: '__ungrouped', group: null, list: ungrouped })
     for (const g of [...groups].sort((a, b) => a.name.localeCompare(b.name))) {
       const list = byGroup.get(g.id)
       if (list?.length) sections.push({ key: g.id, group: g, list })
     }
+    // Ungrouped sandboxes render flat, after the named groups.
+    if (ungrouped.length) sections.push({ key: '__ungrouped', group: null, list: ungrouped })
     return sections
   })()
 
