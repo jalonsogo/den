@@ -755,6 +755,10 @@ html, body, #root {
   outline: 1px dashed color-mix(in srgb, var(--accent, var(--primary)) 55%, transparent);
   border-radius: 8px;
 }
+/* Group reorder: a crisp line marking the drop gap above/below the group,
+   rather than illuminating the whole section. */
+.sb-group.drop-before { box-shadow: inset 0 2px 0 var(--accent, var(--primary)); }
+.sb-group.drop-after { box-shadow: inset 0 -2px 0 var(--accent, var(--primary)); }
 .sb-group-hd:hover .sb-group-add { opacity: 0.7; }
 .sb-group-add:hover { opacity: 1; background: var(--sb-active); color: var(--sb-fg); }
 /* Shared-working-tree warning on a project header (sidebar + dashboard). */

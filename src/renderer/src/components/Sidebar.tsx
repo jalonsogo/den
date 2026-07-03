@@ -147,6 +147,9 @@ export function Sidebar() {
   })
   // Which group section a dragged sandbox is hovering (for the drop highlight).
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+  // When reordering a group, show an insertion line in the gap above/below the
+  // hovered group rather than illuminating the whole group section.
+  const [groupDrop, setGroupDrop] = useState<{ id: string; after: boolean } | null>(null)
   const openGroupMenu = (e: React.MouseEvent, groupId: string) => {
     e.preventDefault(); e.stopPropagation()
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace: null, groupId })
@@ -524,12 +527,40 @@ export function Sidebar() {
           ) : grouped && !collapsed ? (
             grouped.map((sec) => (
               <div
-                className={`sb-group${dragOverKey === sec.key ? ' drag-over' : ''}`}
+                className={`sb-group${dragOverKey === sec.key ? ' drag-over' : ''}${groupDrop?.id === sec.key ? (groupDrop.after ? ' drop-after' : ' drop-before') : ''}`}
                 key={sec.key}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverKey !== sec.key) setDragOverKey(sec.key) }}
-                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverKey((k) => (k === sec.key ? null : k)) }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  if (e.dataTransfer.types.includes('text/den-group')) {
+                    // Group reorder: mark an insertion gap above/below, don't
+                    // illuminate the whole group section.
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const after = e.clientY > rect.top + rect.height / 2
+                    if (groupDrop?.id !== sec.key || groupDrop.after !== after) setGroupDrop({ id: sec.key, after })
+                    if (dragOverKey) setDragOverKey(null)
+                  } else if (dragOverKey !== sec.key) {
+                    // Sandbox move: highlight the target group.
+                    setDragOverKey(sec.key)
+                  }
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                  setDragOverKey((k) => (k === sec.key ? null : k))
+                  setGroupDrop((g) => (g?.id === sec.key ? null : g))
+                }}
                 onDrop={(e) => {
-                  e.preventDefault(); setDragOverKey(null)
+                  e.preventDefault(); setDragOverKey(null); setGroupDrop(null)
+                  const gid = e.dataTransfer.getData('text/den-group')
+                  if (gid) {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const after = e.clientY > rect.top + rect.height / 2
+                    const named = grouped!.filter((g) => g.group).map((g) => g.group!.id)
+                    // Dropping on the ungrouped area = move to the end.
+                    const beforeId = !sec.group ? null : after ? (named[named.indexOf(sec.group.id) + 1] ?? null) : sec.group.id
+                    if (gid !== beforeId) reorderGroups(gid, beforeId)
+                    return
+                  }
                   const n = e.dataTransfer.getData('text/den-sandbox')
                   // Drop on a named group assigns; drop on the ungrouped area removes.
                   if (n) setSandboxGroup(n, sec.group ? sec.group.id : null)
@@ -548,11 +579,6 @@ export function Sidebar() {
                       draggable={!!sec.group}
                       onContextMenu={sec.group ? (e) => openGroupMenu(e, sec.group!.id) : undefined}
                       onDragStart={sec.group ? (e) => { e.dataTransfer.setData('text/den-group', sec.group!.id); e.dataTransfer.effectAllowed = 'move' } : undefined}
-                      onDragOver={sec.group ? (e) => { if (e.dataTransfer.types.includes('text/den-group')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move' } } : undefined}
-                      onDrop={sec.group ? (e) => {
-                        const id = e.dataTransfer.getData('text/den-group')
-                        if (id) { e.preventDefault(); e.stopPropagation(); if (id !== sec.group!.id) reorderGroups(id, sec.group!.id) }
-                      } : undefined}
                     >
                       <span className="sb-group-name">{sec.group ? sec.group.name : sec.key}</span>
                       {sec.group && (
