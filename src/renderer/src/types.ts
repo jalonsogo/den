@@ -208,6 +208,7 @@ export interface AppSettings {
   menuBarOnly: boolean
   notifyOnExit: boolean
   notifyOnError: boolean
+  keepAwake: boolean
 }
 
 declare global {
@@ -286,6 +287,9 @@ declare global {
       projectConfigSync(local: { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }>
       projectConfigSet(field: 'colors' | 'icons' | 'names' | 'sandboxIcons', workspace: string, value: string | null): Promise<void>
       sandboxIsolation(): Promise<Record<string, boolean>>
+      sandboxFetchWork(name: string, repoDir: string): Promise<{ ok: boolean; branch?: string; hasRemote?: boolean; error?: string }>
+      sandboxOpenPr(repoDir: string, branch: string): Promise<{ ok: boolean; url?: string; pushedOnly?: boolean; error?: string }>
+      sandboxMergeBranch(repoDir: string, branch: string): Promise<{ ok: boolean; base?: string; output?: string; conflict?: boolean; error?: string }>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void

@@ -118,21 +118,27 @@
 
     /* ─── HERO ─── */
     .hero {
-      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       text-align: center;
-      padding: 130px 24px 90px;
+      padding: 140px 24px 0;
       position: relative;
       overflow: hidden;
+    }
+    .hero-copy {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      z-index: 2;
     }
     .hero-bg {
       position: absolute; inset: 0;
       background:
-        radial-gradient(ellipse 55% 40% at 18% 90%, rgba(38,39,46,0.06) 0%, transparent 60%),
-        radial-gradient(ellipse 45% 35% at 85% 80%, rgba(63,63,70,0.05) 0%, transparent 60%);
+        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(38,39,46,0.05) 0%, transparent 62%),
+        radial-gradient(ellipse 55% 40% at 18% 90%, rgba(38,39,46,0.05) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 35% at 85% 85%, rgba(63,63,70,0.04) 0%, transparent 60%);
     }
     /* subtle grain */
     .hero-bg::after {
@@ -143,42 +149,31 @@
     }
 
     .hero-eyebrow {
-      display: inline-flex; align-items: center; gap: 8px;
+      display: inline-flex; align-items: center; gap: 9px;
       background: var(--coral-pale);
       border: 1px solid rgba(38,39,46,0.22);
       color: var(--coral);
       font-size: 11px; font-weight: 700;
       letter-spacing: 0.1em; text-transform: uppercase;
-      padding: 6px 16px; border-radius: 100px;
-      margin-bottom: 40px;
+      padding: 6px 16px 6px 8px; border-radius: 100px;
+      margin-bottom: 30px;
       opacity: 0;
       animation: fadeUp 0.6s ease forwards 0.15s;
       position: relative;
     }
-
-    .hero-logo {
-      width: 420px; height: 420px;
-      object-fit: contain;
-      margin-bottom: 36px;
-      opacity: 1;
-      filter: drop-shadow(0 24px 48px rgba(24,24,27,0.14));
-      position: relative;
-    }
-    .hero-logo.floating {
-      animation: floatLoop 5s ease-in-out infinite;
-    }
+    .hero-eyebrow-logo { width: 18px; height: 18px; object-fit: contain; }
 
     .hero-title {
       font-family: 'Figtree', sans-serif;
-      font-size: clamp(50px, 8vw, 92px);
+      font-size: clamp(44px, 6.6vw, 76px);
       font-weight: 800;
-      line-height: 1.02;
+      line-height: 1.03;
       letter-spacing: -0.04em;
       color: var(--text-dark);
-      margin-bottom: 26px;
-      max-width: 880px;
+      margin-bottom: 22px;
+      max-width: 780px;
       opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.5s;
+      animation: fadeUp 0.8s ease forwards 0.3s;
       position: relative;
     }
     .hero-title em { font-style: normal; color: var(--text-light); }
@@ -186,18 +181,59 @@
     .hero-sub {
       font-size: 18px; font-weight: 400;
       color: var(--text-mid);
-      max-width: 520px; line-height: 1.7;
-      margin-bottom: 48px;
+      max-width: 560px; line-height: 1.7;
+      margin-bottom: 36px;
       opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.65s;
+      animation: fadeUp 0.8s ease forwards 0.45s;
       position: relative;
     }
 
     .hero-actions {
       display: flex; gap: 14px; align-items: center;
       opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.8s;
+      animation: fadeUp 0.8s ease forwards 0.6s;
       position: relative;
+    }
+
+    /* The real product as the hero centerpiece: a live render of den in a
+       floating app window. The mockup ships its own dark UI + traffic-light
+       toolbar, so it just needs a frame, a big shadow and a platform glow. */
+    .hero-shot {
+      position: relative;
+      z-index: 1;
+      width: min(100% - 40px, 1520px);
+      margin: 58px auto 0;
+      opacity: 0;
+      transform: translateY(44px) scale(0.985);
+      animation: fadeUp 1s ease forwards 0.8s;
+    }
+    .hero-shot::before {
+      content: '';
+      position: absolute;
+      left: 50%; bottom: -7%;
+      transform: translateX(-50%);
+      width: 86%; height: 62%;
+      background: radial-gradient(ellipse at center, rgba(24,24,27,0.22) 0%, transparent 70%);
+      filter: blur(46px);
+      z-index: -1;
+    }
+    .app-window {
+      border-radius: 14px;
+      overflow: hidden;
+      background: #0D1117;
+      border: 1px solid rgba(24,24,27,0.14);
+      box-shadow:
+        0 2px 6px rgba(24,24,27,0.06),
+        0 30px 80px rgba(24,24,27,0.28);
+    }
+    .app-frame {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1200 / 760;
+      border: 0;
+      background: #0D1117;
+      /* Fully interactive — click through sandboxes, open New Sandbox, switch
+         themes, browse the library, all live. */
     }
     .btn-primary {
       display: inline-flex; align-items: center; gap: 8px;
@@ -231,10 +267,11 @@
     }
 
     .hero-trust {
-      margin-top: 60px;
+      margin-top: 34px;
       display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap; justify-content: center;
       opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.95s;
+      animation: fadeUp 0.8s ease forwards 0.7s;
       position: relative;
     }
     .hero-trust-item {
@@ -280,7 +317,7 @@
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       grid-auto-rows: minmax(186px, auto);
-      gap: 18px; max-width: 1120px; margin: 0 auto;
+      gap: 18px; max-width: 1240px; margin: 0 auto;
     }
     .bento-tile {
       background: var(--white);
@@ -302,6 +339,7 @@
     .bento-b { grid-column: span 2; }
     .bento-e { grid-column: span 2; }
     .bento-f { grid-column: span 2; }
+    .bento-g { grid-column: span 4; }
     /* dark hero tile */
     .bento-a {
       background: linear-gradient(165deg, var(--ocean-mid) 0%, var(--ocean-deep) 100%);
@@ -338,21 +376,50 @@
     }
     .feat-desc { font-size: 13.5px; line-height: 1.68; color: var(--text-mid); }
 
-    /* agent chips — one row that fades out at the right edge (more agents beyond) */
-    .agent-chips {
-      display: flex; gap: 8px; margin-top: auto;
-      flex-wrap: nowrap; overflow: hidden;
-      -webkit-mask-image: linear-gradient(to right, #000 0, #000 80%, transparent 100%);
-              mask-image: linear-gradient(to right, #000 0, #000 80%, transparent 100%);
+    /* agent logos — bigger, full-colour marks with the label beneath */
+    .agent-logos {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 18px 6px;
+      margin-top: auto;
+      padding-top: 8px;
     }
-    .agent-chip {
-      flex: none; white-space: nowrap;
-      display: inline-flex; align-items: center; gap: 7px;
-      font-size: 13px; font-weight: 600; color: var(--text-dark);
+    .agent-logo {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 9px; text-align: center;
+    }
+    .agent-ico { display: block; }
+    .agent-name {
+      font-size: 12px; font-weight: 600;
+      color: var(--text-mid); letter-spacing: -0.01em; line-height: 1;
+    }
+    /* brand colours */
+    .a-claude      { color: #D97757; }
+    .a-codex       { color: #0D0D0D; }
+    .a-antigravity { color: #4285F4; }
+    .a-opencode    { color: #0D0D0D; }
+    .a-cursor      { color: #0D0D0D; }
+
+    /* git tile — full-width feature with a diff-flavoured chip stack */
+    .bento-g {
+      flex-direction: row; align-items: center; gap: 32px;
+    }
+    .bento-g .feat-icon { margin-bottom: 0; }
+    .bento-g .g-copy { max-width: 620px; }
+    .bento-g .feat-title { margin-bottom: 9px; }
+    .bento-g .feat-desc { font-size: 14px; }
+    .g-chips {
+      margin-left: auto; display: flex; flex-wrap: wrap;
+      gap: 8px; justify-content: flex-end; max-width: 340px;
+    }
+    .g-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; color: var(--text-dark);
       background: var(--sand-1); border: 1px solid rgba(0,0,0,0.06);
-      border-radius: 100px; padding: 7px 14px;
+      border-radius: 100px; padding: 6px 12px; white-space: nowrap;
     }
-    .agent-ico { flex: none; display: block; }
+    .g-chip.mono { font-family: 'SF Mono','Menlo',monospace; font-weight: 500; color: var(--text-mid); }
+    .g-add { color: #16a34a; } .g-del { color: #dc2626; }
 
     /* ─── HOW IT WORKS ─── */
     .how {
@@ -756,8 +823,11 @@
     /* ─── RESPONSIVE ─── */
     @media (max-width: 960px) {
       .bento { grid-template-columns: repeat(2, 1fr); }
-      .bento-a, .bento-b, .bento-e, .bento-f { grid-column: span 2; }
+      .bento-a, .bento-b, .bento-e, .bento-f, .bento-g { grid-column: span 2; }
       .bento-a { grid-row: auto; }
+      .bento-g { flex-direction: column; align-items: flex-start; gap: 0; }
+      .bento-g .g-chips { margin-left: 0; margin-top: 16px; justify-content: flex-start; max-width: none; }
+      .agent-logos { gap: 16px 6px; }
       .steps { grid-template-columns: repeat(2, 1fr); }
       .steps::before { display: none; }
       nav { padding: 16px 24px; }
@@ -766,7 +836,8 @@
     }
     @media (max-width: 580px) {
       .bento { grid-template-columns: 1fr; }
-      .bento-a, .bento-b, .bento-e, .bento-f { grid-column: span 1; }
+      .bento-a, .bento-b, .bento-e, .bento-f, .bento-g { grid-column: span 1; }
+      .agent-logos { grid-template-columns: repeat(3, 1fr); }
       .steps { grid-template-columns: 1fr; }
       .hero-actions { flex-direction: column; width: 100%; }
       .btn-primary, .btn-secondary { justify-content: center; }
@@ -785,7 +856,6 @@
   </a>
   <ul class="nav-links">
     <li><a href="#features">Features</a></li>
-    <li><a href="#demo">Preview</a></li>
     <li><a href="https://docs.docker.com/ai/sandboxes/" target="_blank" rel="noopener">sbx docs</a></li>
     <li><a href="#cta" class="nav-cta">Download</a></li>
   </ul>
@@ -795,48 +865,48 @@
 <section class="hero">
   <div class="hero-bg"></div>
 
-  <div class="hero-eyebrow">Safe YOLO for coding agents</div>
+  <div class="hero-copy">
+    <div class="hero-eyebrow">
+      <img src="resources/logo.png" alt="" class="hero-eyebrow-logo">
+      Safe YOLO for coding agents
+    </div>
 
-  <img id="heroLogo" src="resources/logo.png" alt="den" class="hero-logo">
+    <h1 class="hero-title">
+      Let your agents<br>run <em>full YOLO.</em>
+    </h1>
 
-  <h1 class="hero-title">
-    Let your agents<br>run <em>full YOLO.</em>
-  </h1>
+    <p class="hero-sub">
+      No more being the human on the yes / no / cancel button. den drops every coding agent into a disposable, network-policed microVM — turn off the guardrails, walk away, and focus on the work instead of the approvals.
+    </p>
 
-  <p class="hero-sub">
-    No more being the human on the yes / no / cancel button. den drops every coding agent into a disposable, network-policed microVM — so you can turn off the guardrails, walk away, and focus on the work instead of the approvals.
-  </p>
+    <div class="hero-actions">
+      <a href="#cta" class="btn-primary">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M7.5 1v9m0 0L4.5 7m3 3 3-3M1.5 13h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Download for Mac
+      </a>
+      <a href="#features" class="btn-secondary">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><circle cx="7.5" cy="7.5" r="5.75" stroke="currentColor" stroke-width="1.5"/><path d="M6 5l4 2.5L6 10V5z" fill="currentColor"/></svg>
+        See it in action
+      </a>
+    </div>
 
-  <div class="hero-actions">
-    <a href="#cta" class="btn-primary">
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M7.5 1v9m0 0L4.5 7m3 3 3-3M1.5 13h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Download for Mac
-    </a>
-    <a href="#demo" class="btn-secondary">
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><circle cx="7.5" cy="7.5" r="5.75" stroke="currentColor" stroke-width="1.5"/><path d="M6 5l4 2.5L6 10V5z" fill="currentColor"/></svg>
-      See it in action
-    </a>
+    <div class="hero-trust">
+      <div class="hero-trust-item"><b>✦</b>&nbsp;Isolated by default</div>
+      <div class="hero-trust-sep"></div>
+      <div class="hero-trust-item"><b>✦</b>&nbsp;Network policies</div>
+      <div class="hero-trust-sep"></div>
+      <div class="hero-trust-item"><b>✦</b>&nbsp;Claude · Codex · Antigravity · OpenCode</div>
+      <div class="hero-trust-sep"></div>
+      <div class="hero-trust-item"><b>✦</b>&nbsp;macOS &amp; Windows</div>
+    </div>
   </div>
 
-  <div class="hero-trust">
-    <div class="hero-trust-item"><b>✦</b>&nbsp;Isolated by default</div>
-    <div class="hero-trust-sep"></div>
-    <div class="hero-trust-item"><b>✦</b>&nbsp;Network policies</div>
-    <div class="hero-trust-sep"></div>
-    <div class="hero-trust-item"><b>✦</b>&nbsp;Claude · Codex · Antigravity · OpenCode</div>
-    <div class="hero-trust-sep"></div>
-    <div class="hero-trust-item"><b>✦</b>&nbsp;macOS &amp; Windows</div>
-  </div>
-</section>
-
-<!-- ── MOCKUP ── -->
-<section class="mockup-section" id="demo">
-  <div class="section-eyebrow">Preview</div>
-  <h2 class="section-title">Sandboxes left, live agent right</h2>
-  <p class="section-sub" style="margin-bottom: 60px;">Your sandboxes and projects in the sidebar; the agent running unattended, front and center.</p>
-
-  <div class="browser-window" id="browserWin">
-    <iframe class="app-frame" src="mockup.html" title="den — live interface preview" loading="lazy" scrolling="no"></iframe>
+  <!-- The real product, front and center: a live render of den — sandboxes in
+       the sidebar, a Claude agent working in the terminal on the right. -->
+  <div class="hero-shot" id="heroShot">
+    <div class="app-window">
+      <iframe class="app-frame" src="mockup.html" title="den — live interface, a Claude agent running inside an isolated sandbox" loading="eager"></iframe>
+    </div>
   </div>
 </section>
 
@@ -863,13 +933,31 @@
       <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
       <h3 class="feat-title">Every agent, first-class</h3>
       <p class="feat-desc">Full agent TUIs over a real PTY — bring the one you already use.</p>
-      <div class="agent-chips">
-        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></svg>Claude</span>
-        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"/></svg>Codex</span>
-        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"/></svg>Antigravity</span>
-        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg>OpenCode</span>
-        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z"/></svg>Gemini</span>
-        <span class="agent-chip"><svg class="agent-ico" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg>Cursor</span>
+      <div class="agent-logos">
+        <div class="agent-logo a-claude">
+          <svg class="agent-ico" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></svg>
+          <span class="agent-name">Claude</span>
+        </div>
+        <div class="agent-logo a-codex">
+          <svg class="agent-ico" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"/></svg>
+          <span class="agent-name">Codex</span>
+        </div>
+        <div class="agent-logo a-antigravity">
+          <svg class="agent-ico" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"/></svg>
+          <span class="agent-name">Antigravity</span>
+        </div>
+        <div class="agent-logo a-opencode">
+          <svg class="agent-ico" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg>
+          <span class="agent-name">OpenCode</span>
+        </div>
+        <div class="agent-logo a-gemini">
+          <svg class="agent-ico" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><defs><linearGradient id="gemGrad" x1="2" y1="20" x2="22" y2="4" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1C7DFF"/><stop offset="0.52" stop-color="#9168E8"/><stop offset="1" stop-color="#D96570"/></linearGradient></defs><path fill="url(#gemGrad)" d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z"/></svg>
+          <span class="agent-name">Gemini</span>
+        </div>
+        <div class="agent-logo a-cursor">
+          <svg class="agent-ico" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg>
+          <span class="agent-name">Cursor</span>
+        </div>
       </div>
     </div>
 
@@ -903,16 +991,21 @@
       <img class="bento-shot" src="screenshots/app-dashboard.png" alt="den home dashboard showing running sandboxes grouped by project">
     </div>
 
-  </div>
-</section>
+    <!-- Git support -->
+    <div class="bento-tile bento-g">
+      <div class="feat-icon b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div>
+      <div class="g-copy">
+        <h3 class="feat-title">A branch per sandbox — review every diff</h3>
+        <p class="feat-desc">Clone-isolate your repo and the agent commits freely on its own branch, your working tree untouched. Review the full diff and merge back when it's ready.</p>
+      </div>
+      <div class="g-chips">
+        <span class="g-chip"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>feat/oauth-pkce</span>
+        <span class="g-chip mono">--clone</span>
+        <span class="g-chip mono"><span class="g-add">+312</span> <span class="g-del">−87</span></span>
+        <span class="g-chip">Review &amp; merge</span>
+      </div>
+    </div>
 
-<!-- ── READINESS HOOK ── -->
-<section class="ready" id="ready">
-  <div class="ready-inner">
-    <div class="section-eyebrow">The real question</div>
-    <h2 class="ready-title">Are you ready for<br><em>full YOLO mode?</em></h2>
-    <p class="ready-sub">Uncover what your agents can really do. Stop babysitting them, stop clicking <em>approve</em> — box them in, turn them loose, and get on with your day.</p>
-    <a href="#cta" class="btn-white ready-btn">I'm ready →</a>
   </div>
 </section>
 
@@ -948,11 +1041,6 @@
     nav.classList.toggle('scrolled', scrollY > 24);
   }, { passive: true });
 
-  // No logo animation
-  const logo = document.getElementById('heroLogo');
-  logo.style.animation = 'none';
-  logo.style.opacity = '1';
-
   // Intersection Observer — feature cards
   const cardObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -980,18 +1068,6 @@
 
   const bw = document.getElementById('browserWin');
   if (bw) browserObs.observe(bw);
-
-  // Readiness hook reveal
-  const revealObs = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-      entry.target.classList.add('visible');
-      revealObs.unobserve(entry.target);
-    });
-  }, { threshold: 0.25 });
-
-  const readyInner = document.querySelector('.ready-inner');
-  if (readyInner) revealObs.observe(readyInner);
 
   // Animate log lines
   const logRows = document.querySelectorAll('.log-row');

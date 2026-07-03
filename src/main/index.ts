@@ -7,7 +7,8 @@ import {
   shell,
   nativeImage,
   dialog,
-  session
+  session,
+  powerSaveBlocker
 } from 'electron'
 import { join } from 'path'
 import http from 'http'
@@ -284,12 +285,34 @@ function normalizeSandbox(raw: SbxSandbox) {
   }
 }
 
+// Keep the machine awake while any sandbox is running (opt-in via the
+// `keepAwake` setting, default on) so long agent runs aren't interrupted by
+// system sleep. Re-evaluated whenever the sandbox list is refreshed.
+let powerBlockerId = -1
+let lastRunningCount = 0
+function updatePowerBlocker(runningCount: number): void {
+  lastRunningCount = runningCount
+  const enabled = (store.get('keepAwake') as boolean | undefined) ?? true
+  const shouldBlock = enabled && runningCount > 0
+  const active = powerBlockerId !== -1 && powerSaveBlocker.isStarted(powerBlockerId)
+  try {
+    if (shouldBlock && !active) {
+      powerBlockerId = powerSaveBlocker.start('prevent-app-suspension')
+    } else if (!shouldBlock && active) {
+      powerSaveBlocker.stop(powerBlockerId)
+      powerBlockerId = -1
+    }
+  } catch (e) { console.error('powerSaveBlocker:', e) }
+}
+
 async function listSandboxes() {
   try {
     const out = await sbx(['ls', '--json'])
     const parsed = JSON.parse(out)
     const sandboxes: SbxSandbox[] = parsed.sandboxes ?? parsed
-    return sandboxes.map(normalizeSandbox)
+    const list = sandboxes.map(normalizeSandbox)
+    updatePowerBlocker(list.filter((s) => s.status === 'running').length)
+    return list
   } catch (err) {
     console.error('sbx ls failed:', err)
     return []
@@ -1686,6 +1709,75 @@ function setupIPC(): void {
     })
   }))
 
+  // ── Clone-mode "feature" fetch-back ───────────────────────────────────────
+  // A --clone sandbox exposes its private clone as a `sandbox-<name>` git remote
+  // on the host (git daemon, live only while the sandbox runs). Agent output is
+  // untrusted, so we never auto-merge onto the working branch: we fetch the work
+  // into a local review branch, then the user explicitly opens a PR or merges.
+  const gitIn = (repoDir: string) => (args: string[]) => new Promise<{ code: number; out: string; err: string }>((resolve) => {
+    execFile('git', args, { cwd: repoDir, timeout: 120000, env: guiEnv() },
+      (e, so, se) => resolve({ code: e ? ((e as { code?: number }).code ?? 1) : 0, out: (so || '').trim(), err: (se || '').trim() }))
+  })
+
+  // Fetch the sandbox's work into a local review branch `sandbox/<name>`.
+  ipcMain.handle('minipit:sandbox-fetch-work', async (_, name: string, repoDir: string) => {
+    const remote = `sandbox-${name}`
+    const git = gitIn(repoDir)
+    try {
+      const remotes = await git(['remote'])
+      if (!remotes.out.split('\n').includes(remote)) {
+        return { ok: false, error: `No "${remote}" remote — clone-mode fetch-back needs the sandbox running (its git daemon runs only while active).` }
+      }
+      const fetched = await git(['fetch', remote])
+      if (fetched.code !== 0) return { ok: false, error: fetched.err || `git fetch ${remote} failed — is the sandbox running?` }
+      const srcBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+      const review = `sandbox/${name}`
+      const made = await git(['branch', '-f', review, `${remote}/${srcBranch}`])
+      if (made.code !== 0) return { ok: false, error: made.err || `Couldn't create review branch ${review}.` }
+      const hasRemote = (await git(['remote', 'get-url', 'origin'])).code === 0
+      return { ok: true, branch: review, hasRemote }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Push the review branch and open a PR (via gh, falling back to a compare URL).
+  ipcMain.handle('minipit:sandbox-open-pr', async (_, repoDir: string, branch: string) => {
+    const git = gitIn(repoDir)
+    try {
+      const pushed = await git(['push', '-u', 'origin', branch])
+      if (pushed.code !== 0) return { ok: false, error: pushed.err || 'git push failed.' }
+      const gh = await new Promise<{ code: number; out: string }>((resolve) => {
+        execFile('gh', ['pr', 'create', '--head', branch, '--fill'], { cwd: repoDir, timeout: 60000, env: guiEnv() },
+          (e, so) => resolve({ code: e ? 1 : 0, out: (so || '').trim() }))
+      })
+      if (gh.code === 0) return { ok: true, url: (gh.out.match(/https?:\/\/\S+/) || [])[0] }
+      // gh unavailable/failed — hand back a compare URL derived from origin.
+      const originUrl = (await git(['remote', 'get-url', 'origin'])).out
+      const m = originUrl.match(/^(?:git@|https?:\/\/)([^/:]+)[/:](.+?)(?:\.git)?$/)
+      const url = m ? `https://${m[1]}/${m[2]}/compare/${encodeURIComponent(branch)}?expand=1` : undefined
+      return { ok: true, url, pushedOnly: true }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Merge a review branch into the current branch, aborting cleanly on conflict.
+  ipcMain.handle('minipit:sandbox-merge-branch', async (_, repoDir: string, branch: string) => {
+    const git = gitIn(repoDir)
+    try {
+      const base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+      const merged = await git(['merge', '--no-edit', branch])
+      if (merged.code !== 0) {
+        await git(['merge', '--abort'])
+        return { ok: false, conflict: true, error: `Merge of ${branch} into ${base} hit conflicts and was aborted. Resolve manually:\n  git merge ${branch}` }
+      }
+      return { ok: true, base, output: merged.out || `Merged ${branch} into ${base}.` }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Initialize a Git repo in a host folder and commit its current contents, so a
   // `--clone` sandbox has a repo (with the folder's files) to clone.
   ipcMain.handle('minipit:git-init', async (_, dir: string) => {
@@ -1889,7 +1981,8 @@ function setupIPC(): void {
     launchAtLogin: (store.get('launchAtLogin') as boolean) ?? true,
     menuBarOnly: (store.get('menuBarOnly') as boolean) ?? true,
     notifyOnExit: (store.get('notifyOnExit') as boolean) ?? true,
-    notifyOnError: (store.get('notifyOnError') as boolean) ?? true
+    notifyOnError: (store.get('notifyOnError') as boolean) ?? true,
+    keepAwake: (store.get('keepAwake') as boolean) ?? true
   }))
 
   ipcMain.handle('minipit:save-settings', (_, settings: Record<string, unknown>) => {
@@ -1897,6 +1990,8 @@ function setupIPC(): void {
     if (typeof settings.launchAtLogin === 'boolean') {
       app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
     }
+    // Re-evaluate the sleep blocker if the keepAwake setting was toggled.
+    if (typeof settings.keepAwake === 'boolean') updatePowerBlocker(lastRunningCount)
   })
 
   // ── sbx runtime (version / update / release notes) ──────────────────────────

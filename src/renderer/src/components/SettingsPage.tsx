@@ -19,7 +19,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   launchAtLogin: true,
   menuBarOnly: true,
   notifyOnExit: true,
-  notifyOnError: true
+  notifyOnError: true,
+  keepAwake: true
 }
 
 export function SettingsPage() {
@@ -404,7 +405,8 @@ export function SettingsPage() {
               { key: 'launchAtLogin', label: 'Launch at login', sub: '' },
               { key: 'menuBarOnly', label: 'Menu bar only', sub: 'Hide from Dock.' },
               { key: 'notifyOnExit', label: 'Notify on agent exit', sub: '' },
-              { key: 'notifyOnError', label: 'Notify on errors', sub: '' }
+              { key: 'notifyOnError', label: 'Notify on errors', sub: '' },
+              { key: 'keepAwake', label: 'Keep computer awake', sub: 'Prevent system sleep while any sandbox is running.' }
             ] as const
           ).map(({ key, label, sub }) => (
             <div className="ss-row" key={key}>

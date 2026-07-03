@@ -168,7 +168,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       )}
 
       <AccordionSection id="workspaces" title="Workspaces" defaultOpen>
-        <div className="info-row">
+        <div className="info-row info-row-stack">
           <span className="ir-label">Primary (read-write)</span>
           <span
             className="ir-val"
@@ -177,7 +177,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
           >{sandbox.workspace}</span>
         </div>
         {sandbox.additionalWorkspaces?.map((ws, i) => (
-          <div className="info-row" key={i}>
+          <div className="info-row info-row-stack" key={i}>
             <span className="ir-label">{ws.readonly ? 'Read-only' : 'Read-write'}</span>
             <span className="ir-val">{ws.path}</span>
           </div>
