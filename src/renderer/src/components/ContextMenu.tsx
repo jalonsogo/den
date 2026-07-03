@@ -317,9 +317,11 @@ export function ContextMenu() {
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="ctx-item" onClick={handleStartStop}>
-        {sandbox.status === 'running' ? 'Stop' : 'Start'} <span className="ctx-kbd">⌘.</span>
+        {sandbox.status === 'running'
+          ? <>Stop <span className="ctx-kbd">⌘S</span></>
+          : 'Start'}
       </div>
-      <div className="ctx-item" onClick={handleRestart}>Restart</div>
+      <div className="ctx-item" onClick={handleRestart}>Restart <span className="ctx-kbd">⌘R</span></div>
       <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleOpenInFinder}>
         Open in Finder <span className="ctx-kbd">⇧⌘F</span>
@@ -347,7 +349,7 @@ export function ContextMenu() {
         </SubMenu>
       )}
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs</div>
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs <span className="ctx-kbd">⌘L</span></div>
       <div className="ctx-sep" />
       <SubMenu label="Terminal theme">
         {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
@@ -368,7 +370,7 @@ export function ContextMenu() {
       </SubMenu>
       <div className="ctx-sep" />
       <div className="ctx-item destructive" onClick={handleDelete}>
-        Delete Sandbox…
+        Delete Sandbox… <span className="ctx-kbd">⌘X</span>
       </div>
     </div>
   )
