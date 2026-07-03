@@ -126,6 +126,20 @@ function recordKits(sandbox: string, kitDirs: string[]): void {
   store.set('appliedKits', map)
 }
 
+// Record whether a sandbox isolates its working tree (`--clone`) or mounts the
+// host folder directly. sbx doesn't report this back, so we track it locally to
+// warn when several direct-mount sandboxes share one folder.
+function recordIsolation(sandbox: string, isolated: boolean): void {
+  if (!sandbox) return
+  const map = (store.get('sandboxIsolation') as Record<string, boolean>) ?? {}
+  map[sandbox] = isolated
+  store.set('sandboxIsolation', map)
+}
+function forgetIsolation(sandbox: string): void {
+  const map = (store.get('sandboxIsolation') as Record<string, boolean>) ?? {}
+  if (sandbox in map) { delete map[sandbox]; store.set('sandboxIsolation', map) }
+}
+
 const SBX_RELEASES_URL = 'https://github.com/docker/sbx-releases/releases/latest'
 type InstallManager = 'brew' | 'winget' | 'apt' | 'manual'
 
@@ -1237,6 +1251,7 @@ function setupIPC(): void {
     clearAgentActivity(name)
     await sbx(['rm', '--force', name])
     uptimeMap.delete(name)
+    forgetIsolation(name)
   })
 
   ipcMain.handle('minipit:create-sandbox', async (_, config: {
@@ -1284,6 +1299,7 @@ function setupIPC(): void {
     const sandboxName =
       config.name ?? match?.[1] ?? `${config.agent}-${config.workspace.split('/').pop()}`
     recordKits(sandboxName, config.kits ?? [])
+    recordIsolation(sandboxName, !!config.branch)
     // The agent session is started by the Agent terminal (agent-ensure) at the
     // terminal's real size — avoids a default-size session that renders garbled.
     return sandboxName
@@ -1981,6 +1997,9 @@ function setupIPC(): void {
     }
     return readProjectConfig()
   })
+
+  // Per-sandbox working-tree isolation (name → true if created with --clone).
+  ipcMain.handle('minipit:sandbox-isolation', () => (store.get('sandboxIsolation') as Record<string, boolean>) ?? {})
 
   ipcMain.handle('minipit:project-config-set', (_, field: keyof ProjectConfig, workspace: string, value: string | null) => {
     const key = CFG_KEYS[field]

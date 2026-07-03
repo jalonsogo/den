@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-03
+
+### Added
+- Per-sandbox **custom icons**: pick an icon (or keep the two-letter initials) from the sandbox detail-header avatar or right-click → Customize. Picker offers a curated set plus a full Lucide browse (search + scrollable grid). Stored durably per sandbox.
+- **1Password sourcing for secrets** (merged from the 1password-secrets line): a "Load from 1Password" switch in the New Secret modal resolves an `op://` reference on the host via `op read`.
+- Shared-working-tree safety: den records each sandbox's isolation (`--clone` vs direct mount), warns on a project when **multiple sandboxes mount the same folder directly**, and guards New Sandbox creation into an already-used folder with an "Enable isolation" nudge.
+
+### Changed
+- **Removed the Home page** — the Sandboxes view is now the dashboard and the default landing. The dashboard lists **all** sandboxes grouped by project (running first, then stopped).
+- **Removed the sidebar Projects section**; "Add project" moves to the Sandboxes header, and project group headers gain a hover + (new sandbox) and a right-click project menu.
+- Project group headers show as plain text; "Customize" is promoted to the top of the project menu and is now **color-only** (icon customization removed).
+- The sandbox detail view shows the workspace **git branch** below the status (previously surfaced in the removed Projects section).
+- The New Sandbox folder picker can create a new folder on Windows/Linux (`createDirectory`).
+
+### Fixed
+- Per-project appearance (color/name/icon) now persists in the file-based store instead of the renderer's `localStorage`, surviving dev-server origin/port changes. Existing config is migrated on first launch.
+- Stopped sandboxes keep their project color (no longer fully grayscaled), so they stay distinguishable.
+
 ## [0.4.0] - 2026-07-03
 
 ### Added

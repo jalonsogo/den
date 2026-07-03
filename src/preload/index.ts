@@ -88,6 +88,7 @@ const api = {
   defaultWorkspace: ()                  => ipcRenderer.invoke('minipit:default-workspace'),
   projectConfigSync: (local: unknown)   => ipcRenderer.invoke('minipit:project-config-sync', local),
   projectConfigSet: (field: string, workspace: string, value: string | null) => ipcRenderer.invoke('minipit:project-config-set', field, workspace, value),
+  sandboxIsolation: ()                  => ipcRenderer.invoke('minipit:sandbox-isolation'),
 
   onSandboxesUpdated: (cb: (sandboxes: unknown[]) => void) => {
     const handler = (_: Electron.IpcRendererEvent, s: unknown[]) => cb(s)

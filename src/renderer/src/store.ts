@@ -53,6 +53,9 @@ interface AppState {
   projectNames: Record<string, string>
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
+  // Per-sandbox working-tree isolation (by name): true = --clone (own tree),
+  // false = direct mount of the host folder. Used to warn about shared folders.
+  sandboxIsolation: Record<string, boolean>
   // Host-side git summary per workspace path (lazy-loaded, cached).
   gitInfo: Record<string, { isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
   // Uncommitted-change counts per sandbox name (running sandboxes only).
@@ -102,6 +105,7 @@ interface AppState {
   setSandboxIcon:     (name: string, iconKey: string | null) => void
   setCustomizeSandbox:(name: string | null) => void
   syncProjectConfig:  () => void
+  loadSandboxIsolation: () => void
   loadGitInfo:        (workspace: string, force?: boolean) => void
   refreshSandboxChanges: (name: string, workspace: string) => void
   setDisplay:         (key: 'agentBadge' | 'sandboxSub' | 'projectCounts' | 'gitBranch' | 'changeBadge', value: boolean) => void
@@ -162,6 +166,7 @@ export const useStore = create<AppState>((set) => ({
   sandboxIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
+  sandboxIsolation: {},
   projectNames: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:projectNames') ?? '{}') ?? {} } catch { return {} }
   })(),
@@ -345,6 +350,12 @@ export const useStore = create<AppState>((set) => ({
 
   setCustomizeProject: (workspace) => set({ customizeProject: workspace }),
   setCustomizeSandbox: (name) => set({ customizeSandbox: name }),
+
+  loadSandboxIsolation: () => {
+    window.minipit?.sandboxIsolation()
+      .then((m) => set({ sandboxIsolation: m ?? {} }))
+      .catch(() => {})
+  },
 
   setSandboxIcon: (name, iconKey) =>
     set((state) => {

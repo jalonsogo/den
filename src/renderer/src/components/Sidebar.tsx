@@ -4,7 +4,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
-  ArrowUp, ArrowDown
+  ArrowUp, ArrowDown, AlertTriangle
 } from 'lucide-react'
 import { useStore, unackedBlockCount, projectDisplayName } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
@@ -140,7 +140,7 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage,
     setNewSandboxWorkspace, setActiveProject, sidebarCollapsed,
-    addProject, toggleSidebar, setContextMenu, projectNames, display
+    addProject, toggleSidebar, setContextMenu, projectNames, display, sandboxIsolation
   } = useStore()
   const openProjectMenu = (e: React.MouseEvent, workspace: string) => {
     e.preventDefault(); e.stopPropagation()
@@ -526,6 +526,14 @@ export function Sidebar() {
                 >
                   <span className="sb-group-name">{key}</span>
                   {display.projectCounts && <span className="sb-group-count">{list.length}</span>}
+                  {groupBy === 'project' && list.filter((s) => sandboxIsolation[s.name] === false).length >= 2 && (
+                    <span
+                      className="sb-group-warn"
+                      title="Multiple sandboxes mount this folder directly — their edits can collide. Use clone isolation for new ones."
+                    >
+                      <AlertTriangle size={12} />
+                    </span>
+                  )}
                   {groupBy === 'project' && (
                     <button
                       className="sb-group-add"

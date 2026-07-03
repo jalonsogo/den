@@ -283,6 +283,7 @@ declare global {
       defaultWorkspace(): Promise<string>
       projectConfigSync(local: { colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }): Promise<{ colors: Record<string, string>; icons: Record<string, string>; names: Record<string, string>; sandboxIcons: Record<string, string> }>
       projectConfigSet(field: 'colors' | 'icons' | 'names' | 'sandboxIcons', workspace: string, value: string | null): Promise<void>
+      sandboxIsolation(): Promise<Record<string, boolean>>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void

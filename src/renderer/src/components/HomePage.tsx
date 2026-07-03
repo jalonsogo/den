@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, ChevronRight, FolderOpen, ArrowUp, X, HardDrive, ShieldAlert, Zap, ShieldCheck, Boxes, Terminal } from 'lucide-react'
+import { Plus, ChevronRight, FolderOpen, ArrowUp, X, HardDrive, ShieldAlert, Zap, ShieldCheck, Boxes, Terminal, AlertTriangle } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import type { SbxRelease, StorageUsage } from '../types'
 import { ProjectAvatar } from './ProjectAvatar'
@@ -25,6 +25,7 @@ export function HomePage() {
   const policyBlocks = useStore((s) => s.policyBlocks)
   const blocksSeenAt = useStore((s) => s.blocksSeenAt)
   const agentActivity = useStore((s) => s.agentActivity)
+  const sandboxIsolation = useStore((s) => s.sandboxIsolation)
   const theme = useStore((s) => s.theme)
   const brandMark = theme === 'dark' ? brandDark : brandLight
   const running = sandboxes.filter((s) => s.status === 'running')
@@ -232,6 +233,14 @@ export function HomePage() {
               <ProjectAvatar workspace={workspace} size={18} editable={false} />
               <span className="home-tree-proj-name">{projectName(workspace)}</span>
               <span className="home-tree-proj-count">{list.length}</span>
+              {list.filter((s) => sandboxIsolation[s.name] === false).length >= 2 && (
+                <span
+                  className="sb-group-warn"
+                  title="Multiple sandboxes mount this folder directly — their edits can collide."
+                >
+                  <AlertTriangle size={13} />
+                </span>
+              )}
             </div>
             {list.map((s) => {
               const isRunning = s.status === 'running'

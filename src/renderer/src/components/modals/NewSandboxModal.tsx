@@ -19,7 +19,7 @@ function deriveName(agent: string, workspace: string): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, defaultKits } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, defaultKits, sandboxes } = useStore()
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -419,6 +419,21 @@ export function NewSandboxModal() {
                 </button>
               </div>
             )}
+
+            {/* Guard: creating a non-isolated sandbox in a folder that already
+                has one means both mount the same working tree — edits collide. */}
+            {!clone && (() => {
+              const inUse = sandboxes.filter((s) => s.workspace === workspace).length
+              return inUse > 0 ? (
+                <div className="clone-warn">
+                  <span>
+                    This folder already has {inUse} sandbox{inUse > 1 ? 'es' : ''}. Without isolation they mount the
+                    same working tree — concurrent edits can collide or corrupt the Git index.
+                  </span>
+                  <button className="btn btn-default btn-sm" onClick={() => setClone(true)}>Enable isolation</button>
+                </div>
+              ) : null
+            })()}
           </div>
 
           {/* Advanced — collapsible */}
