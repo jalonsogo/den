@@ -4,7 +4,6 @@ import { useStore } from './store'
 import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
 import { HomePage } from './components/HomePage'
-import { ProjectsPage } from './components/ProjectsPage'
 import { SandboxDetail } from './components/SandboxDetail'
 import { TemplatesPage } from './components/TemplatesPage'
 import { KitsPage } from './components/KitsPage'
@@ -21,7 +20,7 @@ import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, setActiveProject, loadProjects, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, loadProjects, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
 
   useEffect(() => {
     // Initial load
@@ -89,16 +88,10 @@ export function App() {
 
     // Menu-bar (tray) quick-open: jump to a sandbox or a project.
     const unsub6 = window.minipit?.onOpenSandbox((name) => setActiveSandboxId(name))
-    const unsub7 = window.minipit?.onOpenProject((workspace) => {
-      setActiveProject(workspace)
-      setActivePage('projects')
-    })
-    // Menu-bar "New Project…": run the same pick-folder flow as the sidebar.
-    const unsub8 = window.minipit?.onNewProject?.(() => {
-      useStore.getState().addProject().then((dir) => {
-        if (dir) { setActiveProject(dir); setActivePage('projects') }
-      })
-    })
+    // Projects were replaced by groups; menu-bar "open project" just shows the
+    // sandboxes dashboard, and "New Project…" opens New Sandbox.
+    const unsub7 = window.minipit?.onOpenProject(() => setActivePage('sandboxes'))
+    const unsub8 = window.minipit?.onNewProject?.(() => setModal('new-sandbox'))
 
     return () => {
       unsub1?.()
@@ -172,7 +165,6 @@ export function App() {
       <div className="body">
         <Sidebar />
         <div className="content">
-          {activePage === 'projects'  && <ProjectsPage />}
           {activePage === 'sandboxes' && <HomePage />}
           {activePage === 'sandbox'   && <SandboxDetail />}
           {activePage === 'templates' && <TemplatesPage />}

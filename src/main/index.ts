@@ -1214,7 +1214,7 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     {
       label: 'Projects',
       submenu: [
-        { label: 'Show All Projects', accelerator: 'Shift+Cmd+P', click: () => go('minipit:navigate', 'projects') },
+        { label: 'Show All Projects', accelerator: 'Shift+Cmd+P', click: () => go('minipit:navigate', 'sandboxes') },
         { label: 'New Project…', click: () => go('minipit:new-project') },
         { type: 'separator' },
         ...projectItems
