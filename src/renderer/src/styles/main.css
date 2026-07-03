@@ -1255,6 +1255,10 @@ html, body, #root {
 }
 .ir-label { font-size: 13px; color: var(--t1); }
 .ir-val { font-size: 12px; color: var(--t2); font-family: 'SF Mono','Menlo',monospace; }
+/* Stacked variant: label on its own line, value (e.g. a long path) below it. */
+.info-row-stack { flex-direction: column; align-items: stretch; gap: 3px; }
+.info-row-stack .ir-label { color: var(--t3); font-size: 11px; }
+.info-row-stack .ir-val { word-break: break-all; line-height: 1.4; }
 
 /* Network policy block */
 .info-kits { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1710,6 +1714,33 @@ html, body, #root {
 
 /* Dashboard fills the full page width and wraps responsively */
 .home-dash { max-width: none; --avatar-surface: var(--bg); }
+/* Compact dashboard overview — replaces the three vanity stat cards. */
+.home-overview {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 18px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+}
+.home-ov-counts { display: flex; align-items: center; gap: 8px; }
+.home-ov-ic { color: var(--t3); flex-shrink: 0; margin-right: 2px; }
+.home-ov-total { font-size: 22px; font-weight: 600; color: var(--t1); line-height: 1; letter-spacing: -0.02em; }
+.home-ov-unit { font-size: 12.5px; color: var(--t3); margin-right: 6px; }
+.home-ov-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--t2); padding-left: 6px;
+}
+.home-ov-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-hi); flex-shrink: 0; }
+.home-ov-dot.on { background: var(--green); }
+.home-ov-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.home-ov-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--t2); font-family: inherit;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 100px; padding: 4px 11px; cursor: pointer;
+  transition: border-color 0.1s, color 0.1s;
+}
+.home-ov-chip > svg { color: var(--t3); }
+.home-ov-chip:not(.home-ov-chip-static):hover { border-color: var(--border-hi); color: var(--t1); }
+.home-ov-chip-static { cursor: default; }
+
 .home-stats { display: flex; gap: 12px; flex-wrap: wrap; }
 .home-stat { flex: 1 1 150px; min-width: 150px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .home-stat-btn { cursor: pointer; background: var(--bg); text-align: left; transition: all 0.1s; font: inherit; }

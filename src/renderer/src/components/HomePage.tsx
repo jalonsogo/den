@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, ChevronRight, FolderOpen, ArrowUp, X, HardDrive, ShieldAlert, Zap, ShieldCheck, Boxes, Terminal, AlertTriangle } from 'lucide-react'
+import { Plus, FolderOpen, ArrowUp, X, HardDrive, ShieldAlert, Zap, ShieldCheck, Boxes, Terminal, AlertTriangle } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import type { SbxRelease, StorageUsage } from '../types'
 import { ProjectAvatar } from './ProjectAvatar'
@@ -153,6 +153,7 @@ export function HomePage() {
       )}
 
       <div className="page-hdr">
+        <span className="page-title">Sandboxes</span>
         <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setModal('new-sandbox')}>
           <Plus size={13} />
           New Sandbox
@@ -183,47 +184,30 @@ export function HomePage() {
           </div>
         )}
 
-        <div className="home-stats">
-          <button className="home-stat home-stat-btn" onClick={() => setActivePage('sandboxes')} title="View all sandboxes">
-            <div className="home-stat-n">{sandboxes.length}</div>
-            <div className="home-stat-l">Sandboxes</div>
-          </button>
-          <div className="home-stat">
-            <div className="home-stat-n" style={{ color: 'var(--green)' }}>{running.length}</div>
-            <div className="home-stat-l">Running</div>
+        {/* Compact overview: the counts read as one line, not three vanity
+            cards; projects + disk demote to chips so the list below is the hero. */}
+        <div className="home-overview">
+          <div className="home-ov-counts">
+            <Boxes size={17} className="home-ov-ic" />
+            <span className="home-ov-total">{sandboxes.length}</span>
+            <span className="home-ov-unit">sandbox{sandboxes.length === 1 ? '' : 'es'}</span>
+            <span className="home-ov-pill"><i className="home-ov-dot on" />{running.length} running</span>
+            <span className="home-ov-pill"><i className="home-ov-dot" />{stopped.length} stopped</span>
           </div>
-          <div className="home-stat">
-            <div className="home-stat-n" style={{ color: 'var(--t3)' }}>{stopped.length}</div>
-            <div className="home-stat-l">Stopped</div>
-          </div>
-        </div>
-
-        <div className="home-cards">
-          <button className="home-card" onClick={() => setActivePage('projects')}>
-            <div className="home-card-ic"><FolderOpen size={16} /></div>
-            <div className="home-card-body">
-              <div className="home-card-title">Projects</div>
-              <div className="home-card-sub">{projectCount} project{projectCount === 1 ? '' : 's'}</div>
-            </div>
-            <ChevronRight size={15} style={{ color: 'var(--t3)' }} />
-          </button>
-
-          <div className="home-card home-card-static">
-            <div className="home-card-ic"><HardDrive size={16} /></div>
-            <div className="home-card-body">
-              <div className="home-card-title">Disk usage</div>
-              <div className="home-card-sub">{storageSub}</div>
-            </div>
-            {showBreakdown && (
-              <div className="home-disk-break">
-                <span><i className="home-disk-dot" style={{ background: 'var(--primary)' }} />Sandboxes {fmtBytes(storage!.sandboxes.bytes)}</span>
-                <span><i className="home-disk-dot" style={{ background: 'var(--t3)' }} />Templates {fmtBytes(storage!.templates.bytes)}</span>
-              </div>
-            )}
+          <div className="home-ov-meta">
+            <button className="home-ov-chip" onClick={() => setActivePage('projects')} title="View projects">
+              <FolderOpen size={13} />{projectCount} project{projectCount === 1 ? '' : 's'}
+            </button>
+            <span
+              className="home-ov-chip home-ov-chip-static"
+              title={showBreakdown ? `Sandboxes ${fmtBytes(storage!.sandboxes.bytes)} · Templates ${fmtBytes(storage!.templates.bytes)}` : undefined}
+            >
+              <HardDrive size={13} />{storageSub}
+            </span>
           </div>
         </div>
 
-        <div className="ss-hdr" style={{ marginTop: 26 }}>Sandboxes</div>
+        <div className="ss-hdr" style={{ marginTop: 22 }}>Your sandboxes</div>
         {groups.map(([workspace, list]) => (
           <div key={workspace} className="home-tree">
             <div
