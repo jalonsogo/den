@@ -290,6 +290,9 @@ html, body, #root {
 }
 .sb-item:hover { background: var(--sb-hover); }
 .sb-item.active { background: var(--sb-active); }
+/* Shift-drag reorder: line marking the drop gap above/below the row. */
+.sb-item.drop-before { box-shadow: inset 0 2px 0 var(--accent, var(--primary)); }
+.sb-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent, var(--primary)); }
 
 /* Sandbox avatar with agent badge */
 .sbx-avatar {
