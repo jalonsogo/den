@@ -52,10 +52,12 @@ export function ContextMenu() {
   const setLogsSandbox = useStore((s) => s.setLogsSandbox)
   const setLogsReturn = useStore((s) => s.setLogsReturn)
   const setNewSandboxWorkspace = useStore((s) => s.setNewSandboxWorkspace)
+  const setNewSandboxFeature = useStore((s) => s.setNewSandboxFeature)
   const setModal = useStore((s) => s.setModal)
   const setCustomizeProject = useStore((s) => s.setCustomizeProject)
   const setCustomizeSandbox = useStore((s) => s.setCustomizeSandbox)
   const setActiveSandboxId = useStore((s) => s.setActiveSandboxId)
+  const sandboxIsolation = useStore((s) => s.sandboxIsolation)
   const gitInfoMap = useStore((s) => s.gitInfo)
   const loadGitInfo = useStore((s) => s.loadGitInfo)
   const ref = useRef<HTMLDivElement>(null)
@@ -95,7 +97,8 @@ export function ContextMenu() {
     const close = () => setContextMenu({ visible: false })
 
     const openProject = () => { close(); setActiveProject(projectWs); setActivePage('projects') }
-    const newSandbox = () => { close(); setNewSandboxWorkspace(projectWs); setModal('new-sandbox') }
+    const newSandbox = () => { close(); setNewSandboxFeature(false); setNewSandboxWorkspace(projectWs); setModal('new-sandbox') }
+    const newFeature = () => { close(); setNewSandboxWorkspace(projectWs); setNewSandboxFeature(true); setModal('new-sandbox') }
     const reveal = () => { close(); window.minipit?.openInFinder(projectWs) }
     const copyPath = () => { close(); navigator.clipboard?.writeText(projectWs).catch(() => {}) }
     // Open the color picker on the Projects page (whose avatar listens for the
@@ -154,6 +157,7 @@ export function ContextMenu() {
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="ctx-item" onClick={openProject}>Open project</div>
+        <div className="ctx-item" onClick={newFeature}>New feature…</div>
         <div className="ctx-item" onClick={newSandbox}>New sandbox…</div>
         <div className="ctx-item" onClick={customize}>Customize…</div>
         <div className="ctx-sep" />
@@ -306,6 +310,19 @@ export function ContextMenu() {
       >
         Customize…
       </div>
+      {sandboxIsolation[sandbox.name] === true && (
+        <div
+          className="ctx-item"
+          onClick={async () => {
+            setContextMenu({ visible: false })
+            const res = await window.minipit?.sandboxMergeBack(sandbox.name, sandbox.workspace).catch(() => null)
+            if (res?.ok) alert(`Merged the sandbox's commits${res.branch ? ` onto ${res.branch}` : ''}.\n${res.output ?? ''}`)
+            else alert(res?.error || 'Merge failed.')
+          }}
+        >
+          Merge work to host…
+        </div>
+      )}
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs</div>
       <div className="ctx-sep" />

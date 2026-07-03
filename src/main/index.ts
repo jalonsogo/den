@@ -7,7 +7,8 @@ import {
   shell,
   nativeImage,
   dialog,
-  session
+  session,
+  powerSaveBlocker
 } from 'electron'
 import { join } from 'path'
 import http from 'http'
@@ -284,12 +285,34 @@ function normalizeSandbox(raw: SbxSandbox) {
   }
 }
 
+// Keep the machine awake while any sandbox is running (opt-in via the
+// `keepAwake` setting, default on) so long agent runs aren't interrupted by
+// system sleep. Re-evaluated whenever the sandbox list is refreshed.
+let powerBlockerId = -1
+let lastRunningCount = 0
+function updatePowerBlocker(runningCount: number): void {
+  lastRunningCount = runningCount
+  const enabled = (store.get('keepAwake') as boolean | undefined) ?? true
+  const shouldBlock = enabled && runningCount > 0
+  const active = powerBlockerId !== -1 && powerSaveBlocker.isStarted(powerBlockerId)
+  try {
+    if (shouldBlock && !active) {
+      powerBlockerId = powerSaveBlocker.start('prevent-app-suspension')
+    } else if (!shouldBlock && active) {
+      powerSaveBlocker.stop(powerBlockerId)
+      powerBlockerId = -1
+    }
+  } catch (e) { console.error('powerSaveBlocker:', e) }
+}
+
 async function listSandboxes() {
   try {
     const out = await sbx(['ls', '--json'])
     const parsed = JSON.parse(out)
     const sandboxes: SbxSandbox[] = parsed.sandboxes ?? parsed
-    return sandboxes.map(normalizeSandbox)
+    const list = sandboxes.map(normalizeSandbox)
+    updatePowerBlocker(list.filter((s) => s.status === 'running').length)
+    return list
   } catch (err) {
     console.error('sbx ls failed:', err)
     return []
@@ -1688,6 +1711,39 @@ function setupIPC(): void {
 
   // Initialize a Git repo in a host folder and commit its current contents, so a
   // `--clone` sandbox has a repo (with the folder's files) to clone.
+  // Merge a clone-mode sandbox's commits back into the host repo. sbx exposes
+  // the sandbox's clone as a `sandbox-<name>` git remote (git daemon, live only
+  // while the sandbox runs). We fetch it and merge the branch matching the
+  // host's current branch, aborting cleanly on conflict so the tree is never
+  // left mid-merge.
+  ipcMain.handle('minipit:sandbox-merge-back', async (_, name: string, repoDir: string) => {
+    const remote = `sandbox-${name}`
+    const runGit = (args: string[]) => new Promise<{ code: number; out: string; err: string }>((resolve) => {
+      execFile('git', args, { cwd: repoDir, timeout: 60000, env: guiEnv() },
+        (err, stdout, stderr) => resolve({ code: err ? ((err as { code?: number }).code ?? 1) : 0, out: (stdout || '').trim(), err: (stderr || '').trim() }))
+    })
+    try {
+      const remotes = await runGit(['remote'])
+      if (!remotes.out.split('\n').includes(remote)) {
+        return { ok: false, error: `No "${remote}" remote on the host repo. Clone-mode fetch-back needs the sandbox to be running (its git daemon runs only while active).` }
+      }
+      const fetched = await runGit(['fetch', remote])
+      if (fetched.code !== 0) {
+        return { ok: false, error: fetched.err || `git fetch ${remote} failed — is the sandbox running?` }
+      }
+      const branch = (await runGit(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+      const merged = await runGit(['merge', '--no-edit', `${remote}/${branch}`])
+      if (merged.code !== 0) {
+        await runGit(['merge', '--abort']) // best-effort; leave the tree clean
+        return { ok: false, conflict: true, branch, remote,
+          error: `Merge of ${remote}/${branch} hit conflicts and was aborted. The commits are fetched — merge manually:\n  git merge ${remote}/${branch}` }
+      }
+      return { ok: true, branch, output: merged.out || `Merged ${remote}/${branch}.` }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   ipcMain.handle('minipit:git-init', async (_, dir: string) => {
     const runGit = (args: string[]) => new Promise<string>((resolve, reject) => {
       execFile('git', args, { cwd: dir, timeout: 60000, env: guiEnv() },
@@ -1889,7 +1945,8 @@ function setupIPC(): void {
     launchAtLogin: (store.get('launchAtLogin') as boolean) ?? true,
     menuBarOnly: (store.get('menuBarOnly') as boolean) ?? true,
     notifyOnExit: (store.get('notifyOnExit') as boolean) ?? true,
-    notifyOnError: (store.get('notifyOnError') as boolean) ?? true
+    notifyOnError: (store.get('notifyOnError') as boolean) ?? true,
+    keepAwake: (store.get('keepAwake') as boolean) ?? true
   }))
 
   ipcMain.handle('minipit:save-settings', (_, settings: Record<string, unknown>) => {
@@ -1897,6 +1954,8 @@ function setupIPC(): void {
     if (typeof settings.launchAtLogin === 'boolean') {
       app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
     }
+    // Re-evaluate the sleep blocker if the keepAwake setting was toggled.
+    if (typeof settings.keepAwake === 'boolean') updatePowerBlocker(lastRunningCount)
   })
 
   // ── sbx runtime (version / update / release notes) ──────────────────────────

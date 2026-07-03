@@ -37,6 +37,9 @@ interface AppState {
   secretTarget: SecretService | null
   newSandboxWorkspace: string | null
   newSandboxTemplate: string | null
+  // When true, the New Sandbox modal opens in "feature" mode: isolation (--clone)
+  // is forced on and the UI is framed as starting an isolated feature.
+  newSandboxFeature: boolean
   // When set, the kit modal ('new-kit') opens as a visual EDITOR for this kit
   // instead of creating a new one. Cleared when the modal closes.
   editKit: { dir: string; name: string } | null
@@ -94,6 +97,7 @@ interface AppState {
   setSecretTarget:    (service: SecretService | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
   setNewSandboxTemplate: (ref: string | null) => void
+  setNewSandboxFeature: (v: boolean) => void
   setEditKit: (kit: { dir: string; name: string } | null) => void
   setActiveProject:   (workspace: string | null) => void
   setThemePref:       (pref: 'light' | 'dark' | 'system') => void
@@ -154,6 +158,7 @@ export const useStore = create<AppState>((set) => ({
   secretTarget: null,
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
+  newSandboxFeature: false,
   editKit: null,
   activeProject: null,
   themePref: initialThemePref,
@@ -210,6 +215,7 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   setNewSandboxWorkspace: (path) => set({ newSandboxWorkspace: path }),
+  setNewSandboxFeature: (v) => set({ newSandboxFeature: v }),
 
   setNewSandboxTemplate: (ref) => set({ newSandboxTemplate: ref }),
 

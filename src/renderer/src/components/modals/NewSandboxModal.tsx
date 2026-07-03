@@ -19,7 +19,10 @@ function deriveName(agent: string, workspace: string): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, defaultKits, sandboxes } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, defaultKits, sandboxes } = useStore()
+  const feature = newSandboxFeature
+  // Feature mode always isolates (a feature is an isolated clone you merge back).
+  const closeModal = () => { setNewSandboxFeature(false); setModal(null) }
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -40,7 +43,7 @@ export function NewSandboxModal() {
   const [memIdx, setMemIdx]           = useState(0)
   // A session inside a project shares that one folder, so isolate by default to
   // keep concurrent sandboxes from stomping the same working tree (toggleable).
-  const [clone, setClone]             = useState(!!newSandboxWorkspace)
+  const [clone, setClone]             = useState(!!newSandboxWorkspace || newSandboxFeature)
   // For --clone: whether the workspace is a Git repo (null = unknown/checking).
   const [wsIsRepo, setWsIsRepo]       = useState<boolean | null>(null)
   const [gitIniting, setGitIniting]   = useState(false)
@@ -166,7 +169,7 @@ export function NewSandboxModal() {
   const dismiss = () => {
     unsubRef.current?.()
     unsubRef.current = null
-    setModal(null)
+    closeModal()
   }
 
   // Creation streams its output into the in-modal terminal and also registers a
@@ -204,7 +207,7 @@ export function NewSandboxModal() {
         removeCreatingSandbox(finalName)
         setHighlightSandbox(finalName)
         unsub?.()
-        setModal(null)
+        closeModal()
       } catch (e) {
         removeCreatingSandbox(finalName)
         unsub?.()
@@ -229,7 +232,7 @@ export function NewSandboxModal() {
     <div className="overlay">{/* No close-on-outside-click: use Cancel / Run in background. */}
       <div className="modal" style={{ width: 'clamp(460px, 52vw, 760px)' }} onClick={(e) => e.stopPropagation()}>
         <div className="m-hdr">
-          <div className="m-title">{creating ? 'Creating Sandbox' : 'New Sandbox'}</div>
+          <div className="m-title">{creating ? (feature ? 'Starting Feature' : 'Creating Sandbox') : (feature ? 'New Feature' : 'New Sandbox')}</div>
           <div className="m-sub">{creating ? 'Setting up the sandbox — this can take a moment.' : 'Pick an agent and workspace, then launch.'}</div>
         </div>
 
@@ -397,7 +400,9 @@ export function NewSandboxModal() {
             <div className="tog-row">
               <button
                 className={`s-toggle${clone ? ' on' : ''}`}
-                onClick={() => setClone(!clone)}
+                onClick={() => { if (!feature) setClone(!clone) }}
+                disabled={feature}
+                title={feature ? 'A feature always runs on an isolated clone' : undefined}
               />
               Git clone isolation{' '}
               <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
@@ -405,8 +410,10 @@ export function NewSandboxModal() {
               </code>
             </div>
             <div className="fhint">
-              Work in a standalone clone; your changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.
-              {newSandboxWorkspace && ' On by default here because sessions in a project share its folder.'}
+              {feature
+                ? 'A feature always runs on an isolated clone — work here, then Merge work to host when it’s done.'
+                : <>Work in a standalone clone; your changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.
+                  {newSandboxWorkspace && ' On by default here because sessions in a project share its folder.'}</>}
             </div>
 
             {clone && wsIsRepo === false && (
