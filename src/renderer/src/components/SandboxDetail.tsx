@@ -48,6 +48,16 @@ export function SandboxDetail() {
     document.body.style.cursor = 'col-resize'
   }
 
+  // ⌘F / ⌘I hotkeys toggle the Files / Info dock via a window event.
+  useEffect(() => {
+    const onToggle = (e: Event) => {
+      const which = (e as CustomEvent).detail as Dock
+      if (which === 'files' || which === 'info') setDock((d) => (d === which ? null : which))
+    }
+    window.addEventListener('den:toggle-dock', onToggle)
+    return () => window.removeEventListener('den:toggle-dock', onToggle)
+  }, [])
+
   // Refresh ports when the Info dock is shown (ports live inside Info).
   useEffect(() => {
     if (dock === 'info' && sandbox?.name) {
