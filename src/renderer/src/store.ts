@@ -418,7 +418,7 @@ export const useStore = create<AppState>((set) => ({
   },
 
   createGroup: (name) => {
-    const id = (crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.round(Math.random() * 1e6)}`)
+    const id = `g-${Date.now().toString(36)}-${Math.round(Math.random() * 1e9).toString(36)}`
     const groups = [...useStore.getState().groups, { id, name: name.trim() || 'Group' }]
     set({ groups })
     window.minipit?.groupsSet(groups)
