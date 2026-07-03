@@ -49,6 +49,8 @@ export function ContextMenu() {
   const removeProject = useStore((s) => s.removeProject)
   const setActiveProject = useStore((s) => s.setActiveProject)
   const setActivePage = useStore((s) => s.setActivePage)
+  const setLogsSandbox = useStore((s) => s.setLogsSandbox)
+  const setLogsReturn = useStore((s) => s.setLogsReturn)
   const setNewSandboxWorkspace = useStore((s) => s.setNewSandboxWorkspace)
   const setModal = useStore((s) => s.setModal)
   const setCustomizeProject = useStore((s) => s.setCustomizeProject)
@@ -188,15 +190,25 @@ export function ContextMenu() {
 
   if (!sandbox) return null
 
-  const handleStop = async () => {
+  // Toggle: stop when running, start when stopped.
+  const handleStartStop = async () => {
     setContextMenu({ visible: false })
-    if (sandbox.status !== 'running') return
-    updateSandbox(sandbox.id, { status: 'stopping' })
-    try {
-      await window.minipit?.stopSandbox(sandbox.id)
-      updateSandbox(sandbox.id, { status: 'stopped', uptimeSeconds: undefined })
-    } catch {
-      updateSandbox(sandbox.id, { status: 'running' })
+    if (sandbox.status === 'running') {
+      updateSandbox(sandbox.id, { status: 'stopping' })
+      try {
+        await window.minipit?.stopSandbox(sandbox.id)
+        updateSandbox(sandbox.id, { status: 'stopped', uptimeSeconds: undefined })
+      } catch {
+        updateSandbox(sandbox.id, { status: 'running' })
+      }
+    } else {
+      updateSandbox(sandbox.id, { status: 'creating' })
+      try {
+        await window.minipit?.runSandbox(sandbox.name)
+        updateSandbox(sandbox.id, { status: 'running' })
+      } catch {
+        updateSandbox(sandbox.id, { status: 'stopped' })
+      }
     }
   }
 
@@ -272,14 +284,15 @@ export function ContextMenu() {
       style={{ top: pos.top, left: pos.left }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="ctx-item" onClick={handleStop}>
+      <div className="ctx-item" onClick={handleStartStop}>
         {sandbox.status === 'running' ? 'Stop' : 'Start'} <span className="ctx-kbd">⌘.</span>
       </div>
+      <div className="ctx-item" onClick={handleRestart}>Restart</div>
       <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleOpenInFinder}>
         Open in Finder <span className="ctx-kbd">⇧⌘F</span>
       </div>
-      <div className="ctx-item">Copy Path</div>
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(sandbox.workspace).catch(() => {}) }}>Copy Path</div>
       <div className="ctx-sep" />
       <div
         className="ctx-item"
@@ -294,7 +307,7 @@ export function ContextMenu() {
         Customize…
       </div>
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
-      <div className="ctx-item" onClick={handleRestart}>Restart</div>
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs</div>
       <div className="ctx-sep" />
       <SubMenu label="Terminal theme">
         {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (

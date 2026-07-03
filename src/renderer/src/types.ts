@@ -229,6 +229,8 @@ declare global {
       openPath(path: string): Promise<string>
       openFileWindow(name: string, path: string, fileName: string): Promise<void>
       deletePath(name: string, path: string): Promise<void>
+      copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
+      downloadFrom(name: string, path: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>
       signOut(): Promise<void>
       generatePalette(hex: string, size?: number): Promise<string[]>
       listTemplates(): Promise<Template[]>
@@ -262,7 +264,7 @@ declare global {
       listLogs(): Promise<{ name: string; path: string }[]>
       startLogTail(path: string): Promise<void>
       stopLogTail(): Promise<void>
-      sandboxKitLog(name: string): Promise<{ ok: boolean; text: string; error?: string }>
+      sandboxLog(name: string, which: 'kit' | 'sandbox'): Promise<{ ok: boolean; text: string; error?: string }>
       onLogTail(cb: (chunk: string) => void): () => void
       getSettings(): Promise<AppSettings>
       saveSettings(settings: Partial<AppSettings>): Promise<void>

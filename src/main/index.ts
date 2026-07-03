@@ -1754,6 +1754,52 @@ function setupIPC(): void {
     await sbx(['exec', name, 'rm', '-rf', path])
   })
 
+  // Write dropped files' bytes into a directory inside the sandbox. Mirrors the
+  // agent file-drop (reads bytes in the renderer via arrayBuffer, streams them
+  // in over stdin), so it needs no host path and works for any container
+  // directory regardless of how the workspace is mounted. Returns a per-file
+  // result so the renderer can report partial failures (e.g. permission denied).
+  ipcMain.handle('minipit:copy-into', async (_, name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]) => {
+    const results: { name: string; ok: boolean; error?: string }[] = []
+    for (const f of files) {
+      const safe = ((f.name.split(/[\\/]/).pop() || 'file').replace(/[^A-Za-z0-9._ -]/g, '_').slice(-160)) || 'file'
+      if (!f.bytes?.byteLength || f.bytes.byteLength > 500 * 1024 * 1024) {
+        results.push({ name: safe, ok: false, error: 'file is empty or too large (500 MB max)' })
+        continue
+      }
+      const r = await new Promise<{ name: string; ok: boolean; error?: string }>((resolve) => {
+        // Positional args ($1 dir, $2 name) keep paths with spaces/quotes safe.
+        const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'cat > "$1/$2"', 'sh', destDir, safe])
+        let err = ''
+        proc.stderr.on('data', (d) => { err += d.toString() })
+        proc.on('error', (e) => resolve({ name: safe, ok: false, error: String(e) }))
+        proc.on('close', (code) => resolve(code === 0 ? { name: safe, ok: true } : { name: safe, ok: false, error: err.trim() || `exit ${code}` }))
+        proc.stdin.write(Buffer.from(f.bytes))
+        proc.stdin.end()
+      })
+      results.push(r)
+    }
+    return results
+  })
+
+  // Download a file from the sandbox to the host via a save dialog, then
+  // `sbx cp sandbox:src → host`. Works for any container path, so it's the way
+  // to get files that live outside the (host-mounted) workspace onto the host.
+  ipcMain.handle('minipit:download-from', async (_, name: string, srcPath: string) => {
+    const base = srcPath.split('/').pop() || 'file'
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      defaultPath: join(app.getPath('downloads'), base),
+      buttonLabel: 'Download'
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      await sbx(['cp', `${name}:${srcPath}`, res.filePath], { timeout: 120000 })
+      return { ok: true, path: res.filePath }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   ipcMain.handle('minipit:list-secrets', () => listSecrets())
 
   ipcMain.handle('minipit:set-secret', async (_, service: string, value: string) => {
@@ -1826,9 +1872,10 @@ function setupIPC(): void {
   // Kit/startup logs live INSIDE the sandbox (the durable-startup dispatcher
   // writes every startup command's output here). Not host-tailable, so read it
   // on demand via exec; callers poll for "follow".
-  ipcMain.handle('minipit:sandbox-kit-log', async (_, name: string) => {
+  ipcMain.handle('minipit:sandbox-log', async (_, name: string, which: 'kit' | 'sandbox') => {
+    const path = which === 'sandbox' ? '/var/log/dockerd.log' : '/var/log/sbx-kit-startup.log'
     try {
-      const text = await sbx(['exec', name, 'sh', '-c', 'cat /var/log/sbx-kit-startup.log 2>/dev/null'], { timeout: 10000 })
+      const text = await sbx(['exec', name, 'sh', '-c', `cat ${path} 2>/dev/null`], { timeout: 10000 })
       return { ok: true, text }
     } catch (e) {
       return { ok: false, text: '', error: e instanceof Error ? e.message : String(e) }

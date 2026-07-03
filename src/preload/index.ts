@@ -18,6 +18,8 @@ const api = {
   openPath:      (path: string)         => ipcRenderer.invoke('minipit:open-path', path),
   openFileWindow:(name: string, path: string, fileName: string) => ipcRenderer.invoke('minipit:open-file-window', name, path, fileName),
   deletePath:    (name: string, path: string) => ipcRenderer.invoke('minipit:delete-path', name, path),
+  copyInto:      (name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]) => ipcRenderer.invoke('minipit:copy-into', name, destDir, files),
+  downloadFrom:  (name: string, path: string) => ipcRenderer.invoke('minipit:download-from', name, path),
   signOut:       ()                     => ipcRenderer.invoke('minipit:sign-out'),
   generatePalette: (hex: string, size?: number) => ipcRenderer.invoke('minipit:generate-palette', hex, size),
   listTemplates: ()                     => ipcRenderer.invoke('minipit:list-templates'),
@@ -51,7 +53,7 @@ const api = {
   listLogs:      ()                     => ipcRenderer.invoke('minipit:list-logs'),
   startLogTail:  (path: string)         => ipcRenderer.invoke('minipit:start-log-tail', path),
   stopLogTail:   ()                     => ipcRenderer.invoke('minipit:stop-log-tail'),
-  sandboxKitLog: (name: string)         => ipcRenderer.invoke('minipit:sandbox-kit-log', name),
+  sandboxLog:    (name: string, which: 'kit' | 'sandbox') => ipcRenderer.invoke('minipit:sandbox-log', name, which),
   onLogTail: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:log-tail', handler)

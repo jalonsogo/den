@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { useStore } from './store'
 import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
@@ -126,12 +127,7 @@ export function App() {
           {activePage === 'mixins'    && <KitsPage variant="mixin" />}
           {activePage === 'kits'      && <KitsPage variant="sandbox" />}
           {activePage === 'settings'  && <SettingsPage />}
-          {activePage === 'logs'      && (
-            <div className="page">
-              <div className="page-hdr"><span className="page-title">Logs</span></div>
-              <LogsPanel />
-            </div>
-          )}
+          {activePage === 'logs'      && <LogsPage />}
 
           {modal === 'new-sandbox' && <NewSandboxModal />}
           {modal === 'new-secret'  && <NewSecretModal />}
@@ -142,6 +138,28 @@ export function App() {
       <PromptModal />
       <TemplateInspectModal />
       <PolicyBlockToaster />
+    </div>
+  )
+}
+
+// The Logs page. When opened from a sandbox's "Logs" action it shows a back
+// button that returns to that sandbox.
+function LogsPage() {
+  const logsReturn = useStore((s) => s.logsReturn)
+  const setActiveSandboxId = useStore((s) => s.setActiveSandboxId)
+  const backName = useStore((s) => s.sandboxes.find((x) => x.id === logsReturn)?.name)
+
+  return (
+    <div className="page">
+      <div className="page-hdr">
+        {logsReturn && (
+          <button className="btn btn-ghost btn-sm" onClick={() => setActiveSandboxId(logsReturn)}>
+            <ArrowLeft size={14} /> {backName ?? 'Back'}
+          </button>
+        )}
+        <span className="page-title">Logs</span>
+      </div>
+      <LogsPanel />
     </div>
   )
 }

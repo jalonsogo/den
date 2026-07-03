@@ -121,7 +121,11 @@ export function ProjectsPage() {
                   <div className="proj-hdr-text">
                     <div className="proj-hdr-line">
                       <span className="proj-name">{workspace.split('/').pop() || workspace}</span>
-                      <span className="proj-path">{workspace}</span>
+                      <span
+                        className="proj-path"
+                        title="Double-click to reveal in Finder"
+                        onDoubleClick={(e) => { e.stopPropagation(); window.minipit?.openInFinder(workspace) }}
+                      >{workspace}</span>
                     </div>
                     {gitInfo[workspace]?.isRepo && (
                       <div className="proj-git">

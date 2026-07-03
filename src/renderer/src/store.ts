@@ -81,6 +81,10 @@ interface AppState {
   defaultKits: string[]
   // Name of a just-created sandbox to briefly flash in the sidebar. Auto-clears.
   highlightSandbox: string | null
+  // Sandbox to focus when opening the Logs page (from a sandbox's Logs action).
+  logsSandbox: string | null
+  // Sandbox id to return to from the Logs page (set when opened from a sandbox).
+  logsReturn: string | null
 
   setSandboxes:       (sandboxes: Sandbox[]) => void
   addCreatingSandbox: (sandbox: Sandbox) => void
@@ -119,6 +123,8 @@ interface AppState {
   updateSandbox:      (id: string, updates: Partial<Sandbox>) => void
   setActiveSandboxId: (id: string | null) => void
   setActivePage:      (page: PageType) => void
+  setLogsSandbox:     (name: string | null) => void
+  setLogsReturn:      (id: string | null) => void
   setActiveTab:       (tab: TabType) => void
   setModal:           (modal: ModalType) => void
   openPrompt:         (config: PromptConfig) => void
@@ -185,6 +191,8 @@ export const useStore = create<AppState>((set) => ({
   toasts: [],
   agentActivity: {},
   highlightSandbox: null,
+  logsSandbox: null,
+  logsReturn: null,
   defaultKits: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:defaultKits') ?? '[]') ?? [] } catch { return [] }
   })(),
@@ -511,9 +519,13 @@ export const useStore = create<AppState>((set) => ({
       return { sandboxes, agentActivity, stopHolds }
     }),
 
-  setActiveSandboxId: (id) => set({ activeSandboxId: id, activePage: 'sandbox', activeTab: 'terminal' }),
+  setActiveSandboxId: (id) => set({ activeSandboxId: id, activePage: 'sandbox', activeTab: 'terminal', logsReturn: null }),
 
-  setActivePage: (page) => set({ activePage: page }),
+  setActivePage: (page) => set((s) => ({ activePage: page, logsReturn: page === 'logs' ? s.logsReturn : null })),
+
+  setLogsSandbox: (name) => set({ logsSandbox: name }),
+
+  setLogsReturn: (id) => set({ logsReturn: id }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 
