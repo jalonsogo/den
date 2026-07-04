@@ -2,7 +2,7 @@
 
 A running record of the architectural decisions behind **den**, the desktop GUI for
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (the `sbx` CLI). This is the
-"why", not the "what" — pair it with the code and [`README.md`](README.md).
+"why", not the "what" — pair it with the code and [`README.md`](../README.md).
 
 > Naming: the product is the lowercase wordmark **den** ("Developer Ephemeral Node").
 > The internal IPC namespace and preload bridge are still `minipit` for historical

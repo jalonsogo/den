@@ -25,7 +25,7 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
 
 - [ ] **Release channels (Stable / Nightly)** — in-app channel switching instead of
       leaking the Homebrew cask conflict to users. Design already drafted in
-      [`docs/release-channels-proposal.md`](docs/release-channels-proposal.md).
+      [`release-channels-proposal.md`](release-channels-proposal.md).
 - [ ] **Bulk actions** — start/stop/delete across a multi-select of sandboxes (today it's
       per-sandbox or per-group).
 - [ ] **Group polish** — collapse/expand a group section; show running/total count per
