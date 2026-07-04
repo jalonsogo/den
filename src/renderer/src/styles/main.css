@@ -2351,14 +2351,23 @@ html, body, #root {
   border-radius: 100px; padding: 1px 7px; margin-left: 8px;
 }
 .kit-caps { display: flex; flex-wrap: wrap; gap: 0; align-items: center; justify-content: flex-start; }
+/* Full list: fixed positional columns so each capability type lines up in the
+   same column across every row, table-style, even when a kit lacks some. */
+.kit-caps:not(.compact) {
+  display: grid;
+  grid-template-columns: 132px 104px 108px 116px 96px;
+  justify-content: start;
+}
+.kit-caps:not(.compact) .kit-cap-ic { padding: 0 12px 0 0; border-left: none; }
+.kit-cap-ic.is-empty { pointer-events: none; }
 .kit-cap-empty { font-size: 12px; color: var(--t3); }
 .kit-cap-ic {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11.5px; color: var(--t2); cursor: default;
   padding: 0 12px;
 }
-.kit-cap-ic:first-child { padding-left: 0; }
-.kit-cap-ic + .kit-cap-ic { border-left: 1px solid var(--border); }
+.kit-caps.compact .kit-cap-ic:first-child { padding-left: 0; }
+.kit-caps.compact .kit-cap-ic + .kit-cap-ic { border-left: 1px solid var(--border); }
 .kit-cap-ic:hover { color: var(--t1); }
 .kit-cap-ic:hover svg { color: var(--t1); }
 

@@ -4,10 +4,21 @@ import { Plug, Globe, Variable, TerminalSquare, FileText } from 'lucide-react'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 import type { ParsedKit } from '../lib/kitSpec'
 
-// Visual representation of a kit's spec.yaml — a left-aligned row of capability
-// icons; hovering one shows its detailed contents in a fixed-position popover
-// (so it escapes any ancestor's overflow:hidden clip). `compact` drops the text
-// labels for tight spots like the New Sandbox modal (icons + counts only).
+// Fixed capability order. Non-compact lists render every slot (empty when a kit
+// lacks it) so the same capability type lines up in the same column across rows.
+const CAP_DEFS = [
+  { key: 'mcp', icon: Plug, label: 'Remote MCP' },
+  { key: 'net', icon: Globe, label: 'Policies' },
+  { key: 'env', icon: Variable, label: 'Env vars' },
+  { key: 'cmd', icon: TerminalSquare, label: 'Commands' },
+  { key: 'mem', icon: FileText, label: 'Memory' }
+] as const
+
+// Visual representation of a kit's spec.yaml — a row of capability icons;
+// hovering one shows its detailed contents in a fixed-position popover (so it
+// escapes any ancestor's overflow:hidden clip). `compact` drops the text labels
+// and packs only the present capabilities, for tight spots like the New Sandbox
+// modal; the full list renders fixed positional columns.
 export function KitCaps({ p, compact }: { p?: ParsedKit; compact?: boolean }) {
   const [hover, setHover] = useState<{ key: string; top: number; left: number } | null>(null)
   if (!p) return <div className="kit-caps"><span className="kit-cap-empty">—</span></div>
@@ -19,6 +30,20 @@ export function KitCaps({ p, compact }: { p?: ParsedKit; compact?: boolean }) {
   if (p.installCmds.length) items.push({ key: 'cmd', icon: TerminalSquare, label: 'Commands', count: p.installCmds.length })
   if (p.agentContext) items.push({ key: 'mem', icon: FileText, label: 'Memory' })
   if (items.length === 0) return <div className="kit-caps"><span className="kit-cap-empty">No capabilities</span></div>
+
+  const countByKey: Record<string, number | undefined> = {
+    mcp: p.mcps.length || undefined, net: domains || undefined,
+    env: p.envVars.length || undefined, cmd: p.installCmds.length || undefined, mem: undefined
+  }
+  const presentByKey: Record<string, boolean> = {
+    mcp: p.mcps.length > 0, net: domains > 0, env: p.envVars.length > 0,
+    cmd: p.installCmds.length > 0, mem: !!p.agentContext
+  }
+  // Compact packs only present caps; the full list renders every column in a
+  // fixed order (absent ones become empty cells) so they align table-style.
+  const cells = compact
+    ? items.map((it) => ({ ...it, present: true }))
+    : CAP_DEFS.map((c) => ({ key: c.key, icon: c.icon, label: c.label, count: countByKey[c.key], present: presentByKey[c.key] }))
 
   const enter = (key: string, e: React.MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -63,18 +88,22 @@ export function KitCaps({ p, compact }: { p?: ParsedKit; compact?: boolean }) {
 
   return (
     <div className={`kit-caps${compact ? ' compact' : ''}`}>
-      {items.map(({ key, icon: Icon, label, count }) => (
-        <span
-          key={key}
-          className="kit-cap-ic"
-          onMouseEnter={(e) => enter(key, e)}
-          onMouseLeave={() => setHover((h) => (h?.key === key ? null : h))}
-        >
-          <Icon size={14} />
-          {!compact && <span className="kit-cap-lbl">{label}</span>}
-          {count != null && <span className="kit-cap-n">{count}</span>}
-        </span>
-      ))}
+      {cells.map(({ key, icon: Icon, label, count, present }) =>
+        present ? (
+          <span
+            key={key}
+            className="kit-cap-ic"
+            onMouseEnter={(e) => enter(key, e)}
+            onMouseLeave={() => setHover((h) => (h?.key === key ? null : h))}
+          >
+            <Icon size={14} />
+            {!compact && <span className="kit-cap-lbl">{label}</span>}
+            {count != null && <span className="kit-cap-n">{count}</span>}
+          </span>
+        ) : (
+          <span key={key} className="kit-cap-ic is-empty" aria-hidden="true" />
+        )
+      )}
       {hover && createPortal(
         // Portal to <body> so the fixed-positioned popover escapes any ancestor
         // that forms a containing block for fixed elements (e.g. the modal
