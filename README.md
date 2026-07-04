@@ -12,7 +12,7 @@ den is a beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai
 
 <br />
 
-<img src="landing/screenshots/app-dashboard.png" alt="den — overview of running sandboxes and groups" width="820" />
+<img src="landing/screenshots/app-sandbox.png" alt="den — a running sandbox with an AI agent, sandboxes organized into groups" width="820" />
 
 </div>
 
