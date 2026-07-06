@@ -2023,8 +2023,20 @@ function setupIPC(): void {
   }))
 
   ipcMain.handle('minipit:open-in-finder', (_, path: string) => {
-    const expanded = path.replace(/^~/, app.getPath('home'))
+    const fs = require('fs')
+    // Expand a leading `~` (only when it's the home marker, not part of a name)
+    // and strip trailing slashes — macOS `showItemInFolder` no-ops on both.
+    const expanded = (path.replace(/^~(?=$|\/)/, app.getPath('home')).replace(/\/+$/, '') || '/')
+    if (!fs.existsSync(expanded)) {
+      // The item isn't on the host (e.g. lives only inside the sandbox), so
+      // showItemInFolder would silently do nothing. Fall back to the parent.
+      console.error('open-in-finder: path not found on host:', expanded)
+      const parent = require('path').dirname(expanded)
+      if (fs.existsSync(parent)) return shell.openPath(parent)
+      return undefined
+    }
     shell.showItemInFolder(expanded)
+    return undefined
   })
 
   ipcMain.handle('minipit:exec', async (_, name: string, command: string) => {
