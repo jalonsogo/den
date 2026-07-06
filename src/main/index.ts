@@ -380,11 +380,12 @@ async function getSbxSandboxRaw(name: string): Promise<SbxSandbox | null> {
   } catch { return null }
 }
 
-// `sbx ssh setup` provisions the client side: it writes a single `Host sbx` alias
-// and a managed key into ~/.ssh/config, with live host-key verification (no
+// `sbx ssh setup` provisions the client side: it writes a wildcard `Host *.sbx`
+// block and a managed key into ~/.ssh/config, with live host-key verification (no
 // prompts, survives daemon key rotation). It's idempotent — no duplicate blocks —
-// so we run it before every connect. Connecting uses `<sandbox-name>@sbx`: the
-// single host alias is `sbx` and the sandbox name IS the SSH username.
+// so we run it before every connect. Connecting uses `<sandbox-name>.sbx`: the
+// sandbox name IS the hostname (matched by the `*.sbx` wildcard); the SSH user is
+// set by the config block, not the sandbox name.
 async function ensureSshSetup(): Promise<void> {
   await sbx(['ssh', 'setup'], { timeout: 30000 })
 }
@@ -401,7 +402,7 @@ async function remoteWorkspacePath(name: string): Promise<string> {
 
 // Attach desktop VSCode to a sandbox over the sbx SSH endpoint. Ensures the
 // feature is on, `sbx ssh setup` has run, and the sandbox is up, then launches:
-//   code --folder-uri vscode-remote://ssh-remote+<name>@sbx<workspace>
+//   code --folder-uri vscode-remote://ssh-remote+<name>.sbx<workspace>
 async function openInVscode(name: string): Promise<{ ok: boolean; needsFeature?: boolean; error?: string }> {
   const status = await sshFeatureStatus()
   if (!status.enabled) return { ok: false, needsFeature: true, error: 'The sbx SSH endpoint is not enabled.' }
@@ -416,13 +417,13 @@ async function openInVscode(name: string): Promise<{ ok: boolean; needsFeature?:
   // SSH auto-starts a stopped sandbox, but VSCode's server install and our
   // workspace-path probe are smoother if it's already running.
   if (raw.status !== 'running') {
-    try { await sbx(['run', name], { timeout: 60000 }) } catch (e) {
+    try { await sbx(['run', '--name', name], { timeout: 60000 }) } catch (e) {
       return { ok: false, error: `Couldn't start "${name}": ${e instanceof Error ? e.message : String(e)}` }
     }
   }
 
   const remotePath = await remoteWorkspacePath(name)
-  const folderUri = `vscode-remote://ssh-remote+${name}@sbx${remotePath}`
+  const folderUri = `vscode-remote://ssh-remote+${name}.sbx${remotePath}`
   return new Promise((resolve) => {
     execFile(getCodePath(), ['--folder-uri', folderUri], { timeout: 15000, env: guiEnv() }, (err) => {
       if (err) resolve({ ok: false, error: `Couldn't launch VSCode: ${err.message}. Is the \`code\` CLI installed and on PATH?` })
@@ -1079,7 +1080,7 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24) {
     sbxProcesses.delete(name)
   }
 
-  const proc = pty.spawn(getSbxPath(), ['run', name], {
+  const proc = pty.spawn(getSbxPath(), ['run', '--name', name], {
     name: 'xterm-256color',
     cols,
     rows,

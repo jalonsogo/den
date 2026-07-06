@@ -38,7 +38,7 @@ npm run compile      # or: npm run watch
 
 Press **F5** in VSCode to launch an Extension Development Host.
 
-> Note: connection goes through `sbx ssh setup` (idempotent — writes a single
-> `Host sbx` alias + managed key), after which VSCode opens
-> `vscode-remote://ssh-remote+<name>@sbx<workspace>` (the sandbox name is the SSH
-> username). `sbx ssh` is experimental, so watch the release notes as it evolves.
+> Note: connection goes through `sbx ssh setup` (idempotent — writes a wildcard
+> `Host *.sbx` block + managed key), after which VSCode opens
+> `vscode-remote://ssh-remote+<name>.sbx<workspace>` (the sandbox name is the SSH
+> hostname). `sbx ssh` is experimental, so watch the release notes as it evolves.
