@@ -8,6 +8,8 @@ const api = {
   stopSandbox:   (name: string)         => ipcRenderer.invoke('minipit:stop-sandbox', name),
   deleteSandbox: (name: string)         => ipcRenderer.invoke('minipit:delete-sandbox', name),
   getPorts:      (name: string)         => ipcRenderer.invoke('minipit:get-ports', name),
+  portPublish:   (name: string, spec: string) => ipcRenderer.invoke('minipit:port-publish', name, spec),
+  portUnpublish: (name: string, spec: string) => ipcRenderer.invoke('minipit:port-unpublish', name, spec),
   listFiles:     (name: string, relPath: string) => ipcRenderer.invoke('minipit:list-files', name, relPath),
   gitStatus:     (name: string, workspace: string) => ipcRenderer.invoke('minipit:git-status', name, workspace),
   isGitRepo:     (dir: string)          => ipcRenderer.invoke('minipit:is-git-repo', dir),
@@ -35,6 +37,8 @@ const api = {
   updateKit:     (dir: string, spec: string, files?: string[]) => ipcRenderer.invoke('minipit:update-kit', dir, spec, files),
   removeKit:     (dir: string)          => ipcRenderer.invoke('minipit:remove-kit', dir),
   kitPush:       (dir: string, ref: string) => ipcRenderer.invoke('minipit:kit-push', dir, ref),
+  kitValidate:   (dir: string)          => ipcRenderer.invoke('minipit:kit-validate', dir),
+  kitPack:       (dir: string, name: string) => ipcRenderer.invoke('minipit:kit-pack', dir, name),
   saveSnapshot:  (name: string, tag: string) => ipcRenderer.invoke('minipit:save-snapshot', name, tag),
   kitImport:     (ref: string)          => ipcRenderer.invoke('minipit:kit-import', ref),
   listContribKits: ()                   => ipcRenderer.invoke('minipit:list-contrib-kits'),
@@ -65,9 +69,21 @@ const api = {
   sbxReleases:   ()                     => ipcRenderer.invoke('minipit:sbx-releases'),
   sbxInstallInfo: ()                    => ipcRenderer.invoke('minipit:sbx-install-info'),
   sbxUpdate:     (action: string)       => ipcRenderer.invoke('minipit:sbx-update', action),
+  sbxSettingSet: (key: string, value: string) => ipcRenderer.invoke('minipit:sbx-setting-set', key, value),
+  sbxReset:      (preserveSecrets: boolean) => ipcRenderer.invoke('minipit:sbx-reset', preserveSecrets),
+  diagnose:      (mode?: 'text' | 'json' | 'github-issue' | 'upload') => ipcRenderer.invoke('minipit:diagnose', mode),
+  onDiagnoseOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:diagnose-output', handler)
+    return () => ipcRenderer.removeListener('minipit:diagnose-output', handler)
+  },
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
   policyAllow:   (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-allow', name, resources),
+  policyDeny:    (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-deny', name, resources),
+  policyRm:      (name: string, resource: string) => ipcRenderer.invoke('minipit:policy-rm', name, resource),
+  policySetDefault: (preset: string)    => ipcRenderer.invoke('minipit:policy-set-default', preset),
+  policyReset:   (preset: string)       => ipcRenderer.invoke('minipit:policy-reset', preset),
   onRuntimeOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:runtime-output', handler)

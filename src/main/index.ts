@@ -252,7 +252,28 @@ interface SbxSandbox {
   status: string
   socket_path?: string
   workspaces?: string[]
-  ports?: Array<{ host: string; sandbox: string; protocol: string }>
+  ports?: RawPort[]
+}
+
+// sbx isn't consistent about port field names across commands (`sbx ls` vs
+// `sbx ports`) or types (number vs string), so coerce defensively.
+type RawPort = Record<string, unknown>
+
+function toPortNum(v: unknown): number {
+  if (typeof v === 'number') return v
+  if (typeof v === 'string') return parseInt(v, 10)
+  return NaN
+}
+
+function normalizePorts(ports?: RawPort[]) {
+  return (ports ?? [])
+    .map((p) => ({
+      host: toPortNum(p.host_port ?? p.host),
+      container: toPortNum(p.sandbox_port ?? p.sandbox ?? p.container_port ?? p.container),
+      protocol: String(p.protocol ?? 'tcp').toUpperCase(),
+      active: true
+    }))
+    .filter((p) => !Number.isNaN(p.host) && !Number.isNaN(p.container))
 }
 
 function normalizeSandbox(raw: SbxSandbox) {
@@ -275,12 +296,7 @@ function normalizeSandbox(raw: SbxSandbox) {
     agent: raw.agent ?? 'claude',
     workspace: raw.workspaces?.[0] ?? '~',
     uptimeSeconds,
-    ports: raw.ports?.map((p) => ({
-      host: parseInt(p.host),
-      container: parseInt(p.sandbox),
-      protocol: p.protocol?.toUpperCase() ?? 'TCP',
-      active: true
-    })) ?? [],
+    ports: normalizePorts(raw.ports),
     logs: [] as unknown[]
   }
 }
@@ -323,12 +339,7 @@ async function getPortsForSandbox(name: string) {
   try {
     const out = await sbx(['ports', name, '--json'])
     const data = JSON.parse(out)
-    return (data.ports ?? []).map((p: { host_port: number; sandbox_port: number; protocol: string }) => ({
-      host: p.host_port,
-      container: p.sandbox_port,
-      protocol: (p.protocol ?? 'tcp').toUpperCase(),
-      active: true
-    }))
+    return normalizePorts(data.ports)
   } catch {
     return []
   }
@@ -1306,6 +1317,28 @@ function setupIPC(): void {
     return getPortsForSandbox(name)
   })
 
+  // Publish a port from the sandbox to the host. `spec` is the sbx port form
+  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL], e.g. "8080:8080/tcp".
+  // Requires the sandbox to be running; mappings don't persist across stops.
+  ipcMain.handle('minipit:port-publish', async (_, name: string, spec: string) => {
+    try {
+      const output = await sbx(['ports', name, '--publish', spec], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Remove a published port. sbx wants the explicit host:sandbox[/proto] form.
+  ipcMain.handle('minipit:port-unpublish', async (_, name: string, spec: string) => {
+    try {
+      const output = await sbx(['ports', name, '--unpublish', spec], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   ipcMain.handle('minipit:list-files', async (_, name: string, relPath: string) => {
     return listFiles(name, relPath ?? '')
   })
@@ -1493,12 +1526,81 @@ function setupIPC(): void {
     }
   })
 
+  // Run `sbx diagnose` for support/troubleshooting. The plain and github-issue
+  // variants can take a while (they probe the daemon, VMs and network), and
+  // `--upload` sends a bundle to Docker — so stream output and use a long
+  // timeout, mirroring the login flow.
+  //   text         → `sbx diagnose`               (human-readable report)
+  //   json         → `sbx diagnose --output json`  (machine-readable)
+  //   github-issue → `sbx diagnose --output github-issue` (pre-formatted bug)
+  //   upload       → `sbx diagnose --upload`        (uploads a bundle, prints id)
+  ipcMain.handle(
+    'minipit:diagnose',
+    async (_, mode: 'text' | 'json' | 'github-issue' | 'upload' = 'text') => {
+      const args =
+        mode === 'upload'
+          ? ['diagnose', '--upload']
+          : mode === 'text'
+            ? ['diagnose']
+            : ['diagnose', '--output', mode]
+      const send = (chunk: string) =>
+        mainWindow?.webContents.send('minipit:diagnose-output', chunk)
+      try {
+        const output = await new Promise<string>((resolve, reject) => {
+          const proc = spawn(getSbxPath(), args, { env: guiEnv() })
+          let buf = ''
+          let err = ''
+          proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
+          proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
+          proc.on('error', (e) => reject(e))
+          const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx diagnose timed out')) }, 300000)
+          proc.on('close', (code) => {
+            clearTimeout(timer)
+            if (code === 0) resolve(buf.trim())
+            else reject(new Error(err.trim() || buf.trim() || `sbx diagnose exited ${code}`))
+          })
+        })
+        return { ok: true, output }
+      } catch (err) {
+        return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+      }
+    }
+  )
+
   // Publish a kit as an OCI artifact to a registry (Docker Hub, ghcr, …).
   // Auth uses the Docker credential store (the user must `docker login` first).
   ipcMain.handle('minipit:kit-push', async (_, dir: string, ref: string) => {
     try {
       const output = await sbx(['kit', 'push', dir, ref], { timeout: 180000 })
       return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Validate a kit spec without saving/packing it — surfaces spec errors in the
+  // editor. `sbx kit validate` exits non-zero on invalid specs, so a rejected
+  // promise carries the validation message.
+  ipcMain.handle('minipit:kit-validate', async (_, dir: string) => {
+    try {
+      const output = await sbx(['kit', 'validate', dir], { timeout: 20000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Pack a kit into a distributable zip at a user-chosen location (complements
+  // push — for sharing a file rather than an OCI reference).
+  ipcMain.handle('minipit:kit-pack', async (_, dir: string, name: string) => {
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      defaultPath: `${name}.zip`,
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      const output = await sbx(['kit', 'pack', dir, '-o', res.filePath], { timeout: 30000 })
+      return { ok: true, path: res.filePath, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
@@ -1956,8 +2058,33 @@ function setupIPC(): void {
     menuBarOnly: (store.get('menuBarOnly') as boolean) ?? true,
     notifyOnExit: (store.get('notifyOnExit') as boolean) ?? true,
     notifyOnError: (store.get('notifyOnError') as boolean) ?? true,
-    keepAwake: (store.get('keepAwake') as boolean) ?? true
+    keepAwake: (store.get('keepAwake') as boolean) ?? true,
+    imagePaste: (store.get('imagePaste') as boolean) ?? false
   }))
+
+  // Write a runtime setting via `sbx settings set <key> <value>` (e.g.
+  // clipboard.imagePaste). Distinct from den's own app settings above.
+  ipcMain.handle('minipit:sbx-setting-set', async (_, key: string, value: string) => {
+    try {
+      const output = await sbx(['settings', 'set', key, value], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Destructive: `sbx reset` stops all VMs and deletes sandbox data. It prompts
+  // for confirmation, so feed "y". `--preserve-secrets` keeps stored creds.
+  ipcMain.handle('minipit:sbx-reset', async (_, preserveSecrets: boolean) => {
+    try {
+      const args = ['reset']
+      if (preserveSecrets) args.push('--preserve-secrets')
+      const output = await sbxWithInput(args, 'y\n', 120000)
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
 
   ipcMain.handle('minipit:save-settings', (_, settings: Record<string, unknown>) => {
     for (const [k, v] of Object.entries(settings)) store.set(k, v)
@@ -2061,6 +2188,58 @@ function setupIPC(): void {
       if (name) args.push('--sandbox', name)
       args.push(resources)
       const output = await sbx(args, { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Add a deny rule (block a host). Mirror of policy-allow. Comma-separated
+  // resources and an optional per-sandbox scope are both supported by the CLI.
+  ipcMain.handle('minipit:policy-deny', async (_, name: string, resources: string) => {
+    try {
+      const args = ['policy', 'deny', 'network']
+      if (name) args.push('--sandbox', name)
+      args.push(resources)
+      const output = await sbx(args, { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Remove a local network rule by resource (the value shown as a chip). Only
+  // effective when org governance is inactive — the renderer hides the control
+  // otherwise.
+  ipcMain.handle('minipit:policy-rm', async (_, name: string, resource: string) => {
+    try {
+      const args = ['policy', 'rm', 'network']
+      if (name) args.push('--sandbox', name)
+      args.push('--resource', resource)
+      const output = await sbx(args, { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Set the default network preset non-interactively (open | balanced |
+  // locked-down). Unlike `policy reset`, this doesn't prompt.
+  ipcMain.handle('minipit:policy-set-default', async (_, preset: string) => {
+    try {
+      const output = await sbx(['policy', 'set-default', preset], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Reset all custom network rules. `sbx policy reset` prompts for a new default
+  // preset, so feed the chosen preset to stdin (timeout-guarded so it can never
+  // hang the app if the prompt shape changes).
+  ipcMain.handle('minipit:policy-reset', async (_, preset: string) => {
+    try {
+      const output = await sbxWithInput(['policy', 'reset'], `${preset}\n`, 20000)
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }

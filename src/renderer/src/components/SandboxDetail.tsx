@@ -7,13 +7,25 @@ import { FilesPanel } from './FilesPanel'
 import { SandboxAvatar } from './SandboxAvatar'
 import { ChangesList } from './ChangesList'
 import { formatUptime } from '../lib/utils'
+import { bringSandboxToHost } from '../lib/featureChanges'
 import type { FileChange } from '../types'
 
 type Dock = 'files' | 'info' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
+
+  // Clone-mode sandboxes keep their work inside a private clone; expose the
+  // fetch-back / PR / merge flow as a header button (mirrors the context menu).
+  const [featureOpen, setFeatureOpen] = useState(false)
+  const featureRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!featureOpen) return
+    const onDown = (e: MouseEvent) => { if (featureRef.current && !featureRef.current.contains(e.target as Node)) setFeatureOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [featureOpen])
 
   // Load the workspace's host-side git info (branch/remote) — the project git
   // summary that used to live in the (now-removed) sidebar Projects section.
@@ -132,6 +144,30 @@ export function SandboxDetail() {
            : sandbox.status === 'deleting' ? 'Deleting…' : 'Stopped'}
         </span>
         <div className="d-actions">
+          {sandboxIsolation[sandbox.name] === true && (
+            <div className="d-feature" ref={featureRef} style={{ position: 'relative' }}>
+              <button
+                className="seg-btn-item d-feature-btn"
+                onClick={() => setFeatureOpen((o) => !o)}
+                title="Bring this sandbox's changes to your repo"
+              >
+                <Github size={13} />
+                Changes
+                <ChevronDown size={12} />
+              </button>
+              {featureOpen && (
+                <div className="d-feature-menu">
+                  <div className="d-feature-label">Review in the Files → Changes tab</div>
+                  <div className="d-feature-item" onClick={() => { setFeatureOpen(false); bringSandboxToHost(sandbox, false) }}>
+                    <Github size={13} /> Merge changes to your repo…
+                  </div>
+                  <div className="d-feature-item" onClick={() => { setFeatureOpen(false); bringSandboxToHost(sandbox, true) }}>
+                    <Github size={13} /> Merge, then delete sandbox…
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {sandbox.status === 'running' ? (
             <div className="seg-btn">
               <button className="seg-btn-item" onClick={handleStop} disabled={isTransitioning}>

@@ -951,6 +951,30 @@ html, body, #root {
   gap: 9px;
 }
 /* Segmented action button (e.g. Stop | Restart) — two joined segments. */
+/* Clone-mode "Changes" button + dropdown in the sandbox header. */
+.d-feature-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 5px 9px; font-size: 12px; color: var(--t1);
+  background: transparent; cursor: pointer;
+}
+.d-feature-btn:hover { background: var(--bg-subtle); }
+.d-feature-btn svg { flex-shrink: 0; opacity: 0.85; }
+.d-feature-menu {
+  position: absolute; top: calc(100% + 5px); left: 0; z-index: 2000;
+  min-width: 232px; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,0.22);
+  color: var(--t1); font-size: 13px;
+}
+.d-feature-label { padding: 5px 9px 6px; font-size: 11px; color: var(--t3); }
+.d-feature-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 9px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+}
+.d-feature-item:hover { background: var(--bg-subtle); }
+.d-feature-item svg { flex-shrink: 0; opacity: 0.85; }
+
 .seg-btn { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
 .seg-btn-item {
   display: inline-flex; align-items: center; gap: 5px;
@@ -3169,6 +3193,7 @@ html, body, #root {
   padding: 6px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; font-size: 13px;
 }
 .ctx-sub-item:hover { background: var(--bg-subtle); }
+.ctx-sub-item-icon svg { flex-shrink: 0; opacity: 0.85; }
 .ctx-sub-item .ctx-kbd { margin-left: auto; padding-left: 16px; }
 .ctx-sub-check { width: 12px; color: var(--accent, var(--primary)); flex-shrink: 0; }
 .ctx-sub-sep { height: 1px; background: var(--border); margin: 3px 6px; }

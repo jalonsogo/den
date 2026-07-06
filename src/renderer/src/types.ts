@@ -228,6 +228,7 @@ export interface AppSettings {
   notifyOnExit: boolean
   notifyOnError: boolean
   keepAwake: boolean
+  imagePaste?: boolean
 }
 
 declare global {
@@ -239,6 +240,8 @@ declare global {
       stopSandbox(name: string): Promise<void>
       deleteSandbox(name: string): Promise<void>
       getPorts(name: string): Promise<Port[]>
+      portPublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      portUnpublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       listFiles(name: string, relPath: string): Promise<FileEntry[]>
       gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }>
       isGitRepo(dir: string): Promise<boolean>
@@ -265,6 +268,8 @@ declare global {
       updateKit(dir: string, spec: string, files?: string[]): Promise<{ ok: boolean; output?: string; error?: string }>
       removeKit(dir: string): Promise<void>
       kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      kitValidate(dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      kitPack(dir: string, name: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; output?: string; error?: string }>
       saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
       listContribKits(): Promise<{ ok: boolean; kits?: { dir: string; spec: string }[]; error?: string }>
@@ -293,11 +298,19 @@ declare global {
       sbxReleases(): Promise<SbxRelease[]>
       sbxInstallInfo(): Promise<SbxInstallInfo>
       sbxUpdate(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
+      sbxSettingSet(key: string, value: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      sbxReset(preserveSecrets: boolean): Promise<{ ok: boolean; output?: string; error?: string }>
       onRuntimeOutput(cb: (chunk: string) => void): () => void
       onCreateOutput(cb: (chunk: string) => void): () => void
+      diagnose(mode?: 'text' | 'json' | 'github-issue' | 'upload'): Promise<{ ok: boolean; output?: string; error?: string }>
+      onDiagnoseOutput(cb: (chunk: string) => void): () => void
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policyDeny(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policyRm(name: string, resource: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policySetDefault(preset: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policyReset(preset: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>
       defaultWorkspace(): Promise<string>
       projectConfigSync(local: Record<string, Record<string, string>>): Promise<{ sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }>
