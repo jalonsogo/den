@@ -1,0 +1,82 @@
+{
+  "name": "den-vscode",
+  "displayName": "den — Docker Sandboxes",
+  "description": "List and open Docker Sandboxes (sbx) from VSCode, and attach over the sbx SSH endpoint.",
+  "version": "0.1.0",
+  "publisher": "den",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "den",
+          "title": "den",
+          "icon": "media/den.svg"
+        }
+      ]
+    },
+    "views": {
+      "den": [
+        {
+          "id": "den.sandboxes",
+          "name": "Sandboxes"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "den.sandboxes",
+        "contents": "No sandboxes found.\nMake sure the `sbx` CLI is installed and you're signed in.\n[Refresh](command:den.refresh)"
+      }
+    ],
+    "commands": [
+      { "command": "den.refresh", "title": "Refresh", "category": "den", "icon": "$(refresh)" },
+      { "command": "den.openInVscode", "title": "Open in VSCode", "category": "den", "icon": "$(remote)" },
+      { "command": "den.start", "title": "Start", "category": "den", "icon": "$(play)" },
+      { "command": "den.stop", "title": "Stop", "category": "den", "icon": "$(debug-stop)" },
+      { "command": "den.openShell", "title": "Open Shell", "category": "den", "icon": "$(terminal)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "den.refresh", "when": "view == den.sandboxes", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "den.openInVscode", "when": "view == den.sandboxes && viewItem =~ /sandbox/", "group": "inline@1" },
+        { "command": "den.openShell", "when": "view == den.sandboxes && viewItem == sandbox.running", "group": "inline@2" },
+        { "command": "den.start", "when": "view == den.sandboxes && viewItem == sandbox.stopped", "group": "1_run@1" },
+        { "command": "den.stop", "when": "view == den.sandboxes && viewItem == sandbox.running", "group": "1_run@2" },
+        { "command": "den.openInVscode", "when": "view == den.sandboxes && viewItem =~ /sandbox/", "group": "1_run@3" },
+        { "command": "den.openShell", "when": "view == den.sandboxes && viewItem == sandbox.running", "group": "1_run@4" }
+      ]
+    },
+    "configuration": {
+      "title": "den",
+      "properties": {
+        "den.sbxPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the `sbx` CLI. Leave empty to auto-detect."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

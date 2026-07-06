@@ -286,6 +286,10 @@ declare global {
       oauthSecret(service: string): Promise<{ ok: true }>
       openInFinder(path: string): Promise<void>
       exec(name: string, cmd: string): Promise<string>
+      sshFeatureStatus(): Promise<{ enabled: boolean; experimental: boolean }>
+      setSshFeature(enabled: boolean, restart?: boolean): Promise<{ ok: boolean; enabled: boolean; error?: string }>
+      openVscode(name: string): Promise<{ ok: boolean; needsFeature?: boolean; error?: string }>
+      codeAvailable(): Promise<boolean>
       listLogs(): Promise<{ name: string; path: string }[]>
       startLogTail(path: string): Promise<void>
       stopLogTail(): Promise<void>

@@ -156,6 +156,27 @@ export function ContextMenu() {
     window.minipit?.openInFinder(sandbox.workspace)
   }
 
+  // Attach desktop VSCode over the sbx SSH endpoint. First run: offer to enable
+  // the experimental SSH feature (it may restart the sbx daemon), then retry.
+  const handleOpenVscode = async () => {
+    setContextMenu({ visible: false })
+    type VscodeRes = { ok: boolean; needsFeature?: boolean; error?: string }
+    const attempt = (): Promise<VscodeRes | undefined> =>
+      window.minipit?.openVscode(sandbox.name).catch((e) => ({ ok: false, error: String(e) })) as Promise<VscodeRes | undefined>
+    let res = await attempt()
+    if (res?.needsFeature) {
+      const ok = confirm(
+        'Opening a sandbox in VSCode needs the experimental sbx SSH endpoint.\n\n' +
+        'Enable it now? This may briefly restart the sbx daemon (running sandboxes keep running).'
+      )
+      if (!ok) return
+      const en = await window.minipit?.setSshFeature(true, true).catch(() => null)
+      if (!en?.enabled) { alert(en?.error || 'Could not enable the SSH endpoint. Check Settings → Runtime.'); return }
+      res = await attempt()
+    }
+    if (res && !res.ok) alert(res.error || 'Could not open VSCode.')
+  }
+
   // Restart = stop (if running) then start again, so a fresh agent session picks
   // up new kits/policy.
   const handleRestart = async () => {
@@ -236,6 +257,8 @@ export function ContextMenu() {
           : 'Start'}
       </div>
       <div className="ctx-item" onClick={handleRestart}>Restart <span className="ctx-kbd">⌘R</span></div>
+      <div className="ctx-sep" />
+      <div className="ctx-item" onClick={handleOpenVscode}>Open in VSCode</div>
       <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleOpenInFinder}>
         Open in Finder <span className="ctx-kbd">⇧⌘F</span>
