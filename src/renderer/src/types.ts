@@ -288,6 +288,9 @@ declare global {
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policyDeny(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policyRm(name: string, resource: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policySetDefault(preset: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>
       defaultWorkspace(): Promise<string>
       projectConfigSync(local: Record<string, Record<string, string>>): Promise<{ sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }>

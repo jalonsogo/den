@@ -56,6 +56,11 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
   const [allowBusy, setAllowBusy] = useState(false)
   const [allowMsg, setAllowMsg] = useState<{ ok: boolean; text: string; offerRestart?: boolean } | null>(null)
   const [restarting, setRestarting] = useState(false)
+  const [denyInput, setDenyInput] = useState('')
+  const [denyBusy, setDenyBusy] = useState(false)
+  const [rmBusy, setRmBusy] = useState<string | null>(null)
+  const [preset, setPreset] = useState('balanced')
+  const [presetBusy, setPresetBusy] = useState(false)
 
   const loadPolicy = () => {
     setPolLoading(true)
@@ -94,6 +99,53 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       loadPolicy()
     } else {
       setAllowMsg({ ok: false, text: res?.error || `Failed to allow ${host}.` })
+    }
+  }
+
+  // Add a deny (block) rule — mirror of handleAllow.
+  const handleDeny = async () => {
+    const resources = denyInput.trim()
+    if (!resources || denyBusy) return
+    setDenyBusy(true)
+    setAllowMsg(null)
+    const res = await window.minipit?.policyDeny(sandbox.name, resources).catch(() => null)
+    setDenyBusy(false)
+    if (res?.ok) {
+      setDenyInput('')
+      setAllowMsg({ ok: true, text: 'Block rule added.', offerRestart: true })
+      loadPolicy()
+    } else {
+      setAllowMsg({ ok: false, text: res?.error || 'Failed to add block rule.' })
+    }
+  }
+
+  // Remove a local rule by its resource value (the chip you click ×).
+  const removeResource = async (resource: string) => {
+    if (rmBusy) return
+    setRmBusy(resource)
+    setAllowMsg(null)
+    const res = await window.minipit?.policyRm(sandbox.name, resource).catch(() => null)
+    setRmBusy(null)
+    if (res?.ok) {
+      setAllowMsg({ ok: true, text: `Removed ${resource}.`, offerRestart: true })
+      loadPolicy()
+    } else {
+      setAllowMsg({ ok: false, text: res?.error || `Failed to remove ${resource}.` })
+    }
+  }
+
+  // Change the default network preset (open / balanced / locked-down).
+  const applyPreset = async () => {
+    if (presetBusy) return
+    setPresetBusy(true)
+    setAllowMsg(null)
+    const res = await window.minipit?.policySetDefault(preset).catch(() => null)
+    setPresetBusy(false)
+    if (res?.ok) {
+      setAllowMsg({ ok: true, text: `Default preset set to “${preset}”.`, offerRestart: true })
+      loadPolicy()
+    } else {
+      setAllowMsg({ ok: false, text: res?.error || 'Failed to set default preset.' })
     }
   }
 
@@ -242,7 +294,26 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
                       </span>
                     </div>
                     <div className="np-res">
-                      {r.resources.map((res, j) => <span className="np-chip" key={j}>{res}</span>)}
+                      {r.resources.map((res, j) => (
+                        <span className="np-chip" key={j}>
+                          {res}
+                          {!policy.governance && (
+                            <button
+                              className="np-chip-x"
+                              title="Remove this rule"
+                              disabled={rmBusy === res}
+                              onClick={() => removeResource(res)}
+                              style={{
+                                marginLeft: 5, border: 'none', background: 'none',
+                                cursor: 'pointer', color: 'inherit', opacity: 0.6, padding: 0,
+                                font: 'inherit', lineHeight: 1
+                              }}
+                            >
+                              {rmBusy === res ? '…' : '×'}
+                            </button>
+                          )}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 ))}
@@ -271,6 +342,41 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
                 {allowBusy ? 'Adding…' : 'Allow'}
               </button>
             </div>
+
+            {!policy?.governance && (
+              <>
+                <label className="np-add-lbl" style={{ marginTop: 10 }}>Add block rule</label>
+                <div className="np-add">
+                  <input
+                    className="np-add-input"
+                    value={denyInput}
+                    placeholder="ads.example.com,  tracker.example.com"
+                    onChange={(e) => setDenyInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleDeny() }}
+                  />
+                  <button className="btn btn-default btn-sm" onClick={handleDeny} disabled={denyBusy || !denyInput.trim()}>
+                    {denyBusy ? 'Adding…' : 'Block'}
+                  </button>
+                </div>
+
+                <label className="np-add-lbl" style={{ marginTop: 10 }}>Default preset</label>
+                <div className="np-add">
+                  <select
+                    className="np-add-input"
+                    value={preset}
+                    onChange={(e) => setPreset(e.target.value)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <option value="open">Open — allow all outbound</option>
+                    <option value="balanced">Balanced — allow AI APIs & package managers</option>
+                    <option value="locked-down">Locked down — block all, allowlist only</option>
+                  </select>
+                  <button className="btn btn-default btn-sm" onClick={applyPreset} disabled={presetBusy}>
+                    {presetBusy ? 'Applying…' : 'Apply'}
+                  </button>
+                </div>
+              </>
+            )}
 
             {allowMsg && (
               <div className={`np-banner ${allowMsg.ok ? 'ok' : 'err'}`}>

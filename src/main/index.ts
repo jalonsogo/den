@@ -2101,6 +2101,46 @@ function setupIPC(): void {
     }
   })
 
+  // Add a deny rule (block a host). Mirror of policy-allow. Comma-separated
+  // resources and an optional per-sandbox scope are both supported by the CLI.
+  ipcMain.handle('minipit:policy-deny', async (_, name: string, resources: string) => {
+    try {
+      const args = ['policy', 'deny', 'network']
+      if (name) args.push('--sandbox', name)
+      args.push(resources)
+      const output = await sbx(args, { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Remove a local network rule by resource (the value shown as a chip). Only
+  // effective when org governance is inactive — the renderer hides the control
+  // otherwise.
+  ipcMain.handle('minipit:policy-rm', async (_, name: string, resource: string) => {
+    try {
+      const args = ['policy', 'rm', 'network']
+      if (name) args.push('--sandbox', name)
+      args.push('--resource', resource)
+      const output = await sbx(args, { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Set the default network preset non-interactively (open | balanced |
+  // locked-down). Unlike `policy reset`, this doesn't prompt.
+  ipcMain.handle('minipit:policy-set-default', async (_, preset: string) => {
+    try {
+      const output = await sbx(['policy', 'set-default', preset], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   ipcMain.handle('minipit:default-workspace', () => {
     // Base folder for new sandboxes; each one gets its own ~/den/<name> subfolder.
     const dir = join(app.getPath('home'), 'den')

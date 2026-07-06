@@ -74,6 +74,9 @@ const api = {
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
   policyAllow:   (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-allow', name, resources),
+  policyDeny:    (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-deny', name, resources),
+  policyRm:      (name: string, resource: string) => ipcRenderer.invoke('minipit:policy-rm', name, resource),
+  policySetDefault: (preset: string)    => ipcRenderer.invoke('minipit:policy-set-default', preset),
   onRuntimeOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:runtime-output', handler)
