@@ -44,6 +44,27 @@ export function SettingsPage() {
   const [askId, setAsk] = useState<SoundId>(getAskSoundId())
   const [askCustomName, setAskCustomName] = useState<string | null>(null)
 
+  // Experimental sbx SSH endpoint (powers "Open in VSCode"). This is a sbx daemon
+  // setting, not an app pref — read/written live via IPC, not through `settings`.
+  const [sshOn, setSshOn] = useState<boolean | null>(null)
+  const [sshBusy, setSshBusy] = useState(false)
+  const [codeFound, setCodeFound] = useState<boolean | null>(null)
+  useEffect(() => {
+    window.minipit?.sshFeatureStatus().then((s) => setSshOn(!!s?.enabled)).catch(() => setSshOn(false))
+    window.minipit?.codeAvailable().then(setCodeFound).catch(() => setCodeFound(false))
+  }, [])
+
+  const toggleSsh = async () => {
+    if (sshBusy || sshOn === null) return
+    const next = !sshOn
+    if (next && !confirm('Enable the experimental sbx SSH endpoint?\n\nThis may briefly restart the sbx daemon (running sandboxes keep running).')) return
+    setSshBusy(true)
+    const res = await window.minipit?.setSshFeature(next, true).catch(() => null)
+    setSshBusy(false)
+    if (res?.ok) setSshOn(res.enabled)
+    else alert(res?.error || 'Could not change the SSH endpoint setting.')
+  }
+
   const onPickCustom = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -395,6 +416,25 @@ export function SettingsPage() {
               />
             </div>
           ))}
+        </div>
+
+        <div className="ss">
+          <div className="ss-hdr">Experimental</div>
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">VSCode over SSH</div>
+              <div className="ss-sub">
+                Enable the experimental sbx SSH endpoint so “Open in VSCode” can attach your
+                desktop VSCode to a sandbox. Toggling may briefly restart the sbx daemon.
+                {codeFound === false && ' The `code` CLI wasn’t found — install it from VSCode (⇧⌘P → “Shell Command: Install ‘code’ command in PATH”).'}
+              </div>
+            </div>
+            <button
+              className={`s-toggle${sshOn ? ' on' : ''}`}
+              disabled={sshBusy || sshOn === null}
+              onClick={toggleSsh}
+            />
+          </div>
         </div>
       </div>
       )}
