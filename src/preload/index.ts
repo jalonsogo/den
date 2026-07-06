@@ -69,6 +69,8 @@ const api = {
   sbxReleases:   ()                     => ipcRenderer.invoke('minipit:sbx-releases'),
   sbxInstallInfo: ()                    => ipcRenderer.invoke('minipit:sbx-install-info'),
   sbxUpdate:     (action: string)       => ipcRenderer.invoke('minipit:sbx-update', action),
+  sbxSettingSet: (key: string, value: string) => ipcRenderer.invoke('minipit:sbx-setting-set', key, value),
+  sbxReset:      (preserveSecrets: boolean) => ipcRenderer.invoke('minipit:sbx-reset', preserveSecrets),
   diagnose:      (mode?: 'text' | 'json' | 'github-issue' | 'upload') => ipcRenderer.invoke('minipit:diagnose', mode),
   onDiagnoseOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
@@ -81,6 +83,7 @@ const api = {
   policyDeny:    (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-deny', name, resources),
   policyRm:      (name: string, resource: string) => ipcRenderer.invoke('minipit:policy-rm', name, resource),
   policySetDefault: (preset: string)    => ipcRenderer.invoke('minipit:policy-set-default', preset),
+  policyReset:   (preset: string)       => ipcRenderer.invoke('minipit:policy-reset', preset),
   onRuntimeOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:runtime-output', handler)

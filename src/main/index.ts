@@ -2040,8 +2040,33 @@ function setupIPC(): void {
     menuBarOnly: (store.get('menuBarOnly') as boolean) ?? true,
     notifyOnExit: (store.get('notifyOnExit') as boolean) ?? true,
     notifyOnError: (store.get('notifyOnError') as boolean) ?? true,
-    keepAwake: (store.get('keepAwake') as boolean) ?? true
+    keepAwake: (store.get('keepAwake') as boolean) ?? true,
+    imagePaste: (store.get('imagePaste') as boolean) ?? false
   }))
+
+  // Write a runtime setting via `sbx settings set <key> <value>` (e.g.
+  // clipboard.imagePaste). Distinct from den's own app settings above.
+  ipcMain.handle('minipit:sbx-setting-set', async (_, key: string, value: string) => {
+    try {
+      const output = await sbx(['settings', 'set', key, value], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Destructive: `sbx reset` stops all VMs and deletes sandbox data. It prompts
+  // for confirmation, so feed "y". `--preserve-secrets` keeps stored creds.
+  ipcMain.handle('minipit:sbx-reset', async (_, preserveSecrets: boolean) => {
+    try {
+      const args = ['reset']
+      if (preserveSecrets) args.push('--preserve-secrets')
+      const output = await sbxWithInput(args, 'y\n', 120000)
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
 
   ipcMain.handle('minipit:save-settings', (_, settings: Record<string, unknown>) => {
     for (const [k, v] of Object.entries(settings)) store.set(k, v)
@@ -2185,6 +2210,18 @@ function setupIPC(): void {
   ipcMain.handle('minipit:policy-set-default', async (_, preset: string) => {
     try {
       const output = await sbx(['policy', 'set-default', preset], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Reset all custom network rules. `sbx policy reset` prompts for a new default
+  // preset, so feed the chosen preset to stdin (timeout-guarded so it can never
+  // hang the app if the prompt shape changes).
+  ipcMain.handle('minipit:policy-reset', async (_, preset: string) => {
+    try {
+      const output = await sbxWithInput(['policy', 'reset'], `${preset}\n`, 20000)
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }

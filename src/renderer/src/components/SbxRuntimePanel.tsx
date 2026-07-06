@@ -60,6 +60,14 @@ export function SbxRuntimePanel({
   const [diagCopied, setDiagCopied] = useState(false)
   const diagRef = useRef<HTMLDivElement>(null)
 
+  // Runtime settings (`sbx settings set`) + reset (`sbx reset`).
+  const [imagePaste, setImagePaste] = useState(false)
+  const [settingBusy, setSettingBusy] = useState(false)
+  const [preserveSecrets, setPreserveSecrets] = useState(true)
+  const [resetConfirm, setResetConfirm] = useState('')
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetMsg, setResetMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
   const loadAccount = () =>
     window.minipit?.dockerAccount()
       .then((a) => setAccount(a ?? { loggedIn: false }))
@@ -96,8 +104,33 @@ export function SbxRuntimePanel({
     loadAccount()
     window.minipit?.sbxInstallInfo().then((i) => setInstall(i ?? null)).catch(() => {})
     window.minipit?.sbxReleases().then((r) => setReleases(r ?? [])).catch(() => {}).finally(() => setLoading(false))
+    window.minipit?.getSettings().then((s) => setImagePaste(!!s?.imagePaste)).catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Persist the toggle in den's settings AND apply it to the runtime via
+  // `sbx settings set` so the two stay in step.
+  const toggleImagePaste = async () => {
+    if (settingBusy) return
+    const next = !imagePaste
+    setSettingBusy(true)
+    setImagePaste(next)
+    const res = await window.minipit?.sbxSettingSet('clipboard.imagePaste', String(next)).catch(() => null)
+    if (res?.ok) window.minipit?.saveSettings({ imagePaste: next }).catch(() => {})
+    else setImagePaste(!next) // revert on failure
+    setSettingBusy(false)
+  }
+
+  const handleReset = async () => {
+    if (resetBusy || resetConfirm.trim().toLowerCase() !== 'reset') return
+    setResetBusy(true)
+    setResetMsg(null)
+    const res = await window.minipit?.sbxReset(preserveSecrets).catch((e) => ({ ok: false, error: String(e) }))
+    setResetBusy(false)
+    setResetConfirm('')
+    if (res?.ok) setResetMsg({ ok: true, text: 'Reset complete. All sandbox data was removed.' })
+    else setResetMsg({ ok: false, text: (res && 'error' in res && res.error) || 'Reset failed.' })
+  }
 
   // Stream brew (update/redownload) and sbx login output into the same box.
   useEffect(() => {
@@ -295,6 +328,68 @@ export function SbxRuntimePanel({
           <div className="ss-row" style={{ paddingTop: 0 }}>
             <div className="rt-output" ref={diagRef}>
               <pre className="logs-pre">{diagOut}</pre>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="ss">
+        <div className="ss-hdr">Runtime settings</div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Paste images into agents</div>
+            <div className="ss-sub">
+              Enables <code>clipboard.imagePaste</code>. Relaxes isolation by allowing clipboard access.
+            </div>
+          </div>
+          <button
+            className={`s-toggle${imagePaste ? ' on' : ''}`}
+            onClick={toggleImagePaste}
+            disabled={settingBusy}
+          />
+        </div>
+      </div>
+
+      <div className="ss">
+        <div className="ss-hdr" style={{ color: 'var(--destruct)' }}>Danger zone</div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Reset sbx</div>
+            <div className="ss-sub">
+              Stops all VMs and deletes every sandbox and its contents. This cannot be undone.
+            </div>
+          </div>
+          <label className="ss-sub" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={preserveSecrets} onChange={(e) => setPreserveSecrets(e.target.checked)} />
+            Preserve secrets
+          </label>
+        </div>
+        <div className="ss-row" style={{ paddingTop: 0 }}>
+          <div>
+            <div className="ss-sub">Type <strong>reset</strong> to confirm.</div>
+          </div>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <input
+              className="s-input"
+              value={resetConfirm}
+              placeholder="reset"
+              onChange={(e) => setResetConfirm(e.target.value)}
+              style={{ width: 110 }}
+            />
+            <button
+              className="btn btn-sm"
+              onClick={handleReset}
+              disabled={resetBusy || resetConfirm.trim().toLowerCase() !== 'reset'}
+              style={{ background: 'var(--destruct)', color: '#fff', borderColor: 'var(--destruct)' }}
+            >
+              {resetBusy ? 'Resetting…' : 'Reset everything'}
+            </button>
+          </div>
+        </div>
+        {resetMsg && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="ss-sub" style={{ color: resetMsg.ok ? 'var(--ok, inherit)' : 'var(--destruct)' }}>
+              {resetMsg.text}
             </div>
           </div>
         )}

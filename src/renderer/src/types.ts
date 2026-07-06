@@ -216,6 +216,7 @@ export interface AppSettings {
   notifyOnExit: boolean
   notifyOnError: boolean
   keepAwake: boolean
+  imagePaste?: boolean
 }
 
 declare global {
@@ -285,6 +286,8 @@ declare global {
       sbxReleases(): Promise<SbxRelease[]>
       sbxInstallInfo(): Promise<SbxInstallInfo>
       sbxUpdate(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
+      sbxSettingSet(key: string, value: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      sbxReset(preserveSecrets: boolean): Promise<{ ok: boolean; output?: string; error?: string }>
       onRuntimeOutput(cb: (chunk: string) => void): () => void
       onCreateOutput(cb: (chunk: string) => void): () => void
       diagnose(mode?: 'text' | 'json' | 'github-issue' | 'upload'): Promise<{ ok: boolean; output?: string; error?: string }>
@@ -295,6 +298,7 @@ declare global {
       policyDeny(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       policyRm(name: string, resource: string): Promise<{ ok: boolean; output?: string; error?: string }>
       policySetDefault(preset: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      policyReset(preset: string): Promise<{ ok: boolean; output?: string; error?: string }>
       showOpenDialog(): Promise<string | null>
       defaultWorkspace(): Promise<string>
       projectConfigSync(local: Record<string, Record<string, string>>): Promise<{ sandboxIcons: Record<string, string>; sandboxColors: Record<string, string>; sandboxGroups: Record<string, string> }>

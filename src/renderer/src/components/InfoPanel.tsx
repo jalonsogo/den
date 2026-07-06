@@ -149,6 +149,22 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
     }
   }
 
+  // Reset ALL custom network rules, then set the chosen preset as default.
+  const resetPolicy = async () => {
+    if (presetBusy) return
+    if (!window.confirm(`Remove all custom network rules and set the default preset to “${preset}”?`)) return
+    setPresetBusy(true)
+    setAllowMsg(null)
+    const res = await window.minipit?.policyReset(preset).catch(() => null)
+    setPresetBusy(false)
+    if (res?.ok) {
+      setAllowMsg({ ok: true, text: `Rules reset — default preset is now “${preset}”.`, offerRestart: true })
+      loadPolicy()
+    } else {
+      setAllowMsg({ ok: false, text: res?.error || 'Failed to reset rules.' })
+    }
+  }
+
   // Restart (or start) the sandbox so a freshly-added policy takes effect.
   const handleRestart = async () => {
     setRestarting(true)
@@ -375,6 +391,15 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
                     {presetBusy ? 'Applying…' : 'Apply'}
                   </button>
                 </div>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={resetPolicy}
+                  disabled={presetBusy}
+                  style={{ marginTop: 6, color: 'var(--destruct)' }}
+                  title="Remove all custom rules and reset to the selected preset"
+                >
+                  Reset all rules…
+                </button>
               </>
             )}
 
