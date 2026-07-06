@@ -14,13 +14,18 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  // Keep in sync with polled updates from the store.
-  useEffect(() => { setPorts(sandbox.ports) }, [sandbox.ports])
-
   const running = sandbox.status === 'running'
 
   const refresh = () =>
     window.minipit?.getPorts(sandbox.name).then((p) => setPorts(p ?? [])).catch(() => {})
+
+  // `sbx ports --json` is the authoritative source (the polled sandbox.ports
+  // from `sbx ls` can lag or omit mappings). Refresh on open and when the
+  // sandbox starts/stops.
+  useEffect(() => {
+    refresh()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sandbox.name, sandbox.status])
 
   const publish = async () => {
     const h = hostPort.trim()
@@ -79,7 +84,7 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
       })}
 
       {ports.length === 0 && !adding && (
-        <div className="ports-empty"><span>No port forwards</span></div>
+        <div className="ports-empty"><span>No open ports</span></div>
       )}
 
       {adding ? (
@@ -100,21 +105,21 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
             <option value="udp">UDP</option>
           </select>
           <button className="btn btn-primary btn-sm" onClick={publish} disabled={busy === 'publish' || !hostPort.trim()}>
-            {busy === 'publish' ? 'Publishing…' : 'Publish'}
+            {busy === 'publish' ? 'Opening…' : 'Open'}
           </button>
           <button className="btn btn-ghost btn-sm" onClick={() => { setAdding(false); setErr(null) }}>Cancel</button>
         </div>
       ) : (
-        <button className="ports-add" onClick={() => setAdding(true)} disabled={!running} title={running ? undefined : 'Start the sandbox to publish ports'}>
-          + Add forward
+        <button className="ports-add" onClick={() => setAdding(true)} disabled={!running} title={running ? undefined : 'Start the sandbox to open a port'}>
+          + Open port
         </button>
       )}
 
       {err && <div className="ports-hint" style={{ color: 'var(--destruct)' }}>{err}</div>}
       <div className="ports-hint">
         {running
-          ? 'Forwards are removed when the sandbox stops. Sandbox services must listen on 0.0.0.0.'
-          : 'Start the sandbox to publish ports.'}
+          ? 'Ports close when the sandbox stops. Sandbox services must listen on 0.0.0.0.'
+          : 'Start the sandbox to open a port.'}
       </div>
     </div>
   )

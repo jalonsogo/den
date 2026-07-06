@@ -252,7 +252,28 @@ interface SbxSandbox {
   status: string
   socket_path?: string
   workspaces?: string[]
-  ports?: Array<{ host: string; sandbox: string; protocol: string }>
+  ports?: RawPort[]
+}
+
+// sbx isn't consistent about port field names across commands (`sbx ls` vs
+// `sbx ports`) or types (number vs string), so coerce defensively.
+type RawPort = Record<string, unknown>
+
+function toPortNum(v: unknown): number {
+  if (typeof v === 'number') return v
+  if (typeof v === 'string') return parseInt(v, 10)
+  return NaN
+}
+
+function normalizePorts(ports?: RawPort[]) {
+  return (ports ?? [])
+    .map((p) => ({
+      host: toPortNum(p.host_port ?? p.host),
+      container: toPortNum(p.sandbox_port ?? p.sandbox ?? p.container_port ?? p.container),
+      protocol: String(p.protocol ?? 'tcp').toUpperCase(),
+      active: true
+    }))
+    .filter((p) => !Number.isNaN(p.host) && !Number.isNaN(p.container))
 }
 
 function normalizeSandbox(raw: SbxSandbox) {
@@ -275,12 +296,7 @@ function normalizeSandbox(raw: SbxSandbox) {
     agent: raw.agent ?? 'claude',
     workspace: raw.workspaces?.[0] ?? '~',
     uptimeSeconds,
-    ports: raw.ports?.map((p) => ({
-      host: parseInt(p.host),
-      container: parseInt(p.sandbox),
-      protocol: p.protocol?.toUpperCase() ?? 'TCP',
-      active: true
-    })) ?? [],
+    ports: normalizePorts(raw.ports),
     logs: [] as unknown[]
   }
 }
@@ -323,12 +339,7 @@ async function getPortsForSandbox(name: string) {
   try {
     const out = await sbx(['ports', name, '--json'])
     const data = JSON.parse(out)
-    return (data.ports ?? []).map((p: { host_port: number; sandbox_port: number; protocol: string }) => ({
-      host: p.host_port,
-      container: p.sandbox_port,
-      protocol: (p.protocol ?? 'tcp').toUpperCase(),
-      active: true
-    }))
+    return normalizePorts(data.ports)
   } catch {
     return []
   }
