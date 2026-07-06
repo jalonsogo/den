@@ -37,33 +37,6 @@ const CAPS: { key: Cap; label: string }[] = [
   { key: 'memory',  label: 'Agent memory & files' }
 ]
 
-// One-click starting points for common mixin kits. Selecting one fills the form
-// and turns on the capability sections it needs.
-const KIT_PRESETS: { id: string; label: string; caps: Cap[]; form: Partial<KitForm> }[] = [
-  {
-    id: 'vscode-ssh',
-    label: 'VSCode (SSH)',
-    caps: ['network', 'memory'],
-    form: {
-      name: 'vscode-ssh',
-      displayName: 'VSCode (SSH)',
-      description: 'Attach desktop VSCode to this sandbox over the sbx SSH endpoint (Remote-SSH).',
-      // Egress VSCode's Remote-SSH server + extension downloads need. The SSH
-      // server itself is provided by the sbx endpoint and auto-installed by VSCode
-      // on first connect, so no install command is required here.
-      allowedDomains: [
-        'update.code.visualstudio.com',
-        '*.vscode-cdn.net',
-        'vscode.download.prss.microsoft.com',
-        'marketplace.visualstudio.com',
-        '*.vscode-unpkg.net',
-        '*.gallerycdn.vsassets.io'
-      ],
-      agentContext: 'This sandbox is reachable from desktop VSCode via Remote-SSH (den → “Open in VSCode”).'
-    }
-  }
-]
-
 // Base for a sandbox kit — start from a default agent (image + entrypoint are
 // editable starting points). Pick "Custom" to define your own image.
 const AGENT_BASES: Record<string, { image: string; entrypoint: string }> = {
@@ -281,11 +254,6 @@ export function NewKitModal() {
     if (picked?.length) setF((p) => ({ ...p, attachFiles: [...new Set([...p.attachFiles, ...picked])] }))
   }
 
-  const applyPreset = (p: (typeof KIT_PRESETS)[number]) => {
-    setF((prev) => ({ ...EMPTY, kind: prev.kind, ...p.form }))
-    setCaps(p.caps)
-  }
-
   const handleCreate = async () => {
     if (!f.name.trim()) { setError('Name is required'); return }
     setSaving(true); setError(''); setDone('')
@@ -343,19 +311,6 @@ export function NewKitModal() {
             <label className="flabel">Description</label>
             <input className="finput" value={f.description} placeholder="What this kit does" onChange={(e) => set('description', e.target.value)} />
           </div>
-
-          {!editing && f.kind === 'mixin' && (
-            <div className="fg">
-              <label className="flabel">Start from a preset <span className="flabel-hint">fills the form below</span></label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {KIT_PRESETS.map((p) => (
-                  <button key={p.id} className="btn btn-default btn-sm" type="button" onClick={() => applyPreset(p)}>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {f.kind === 'sandbox' && (() => {
             const selAgent = imgCustom ? null : (AGENTS.find((a) => AGENT_BASES[a.id]?.image === f.image)?.id ?? null)
