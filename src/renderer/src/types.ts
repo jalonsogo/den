@@ -255,6 +255,8 @@ declare global {
       updateKit(dir: string, spec: string, files?: string[]): Promise<{ ok: boolean; output?: string; error?: string }>
       removeKit(dir: string): Promise<void>
       kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      kitValidate(dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      kitPack(dir: string, name: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; output?: string; error?: string }>
       saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
       listContribKits(): Promise<{ ok: boolean; kits?: { dir: string; spec: string }[]; error?: string }>

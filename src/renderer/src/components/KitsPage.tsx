@@ -217,6 +217,23 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     }
   }
 
+  const doValidate = async (k: Kit) => {
+    setMoreFor(null)
+    setMsg(null)
+    const res = await window.minipit?.kitValidate(k.dir).catch(() => null)
+    if (res?.ok) setMsg({ ok: true, text: `"${k.name}" is valid.` })
+    else setMsg({ ok: false, text: res?.error || `"${k.name}" failed validation.` })
+  }
+
+  const doExport = async (k: Kit) => {
+    setMoreFor(null)
+    setMsg(null)
+    const res = await window.minipit?.kitPack(k.dir, k.name).catch(() => null)
+    if (res?.canceled) return
+    if (res?.ok) setMsg({ ok: true, text: `Exported "${k.name}" to ${res.path}.` })
+    else setMsg({ ok: false, text: res?.error || 'Export failed.' })
+  }
+
   const load = useCallback(async () => {
     const list = (await window.minipit?.listKits()) ?? []
     setKits(list)
@@ -468,6 +485,12 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                       <div className="kit-more-menu" style={{ top: morePos.top, right: morePos.right }}>
                         <button className="kit-more-item" onClick={() => { setMoreFor(null); window.minipit?.openInFinder(k.dir) }}>
                           <FolderOpen size={14} /> Open in Finder
+                        </button>
+                        <button className="kit-more-item" onClick={() => doValidate(k)}>
+                          <Check size={14} /> Validate spec
+                        </button>
+                        <button className="kit-more-item" onClick={() => doExport(k)}>
+                          <DownloadCloud size={14} /> Export as zip…
                         </button>
                         <button className="kit-more-item" onClick={() => openPush(k)}>
                           <UploadCloud size={14} /> Upload to Hub…

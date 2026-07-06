@@ -1560,6 +1560,34 @@ function setupIPC(): void {
     }
   })
 
+  // Validate a kit spec without saving/packing it — surfaces spec errors in the
+  // editor. `sbx kit validate` exits non-zero on invalid specs, so a rejected
+  // promise carries the validation message.
+  ipcMain.handle('minipit:kit-validate', async (_, dir: string) => {
+    try {
+      const output = await sbx(['kit', 'validate', dir], { timeout: 20000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Pack a kit into a distributable zip at a user-chosen location (complements
+  // push — for sharing a file rather than an OCI reference).
+  ipcMain.handle('minipit:kit-pack', async (_, dir: string, name: string) => {
+    const res = await dialog.showSaveDialog(mainWindow!, {
+      defaultPath: `${name}.zip`,
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      const output = await sbx(['kit', 'pack', dir, '-o', res.filePath], { timeout: 30000 })
+      return { ok: true, path: res.filePath, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Save a sandbox's current state as a reusable template (image) under a tag.
   // `sbx template save` interactively asks to stop the sandbox first (there is no
   // flag to skip it), so feed "y" to its stdin to auto-confirm.
