@@ -72,30 +72,6 @@ function getBrewPath(): string {
   )
 }
 
-// Resolve the VSCode `code` CLI (used to launch Remote-SSH into a sandbox). Like
-// getSbxPath: honour a stored override, then probe the usual install locations
-// on macOS/Windows/Linux. Falls back to the bare name (resolved via guiEnv PATH).
-function getCodePath(): string {
-  const stored = store.get('codePath') as string | undefined
-  if (stored) return stored
-  const home = app.getPath('home')
-  const candidates = [
-    '/opt/homebrew/bin/code',
-    '/usr/local/bin/code',
-    '/usr/bin/code',
-    '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
-    join(home, 'Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'),
-    join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Microsoft VS Code', 'bin', 'code.cmd'),
-    join(process.env.ProgramFiles ?? '', 'Microsoft VS Code', 'bin', 'code.cmd')
-  ]
-  const fs = require('fs')
-  return (
-    candidates.find((p) => {
-      try { fs.accessSync(p); return true } catch { return false }
-    }) ?? 'code'
-  )
-}
-
 // GUI-launched apps on macOS inherit a stripped PATH that omits the brew
 // prefixes, so spawned tools (sbx, and the docker credential helpers ORAS
 // execs during `kit push`) can't be found. Augment PATH for every host spawn.
@@ -323,113 +299,6 @@ function normalizeSandbox(raw: SbxSandbox) {
     ports: normalizePorts(raw.ports),
     logs: [] as unknown[]
   }
-}
-
-// ── VSCode over the sbx SSH endpoint ─────────────────────────────────────────
-// sbxd exposes an EXPERIMENTAL SSH endpoint, gated behind two settings. We use it
-// to attach desktop VSCode (Remote-SSH) to a running sandbox. Sandboxes are
-// addressed only by name (no Docker container id), so Dev Containers "attach to
-// container" isn't viable — Remote-SSH is the supported path.
-const SSH_FEATURE_KEY = 'feature.ssh'
-const SSH_EXPERIMENTAL_KEY = 'platform.allowExperimentalFeatures'
-
-const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
-// `sbx settings get <key>` → trimmed string (empty on any error, e.g. unset key).
-async function sbxSettingGet(key: string): Promise<string> {
-  try { return (await sbx(['settings', 'get', key])).trim() } catch { return '' }
-}
-
-// Whether the experimental SSH endpoint is currently enabled in sbx settings.
-async function sshFeatureStatus(): Promise<{ enabled: boolean; experimental: boolean }> {
-  const [ssh, exp] = await Promise.all([
-    sbxSettingGet(SSH_FEATURE_KEY),
-    sbxSettingGet(SSH_EXPERIMENTAL_KEY)
-  ])
-  return { enabled: /true/i.test(ssh), experimental: /true/i.test(exp) }
-}
-
-// Turn the experimental SSH endpoint on/off. Settings hot-reload within ~5s, so
-// we set the flags then poll. Some builds only (re)bind the SSH listener on a
-// daemon restart, so callers that pass `restart` cycle the daemon (visible to the
-// user). Enabling also flips the experimental-features master switch on.
-async function setSshFeature(enabled: boolean, restart: boolean): Promise<{ ok: boolean; enabled: boolean; error?: string }> {
-  try {
-    if (enabled) await sbx(['settings', 'set', SSH_EXPERIMENTAL_KEY, 'true'])
-    await sbx(['settings', 'set', SSH_FEATURE_KEY, enabled ? 'true' : 'false'])
-    if (restart) {
-      try { await sbx(['daemon', 'stop'], { timeout: 20000 }) } catch { /* may already be stopped */ }
-      await sbx(['daemon', 'start'], { timeout: 20000 })
-    }
-    for (let i = 0; i < 8; i++) {
-      if ((await sshFeatureStatus()).enabled === enabled) return { ok: true, enabled }
-      await delay(1000)
-    }
-    return { ok: true, enabled: (await sshFeatureStatus()).enabled }
-  } catch (e) {
-    return { ok: false, enabled: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-// Fetch the raw sbx record for one sandbox (status + workspaces).
-async function getSbxSandboxRaw(name: string): Promise<SbxSandbox | null> {
-  try {
-    const data = JSON.parse(await sbx(['ls', '--json'])) as { sandboxes?: SbxSandbox[] } | SbxSandbox[]
-    const list = Array.isArray(data) ? data : data.sandboxes ?? []
-    return list.find((s) => s.name === name) ?? null
-  } catch { return null }
-}
-
-// `sbx ssh setup` provisions the client side: it writes a wildcard `Host *.sbx`
-// block and a managed key into ~/.ssh/config, with live host-key verification (no
-// prompts, survives daemon key rotation). It's idempotent — no duplicate blocks —
-// so we run it before every connect. Connecting uses `<sandbox-name>.sbx`: the
-// sandbox name IS the hostname (matched by the `*.sbx` wildcard); the SSH user is
-// set by the config block, not the sandbox name.
-async function ensureSshSetup(): Promise<void> {
-  await sbx(['ssh', 'setup'], { timeout: 30000 })
-}
-
-// The workspace mounts inside the sandbox at ~/workspace (user `agent`). Resolve
-// it at runtime (the sandbox must be running), falling back to the usual path.
-const DEFAULT_REMOTE_WORKSPACE = '/home/agent/workspace'
-async function remoteWorkspacePath(name: string): Promise<string> {
-  try {
-    const out = (await sbx(['exec', name, 'sh', '-c', `cd ~/workspace 2>/dev/null && pwd || echo ${DEFAULT_REMOTE_WORKSPACE}`])).trim()
-    return out || DEFAULT_REMOTE_WORKSPACE
-  } catch { return DEFAULT_REMOTE_WORKSPACE }
-}
-
-// Attach desktop VSCode to a sandbox over the sbx SSH endpoint. Ensures the
-// feature is on, `sbx ssh setup` has run, and the sandbox is up, then launches:
-//   code --folder-uri vscode-remote://ssh-remote+<name>.sbx<workspace>
-async function openInVscode(name: string): Promise<{ ok: boolean; needsFeature?: boolean; error?: string }> {
-  const status = await sshFeatureStatus()
-  if (!status.enabled) return { ok: false, needsFeature: true, error: 'The sbx SSH endpoint is not enabled.' }
-
-  const raw = await getSbxSandboxRaw(name)
-  if (!raw) return { ok: false, error: `Sandbox "${name}" not found.` }
-
-  try { await ensureSshSetup() } catch (e) {
-    return { ok: false, error: `\`sbx ssh setup\` failed: ${e instanceof Error ? e.message : String(e)}` }
-  }
-
-  // SSH auto-starts a stopped sandbox, but VSCode's server install and our
-  // workspace-path probe are smoother if it's already running.
-  if (raw.status !== 'running') {
-    try { await sbx(['run', '--name', name], { timeout: 60000 }) } catch (e) {
-      return { ok: false, error: `Couldn't start "${name}": ${e instanceof Error ? e.message : String(e)}` }
-    }
-  }
-
-  const remotePath = await remoteWorkspacePath(name)
-  const folderUri = `vscode-remote://ssh-remote+${name}.sbx${remotePath}`
-  return new Promise((resolve) => {
-    execFile(getCodePath(), ['--folder-uri', folderUri], { timeout: 15000, env: guiEnv() }, (err) => {
-      if (err) resolve({ ok: false, error: `Couldn't launch VSCode: ${err.message}. Is the \`code\` CLI installed and on PATH?` })
-      else resolve({ ok: true })
-    })
-  })
 }
 
 // Keep the machine awake while any sandbox is running (opt-in via the
@@ -2141,14 +2010,6 @@ function setupIPC(): void {
   ipcMain.handle('minipit:exec', async (_, name: string, command: string) => {
     return sbx(['exec', name, 'sh', '-c', command], { timeout: 10000 })
   })
-
-  // ── VSCode / SSH endpoint ────────────────────────────────────────────────
-  ipcMain.handle('minipit:ssh-feature-status', () => sshFeatureStatus())
-  ipcMain.handle('minipit:set-ssh-feature', (_, enabled: boolean, restart?: boolean) => setSshFeature(enabled, restart ?? true))
-  ipcMain.handle('minipit:open-vscode', (_, name: string) => openInVscode(name))
-  ipcMain.handle('minipit:code-available', () => new Promise((resolve) => {
-    execFile(getCodePath(), ['--version'], { timeout: 8000, env: guiEnv() }, (err) => resolve(!err))
-  }))
 
   // ── sbx daemon logs ──────────────────────────────────────────────────────
   ipcMain.handle('minipit:list-logs', () => {
