@@ -3,6 +3,7 @@ import { PanelRight, Info, Play, RefreshCw, AlertTriangle } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useStore, unackedBlockCount } from '../store'
 import { termTheme as resolveTermTheme } from '../lib/termThemes'
@@ -80,6 +81,11 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
+    // Make URLs printed by the agent (e.g. PR/auth links) clickable. xterm
+    // doesn't linkify by default, and the agent runs inside a headless sandbox
+    // that has no browser — so route the click to the host via openPath, which
+    // opens http(s) URLs in the Mac's default browser (scheme-checked in main).
+    term.loadAddon(new WebLinksAddon((_event, uri) => { window.minipit?.openPath(uri) }))
     term.open(ref.current)
     fitRef.current = fit
 

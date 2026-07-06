@@ -911,17 +911,37 @@ function formatSize(bytes: number): string {
 async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
   // The target path is passed as a positional arg ($1) so filenames containing
   // quotes/spaces can't break out of the command.
+  //
+  // We list via `find … -exec stat` rather than `find -printf`, because `-printf`
+  // is a GNU extension: BusyBox `find` (shipped by Alpine-based sandbox images)
+  // doesn't support it and exits non-zero, which would surface as a handler error.
+  // `stat -c` and its %F/%s/%n specifiers are supported by both BusyBox and GNU.
+  // The format uses real tab separators (\t here is a literal tab in the string).
   const cmd =
-    "find \"$1\" -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%f\\n' 2>/dev/null"
-  const out = await sbx(['exec', name, 'sh', '-c', cmd, 'sh', dir || '.'])
+    'find "$1" -maxdepth 1 -mindepth 1 -exec stat -c "%F\t%s\t%n" {} + 2>/dev/null'
+
+  let out: string
+  try {
+    out = await sbx(['exec', name, 'sh', '-c', cmd, 'sh', dir || '.'])
+  } catch {
+    // A failure here (sandbox stopped, path gone, missing tool) isn't actionable
+    // for the caller — return an empty listing rather than throwing, so it doesn't
+    // spam the main-process console as an unhandled IPC handler error. Mirrors the
+    // resilient pattern in gitStatus().
+    return []
+  }
 
   const entries: FileEntry[] = []
   for (const line of out.split('\n')) {
     if (!line) continue
+    // stat: "%F" is a human-readable type ("directory", "regular file", …),
+    // "%s" the size, "%n" the full path we passed in.
     const [type, sizeStr, ...rest] = line.split('\t')
-    const fname = rest.join('\t')
+    const fullPath = rest.join('\t')
+    if (!fullPath) continue
+    const fname = fullPath.slice(fullPath.lastIndexOf('/') + 1)
     if (!fname) continue
-    const isDir = type === 'd'
+    const isDir = type === 'directory'
     const dot = fname.lastIndexOf('.')
     entries.push({
       name: fname,
