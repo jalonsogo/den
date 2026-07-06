@@ -283,6 +283,8 @@ declare global {
       sbxUpdate(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
       onRuntimeOutput(cb: (chunk: string) => void): () => void
       onCreateOutput(cb: (chunk: string) => void): () => void
+      diagnose(mode?: 'text' | 'json' | 'github-issue' | 'upload'): Promise<{ ok: boolean; output?: string; error?: string }>
+      onDiagnoseOutput(cb: (chunk: string) => void): () => void
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>

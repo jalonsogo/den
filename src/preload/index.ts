@@ -65,6 +65,12 @@ const api = {
   sbxReleases:   ()                     => ipcRenderer.invoke('minipit:sbx-releases'),
   sbxInstallInfo: ()                    => ipcRenderer.invoke('minipit:sbx-install-info'),
   sbxUpdate:     (action: string)       => ipcRenderer.invoke('minipit:sbx-update', action),
+  diagnose:      (mode?: 'text' | 'json' | 'github-issue' | 'upload') => ipcRenderer.invoke('minipit:diagnose', mode),
+  onDiagnoseOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:diagnose-output', handler)
+    return () => ipcRenderer.removeListener('minipit:diagnose-output', handler)
+  },
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
   policyAllow:   (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-allow', name, resources),

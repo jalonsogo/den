@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Copy, UploadCloud, Stethoscope } from 'lucide-react'
 import type { SbxRelease } from '../types'
+
+type DiagMode = 'text' | 'json' | 'github-issue' | 'upload'
 
 const CAP = 200_000
 const MANAGER_LABEL: Record<string, string> = {
@@ -50,6 +52,13 @@ export function SbxRuntimePanel({
   const [account, setAccount] = useState<{ loggedIn: boolean; username?: string } | null>(null)
   const [signingIn, setSigningIn] = useState(false)
   const outRef = useRef<HTMLDivElement>(null)
+
+  // Diagnostics (`sbx diagnose`) — its own busy/output state so it doesn't
+  // collide with the update/login stream above.
+  const [diagBusy, setDiagBusy] = useState<null | DiagMode>(null)
+  const [diagOut, setDiagOut] = useState('')
+  const [diagCopied, setDiagCopied] = useState(false)
+  const diagRef = useRef<HTMLDivElement>(null)
 
   const loadAccount = () =>
     window.minipit?.dockerAccount()
@@ -102,6 +111,37 @@ export function SbxRuntimePanel({
   useEffect(() => {
     if (outRef.current) outRef.current.scrollTop = outRef.current.scrollHeight
   }, [output])
+
+  // Stream `sbx diagnose` output into its own box.
+  useEffect(() => {
+    const unsub = window.minipit?.onDiagnoseOutput((chunk) =>
+      setDiagOut((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next })
+    )
+    return () => unsub?.()
+  }, [])
+
+  useEffect(() => {
+    if (diagRef.current) diagRef.current.scrollTop = diagRef.current.scrollHeight
+  }, [diagOut])
+
+  // Run a diagnostics variant. For json/github-issue we also copy the finished
+  // report to the clipboard (that's what those formats are for). `upload` sends
+  // a bundle to Docker — the returned text carries the shareable id/URL.
+  const runDiag = async (mode: DiagMode) => {
+    if (diagBusy) return
+    setDiagBusy(mode)
+    setDiagOut('')
+    setDiagCopied(false)
+    const res = await window.minipit?.diagnose(mode).catch((e) => ({ ok: false, output: undefined, error: String(e) }))
+    setDiagBusy(null)
+    if (res?.ok && res.output && (mode === 'json' || mode === 'github-issue')) {
+      try {
+        await navigator.clipboard.writeText(res.output)
+        setDiagCopied(true)
+        setTimeout(() => setDiagCopied(false), 2000)
+      } catch { /* clipboard unavailable — output is still shown below */ }
+    }
+  }
 
   const run = async (action: 'update' | 'redownload') => {
     setBusy(action)
@@ -204,6 +244,57 @@ export function SbxRuntimePanel({
           <div className="ss-row" style={{ paddingTop: 0 }}>
             <div className="rt-output" ref={outRef}>
               <pre className="logs-pre">{output}</pre>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="ss">
+        <div className="ss-hdr">Diagnostics</div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Run diagnostics</div>
+            <div className="ss-sub">
+              Probe the daemon, VMs and network via <code>sbx diagnose</code> — the first step when
+              something isn’t working.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <button
+              className="btn btn-default btn-sm"
+              onClick={() => runDiag('text')}
+              disabled={diagBusy !== null}
+            >
+              <Stethoscope size={13} /> {diagBusy === 'text' ? 'Running…' : 'Run'}
+            </button>
+            <button
+              className="btn btn-default btn-sm"
+              onClick={() => runDiag('json')}
+              disabled={diagBusy !== null}
+            >
+              <Copy size={13} /> {diagBusy === 'json' ? 'Running…' : diagCopied ? '✓ Copied' : 'Copy JSON'}
+            </button>
+            <button
+              className="btn btn-default btn-sm"
+              onClick={() => runDiag('github-issue')}
+              disabled={diagBusy !== null}
+            >
+              <Copy size={13} /> {diagBusy === 'github-issue' ? 'Running…' : 'For bug report'}
+            </button>
+            <button
+              className="btn btn-default btn-sm"
+              onClick={() => runDiag('upload')}
+              disabled={diagBusy !== null}
+              title="Uploads a diagnostics bundle to Docker and prints a shareable id"
+            >
+              <UploadCloud size={13} /> {diagBusy === 'upload' ? 'Uploading…' : 'Upload bundle'}
+            </button>
+          </div>
+        </div>
+        {diagOut && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-output" ref={diagRef}>
+              <pre className="logs-pre">{diagOut}</pre>
             </div>
           </div>
         )}

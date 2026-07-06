@@ -1486,6 +1486,47 @@ function setupIPC(): void {
     }
   })
 
+  // Run `sbx diagnose` for support/troubleshooting. The plain and github-issue
+  // variants can take a while (they probe the daemon, VMs and network), and
+  // `--upload` sends a bundle to Docker — so stream output and use a long
+  // timeout, mirroring the login flow.
+  //   text         → `sbx diagnose`               (human-readable report)
+  //   json         → `sbx diagnose --output json`  (machine-readable)
+  //   github-issue → `sbx diagnose --output github-issue` (pre-formatted bug)
+  //   upload       → `sbx diagnose --upload`        (uploads a bundle, prints id)
+  ipcMain.handle(
+    'minipit:diagnose',
+    async (_, mode: 'text' | 'json' | 'github-issue' | 'upload' = 'text') => {
+      const args =
+        mode === 'upload'
+          ? ['diagnose', '--upload']
+          : mode === 'text'
+            ? ['diagnose']
+            : ['diagnose', '--output', mode]
+      const send = (chunk: string) =>
+        mainWindow?.webContents.send('minipit:diagnose-output', chunk)
+      try {
+        const output = await new Promise<string>((resolve, reject) => {
+          const proc = spawn(getSbxPath(), args, { env: guiEnv() })
+          let buf = ''
+          let err = ''
+          proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
+          proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
+          proc.on('error', (e) => reject(e))
+          const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx diagnose timed out')) }, 300000)
+          proc.on('close', (code) => {
+            clearTimeout(timer)
+            if (code === 0) resolve(buf.trim())
+            else reject(new Error(err.trim() || buf.trim() || `sbx diagnose exited ${code}`))
+          })
+        })
+        return { ok: true, output }
+      } catch (err) {
+        return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+      }
+    }
+  )
+
   // Publish a kit as an OCI artifact to a registry (Docker Hub, ghcr, …).
   // Auth uses the Docker credential store (the user must `docker login` first).
   ipcMain.handle('minipit:kit-push', async (_, dir: string, ref: string) => {
