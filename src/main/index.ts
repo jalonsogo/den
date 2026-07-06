@@ -1299,6 +1299,28 @@ function setupIPC(): void {
     return getPortsForSandbox(name)
   })
 
+  // Publish a port from the sandbox to the host. `spec` is the sbx port form
+  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL], e.g. "8080:8080/tcp".
+  // Requires the sandbox to be running; mappings don't persist across stops.
+  ipcMain.handle('minipit:port-publish', async (_, name: string, spec: string) => {
+    try {
+      const output = await sbx(['ports', name, '--publish', spec], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Remove a published port. sbx wants the explicit host:sandbox[/proto] form.
+  ipcMain.handle('minipit:port-unpublish', async (_, name: string, spec: string) => {
+    try {
+      const output = await sbx(['ports', name, '--unpublish', spec], { timeout: 15000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   ipcMain.handle('minipit:list-files', async (_, name: string, relPath: string) => {
     return listFiles(name, relPath ?? '')
   })

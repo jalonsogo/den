@@ -227,6 +227,8 @@ declare global {
       stopSandbox(name: string): Promise<void>
       deleteSandbox(name: string): Promise<void>
       getPorts(name: string): Promise<Port[]>
+      portPublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      portUnpublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       listFiles(name: string, relPath: string): Promise<FileEntry[]>
       gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }>
       isGitRepo(dir: string): Promise<boolean>
