@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../../store'
-import { SECRET_SERVICES, type SecretService } from '../../types'
+import { SECRET_SERVICES, GLOBAL_SCOPE, isGlobalScope, type SecretService, type StoredSecret } from '../../types'
 
 // 1Password brand mark (keyhole in a circle), in the brand blue.
 function OnePasswordIcon({ size = 18 }: { size?: number }) {
@@ -14,9 +14,12 @@ function OnePasswordIcon({ size = 18 }: { size?: number }) {
 }
 
 export function NewSecretModal() {
-  const { setModal, secretTarget } = useStore()
-  const [configured, setConfigured] = useState<Set<string>>(new Set())
+  const { setModal, secretTarget, secretScopeTarget, sandboxes } = useStore()
+  // Editing an existing secret (locks provider + scope) vs. adding a new one.
+  const editing = secretTarget != null
+  const [stored, setStored] = useState<StoredSecret[]>([])
   const [service, setService] = useState<SecretService>(secretTarget ?? SECRET_SERVICES[0].id)
+  const [scope, setScope] = useState<string>(secretScopeTarget ?? GLOBAL_SCOPE)
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [oauthing, setOauthing] = useState(false)
@@ -30,8 +33,20 @@ export function NewSecretModal() {
     window.minipit?.opAvailable?.().then((v) => setOpAvail(!!v)).catch(() => setOpAvail(false))
   }, [])
 
-  // Anthropic uses our custom OAuth flow; OpenAI uses sbx's built-in --oauth.
-  const oauthService = service === 'anthropic' || service === 'openai' ? service : null
+  // Services already stored in the currently-selected scope (to disable them).
+  const configured = new Set(
+    stored
+      .filter((s) => (isGlobalScope(scope) ? isGlobalScope(s.scope) : s.scope === scope))
+      .map((s) => s.name)
+  )
+
+  // The scope token for sbx commands shown in hints: `-g` or a sandbox name.
+  const scopeArg = isGlobalScope(scope) ? '-g' : scope
+
+  // OAuth flows only exist for the global scope (Anthropic custom flow; OpenAI
+  // via sbx's built-in --oauth). Hidden when scoping to a single sandbox.
+  const oauthService =
+    isGlobalScope(scope) && (service === 'anthropic' || service === 'openai') ? service : null
 
   const handleOAuth = async () => {
     const fn = service === 'anthropic' ? window.minipit?.anthropicOAuth : () => window.minipit?.oauthSecret('openai')
@@ -51,18 +66,23 @@ export function NewSecretModal() {
     }
   }
 
-  // Load which providers already have a stored secret (to disable them).
+  // Load the stored secrets (all scopes) so we can disable already-set providers.
   useEffect(() => {
     window.minipit?.listSecrets().then((list) => {
-      const ids = new Set((list ?? []).map((s) => s.name))
-      setConfigured(ids)
-      // When adding (no preselected target), default to the first unconfigured provider.
-      if (!secretTarget) {
-        const firstFree = SECRET_SERVICES.find((s) => !ids.has(s.id))
-        if (firstFree) setService(firstFree.id)
-      }
+      setStored((list ?? []).filter((s) => s.type === 'service'))
     }).catch(() => {})
-  }, [secretTarget])
+  }, [])
+
+  // When adding, keep the selected provider on one that's free in this scope —
+  // re-run when the scope changes or the stored list arrives.
+  useEffect(() => {
+    if (editing) return
+    if (configured.has(service)) {
+      const firstFree = SECRET_SERVICES.find((s) => !configured.has(s.id))
+      if (firstFree) setService(firstFree.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, stored, editing])
 
   const handleSave = async () => {
     if (useOp ? !opRef.trim() : !apiKey) return
@@ -73,8 +93,8 @@ export function NewSecretModal() {
     setSaving(true)
     setError('')
     try {
-      if (useOp) await window.minipit?.setSecretOp(service, opRef.trim())
-      else await window.minipit?.setSecret(service, apiKey)
+      if (useOp) await window.minipit?.setSecretOp(service, opRef.trim(), scope)
+      else await window.minipit?.setSecret(service, apiKey, scope)
       setModal(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -95,12 +115,13 @@ export function NewSecretModal() {
             <label className="flabel">Provider</label>
             <select
               className="finput"
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: editing ? 'default' : 'pointer' }}
               value={service}
+              disabled={editing}
               onChange={(e) => setService(e.target.value as SecretService)}
             >
               {SECRET_SERVICES.map((s) => {
-                // Disable already-added providers, unless it's the one being edited.
+                // Disable providers already set in this scope, unless being edited.
                 const isAdded = configured.has(s.id) && s.id !== secretTarget
                 return (
                   <option key={s.id} value={s.id} disabled={isAdded}>
@@ -109,6 +130,33 @@ export function NewSecretModal() {
                 )
               })}
             </select>
+          </div>
+
+          <div className="fg">
+            <label className="flabel">Scope</label>
+            {editing ? (
+              <input
+                className="finput"
+                value={isGlobalScope(scope) ? 'Global — all sandboxes' : `Sandbox: ${scope}`}
+                disabled
+                readOnly
+              />
+            ) : (
+              <select
+                className="finput"
+                style={{ cursor: 'pointer' }}
+                value={scope}
+                onChange={(e) => setScope(e.target.value)}
+              >
+                <option value={GLOBAL_SCOPE}>Global — all sandboxes</option>
+                {sandboxes.map((sb) => (
+                  <option key={sb.name} value={sb.name}>Sandbox: {sb.name}</option>
+                ))}
+              </select>
+            )}
+            <div className="fhint">
+              Global secrets are available to every sandbox; a sandbox scope applies to that one only.
+            </div>
           </div>
 
           {oauthService && !useOp && (
@@ -157,7 +205,7 @@ export function NewSecretModal() {
               <div className="fhint">
                 Runs{' '}
                 <code className="ccode">op read</code>{' '}on your host and stores the result via{' '}
-                <code className="ccode">sbx secret set -g {service}</code>. The value is never pasted here.
+                <code className="ccode">sbx secret set {scopeArg} {service}</code>. The value is never pasted here.
               </div>
             </div>
           ) : (
@@ -173,7 +221,7 @@ export function NewSecretModal() {
               />
               <div className="fhint">
                 Stored via{' '}
-                <code className="ccode">sbx secret set -g {service}</code>
+                <code className="ccode">sbx secret set {scopeArg} {service}</code>
               </div>
             </div>
           )}

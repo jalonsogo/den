@@ -2,7 +2,22 @@ import { useEffect, useState, useCallback } from 'react'
 import { Plus } from 'lucide-react'
 import { useStore } from '../store'
 import { SecretIcon } from './SecretIcon'
-import { SECRET_SERVICES, COMMON_SECRET_SERVICES, type StoredSecret, type SecretService } from '../types'
+import {
+  COMMON_SECRET_SERVICES,
+  GLOBAL_SCOPE,
+  isGlobalScope,
+  serviceLabel,
+  type StoredSecret,
+  type SecretService
+} from '../types'
+
+// A single row on the Secrets table: one scope of one service. `stored` is
+// undefined for a not-yet-configured placeholder (always the global slot).
+interface SecretRow {
+  service: string
+  scope: string
+  stored?: StoredSecret
+}
 
 export function SecretsPage() {
   const { modal, setModal, setSecretTarget } = useStore()
@@ -26,22 +41,34 @@ export function SecretsPage() {
     if (modal === null) load()
   }, [modal, load])
 
-  const secretFor = (id: SecretService) => secrets.find((s) => s.name === id)
-
-  // Show the basic providers plus any others added via "Add Secret".
-  const configuredIds = new Set(secrets.map((s) => s.name))
-  const visibleServices = SECRET_SERVICES.filter(
-    (s) => COMMON_SECRET_SERVICES.includes(s.id) || configuredIds.has(s.id)
+  // Only service secrets belong on this page (registry pull-creds are managed
+  // elsewhere). Build one row per (service, scope): a global slot for every
+  // common provider, plus a row for each actually-stored secret in any scope.
+  const serviceSecrets = secrets.filter((s) => s.type === 'service')
+  const entriesFor = (id: string) => serviceSecrets.filter((s) => s.name === id)
+  const otherIds = [...new Set(serviceSecrets.map((s) => s.name))].filter(
+    (id) => !COMMON_SECRET_SERVICES.includes(id as SecretService)
   )
+  const rows: SecretRow[] = []
+  for (const id of [...COMMON_SECRET_SERVICES, ...otherIds]) {
+    const entries = entriesFor(id)
+    const global = entries.find((e) => isGlobalScope(e.scope))
+    if (global) rows.push({ service: id, scope: global.scope, stored: global })
+    else if (COMMON_SECRET_SERVICES.includes(id as SecretService)) rows.push({ service: id, scope: GLOBAL_SCOPE })
+    for (const e of entries.filter((e) => !isGlobalScope(e.scope))) {
+      rows.push({ service: id, scope: e.scope, stored: e })
+    }
+  }
 
-  const openModal = (id: SecretService) => {
-    setSecretTarget(id)
+  const openModal = (service: string, scope: string) => {
+    setSecretTarget(service as SecretService, scope)
     setModal('new-secret')
   }
 
-  const handleRemove = async (id: SecretService) => {
-    if (!confirm(`Remove the stored ${id} secret?`)) return
-    await window.minipit?.removeSecret(id).catch(() => {})
+  const handleRemove = async (service: string, scope: string) => {
+    const where = isGlobalScope(scope) ? 'global' : `sandbox "${scope}"`
+    if (!confirm(`Remove the stored ${service} secret (${where})?`)) return
+    await window.minipit?.removeSecret(service, scope).catch(() => {})
     load()
   }
 
@@ -71,29 +98,28 @@ export function SecretsPage() {
             <div className="sec-th" />
           </div>
 
-          {visibleServices.map((svc) => {
-            const stored = secretFor(svc.id)
-            const configured = !!stored
+          {rows.map((row) => {
+            const configured = !!row.stored
             return (
-              <div className="sec-row" key={svc.id}>
+              <div className="sec-row" key={`${row.service}:${row.scope}`}>
                 <div className="sec-svc">
-                  <div className="sec-ico"><SecretIcon service={svc.id} size={16} /></div>
-                  <div className="sec-name">{svc.label}</div>
+                  <div className="sec-ico"><SecretIcon service={row.service} size={16} /></div>
+                  <div className="sec-name">{serviceLabel(row.service)}</div>
                 </div>
-                <div className="sec-scope">{configured ? 'Global' : '—'}</div>
+                <div className="sec-scope">{isGlobalScope(row.scope) ? 'Global' : row.scope}</div>
                 <div className={`sec-st ${configured ? 'ok' : 'no'}`}>
                   <div className="sec-sd" />
-                  <span className="sec-mask">{configured ? (stored?.masked || 'Configured') : 'Not set'}</span>
+                  <span className="sec-mask">{configured ? (row.stored?.masked || 'Configured') : 'Not set'}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => openModal(svc.id)}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => openModal(row.service, row.scope)}>
                     {configured ? 'Edit' : 'Set'}
                   </button>
                   {configured && (
                     <button
                       className="btn btn-ghost btn-sm"
                       style={{ color: 'var(--destruct)' }}
-                      onClick={() => handleRemove(svc.id)}
+                      onClick={() => handleRemove(row.service, row.scope)}
                     >
                       Remove
                     </button>

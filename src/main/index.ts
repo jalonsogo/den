@@ -464,10 +464,17 @@ function anthropicOAuth(): Promise<{ ok: true }> {
   })
 }
 
-// Parse the `sbx secret ls` table (columns separated by 2+ spaces).
+// Translate a scope value from the renderer into `sbx secret set/rm` args:
+// global → ['-g']; anything else is a sandbox name passed positionally.
+function secretScopeArgs(scope?: string): string[] {
+  return !scope || scope === '(global)' ? ['-g'] : [scope]
+}
+
+// Parse the `sbx secret ls` table (columns separated by 2+ spaces). No `-g`, so
+// this lists every scope — global plus per-sandbox secrets.
 async function listSecrets(): Promise<StoredSecret[]> {
   try {
-    const out = await sbx(['secret', 'ls', '-g'])
+    const out = await sbx(['secret', 'ls'])
     const lines = out.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim())
     if (!lines.length || /no secrets/i.test(lines[0])) return []
     // Drop the header row (SCOPE TYPE NAME SECRET).
@@ -1861,24 +1868,24 @@ function setupIPC(): void {
 
   ipcMain.handle('minipit:list-secrets', () => listSecrets())
 
-  ipcMain.handle('minipit:set-secret', async (_, service: string, value: string) => {
-    await sbxWithInput(['secret', 'set', '-g', service], value.endsWith('\n') ? value : value + '\n')
+  ipcMain.handle('minipit:set-secret', async (_, service: string, value: string, scope?: string) => {
+    await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
   })
 
   // Is the 1Password CLI installed? Gates the "Load from 1Password" option.
   ipcMain.handle('minipit:op-available', () => opAvailable())
 
   // Resolve a 1Password reference with `op read` and store the result — mirrors
-  // `op read "op://…" | sbx secret set -g <service>`. The real value stays on
-  // the host and is never pasted into den.
-  ipcMain.handle('minipit:set-secret-op', async (_, service: string, ref: string) => {
+  // `op read "op://…" | sbx secret set <scope> <service>`. The real value stays
+  // on the host and is never pasted into den.
+  ipcMain.handle('minipit:set-secret-op', async (_, service: string, ref: string, scope?: string) => {
     const value = await opRead(ref)
     if (!value) throw new Error('1Password returned an empty value for that reference.')
-    await sbxWithInput(['secret', 'set', '-g', service], value.endsWith('\n') ? value : value + '\n')
+    await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
   })
 
-  ipcMain.handle('minipit:remove-secret', async (_, service: string) => {
-    await sbx(['secret', 'rm', '-g', service, '-f'])
+  ipcMain.handle('minipit:remove-secret', async (_, service: string, scope?: string) => {
+    await sbx(['secret', 'rm', ...secretScopeArgs(scope), service, '-f'])
   })
 
   ipcMain.handle('minipit:anthropic-oauth', () => anthropicOAuth())

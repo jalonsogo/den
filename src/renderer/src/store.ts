@@ -37,6 +37,9 @@ interface AppState {
   // doesn't flicker back on (see setSandboxes).
   stopHolds: Record<string, number>
   secretTarget: SecretService | null
+  // Scope the secret modal targets when editing: '(global)' or a sandbox name.
+  // Null when adding a new secret (the modal then lets the user pick the scope).
+  secretScopeTarget: string | null
   newSandboxWorkspace: string | null
   newSandboxTemplate: string | null
   // When true, the New Sandbox modal opens in "feature" mode: isolation (--clone)
@@ -96,7 +99,7 @@ interface AppState {
   removeCreatingSandbox: (name: string) => void
   setHighlightSandbox: (name: string | null) => void
   toggleDefaultKit:   (name: string) => void
-  setSecretTarget:    (service: SecretService | null) => void
+  setSecretTarget:    (service: SecretService | null, scope?: string | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
   setNewSandboxTemplate: (ref: string | null) => void
   setNewSandboxFeature: (v: boolean) => void
@@ -158,6 +161,7 @@ export const useStore = create<AppState>((set) => ({
   deletingIds: [],
   stopHolds: {},
   secretTarget: null,
+  secretScopeTarget: null,
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
   newSandboxFeature: false,
@@ -202,7 +206,7 @@ export const useStore = create<AppState>((set) => ({
     try { return JSON.parse(localStorage.getItem('minipit:defaultKits') ?? '[]') ?? [] } catch { return [] }
   })(),
 
-  setSecretTarget: (service) => set({ secretTarget: service }),
+  setSecretTarget: (service, scope = null) => set({ secretTarget: service, secretScopeTarget: scope }),
 
   // Star/unstar a mixin kit as a "default" — new sandboxes pre-select these.
   toggleDefaultKit: (name) =>

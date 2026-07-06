@@ -117,6 +117,18 @@ export const SECRET_SERVICES: { id: SecretService; label: string }[] = [
 // Shown by default on the Secrets page; the rest are revealed via "Show all".
 export const COMMON_SECRET_SERVICES: SecretService[] = ['anthropic', 'openai', 'google', 'github']
 
+// The SCOPE value sbx prints (and we pass back) for a global secret. Any other
+// value is a sandbox name — the secret applies to that one sandbox only.
+export const GLOBAL_SCOPE = '(global)'
+
+export function isGlobalScope(scope: string | null | undefined): boolean {
+  return !scope || scope === GLOBAL_SCOPE
+}
+
+export function serviceLabel(id: string): string {
+  return SECRET_SERVICES.find((s) => s.id === id)?.label ?? id
+}
+
 export interface StoredSecret {
   scope: string   // "(global)" or a sandbox name
   type: string    // "service" | "registry"
@@ -261,10 +273,10 @@ declare global {
       dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string }>
       onLoginOutput(cb: (chunk: string) => void): () => void
       listSecrets(): Promise<StoredSecret[]>
-      setSecret(service: string, value: string): Promise<void>
-      setSecretOp(service: string, ref: string): Promise<void>
+      setSecret(service: string, value: string, scope?: string): Promise<void>
+      setSecretOp(service: string, ref: string, scope?: string): Promise<void>
       opAvailable(): Promise<boolean>
-      removeSecret(service: string): Promise<void>
+      removeSecret(service: string, scope?: string): Promise<void>
       anthropicOAuth(): Promise<{ ok: true }>
       oauthSecret(service: string): Promise<{ ok: true }>
       openInFinder(path: string): Promise<void>
