@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { Github } from 'lucide-react'
 import { useStore } from '../store'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
+import { bringSandboxToHost } from '../lib/featureChanges'
 
 // A hover-triggered flyout item for a context menu. Defaults to opening
 // rightward and flips left (nudging up) when it would overflow the viewport.
@@ -214,32 +216,11 @@ export function ContextMenu() {
     }
   }
 
-  // Clone-mode "feature" integrate flow: review-first (fetch to a branch), then
-  // open a PR (preferred when there's a remote) or merge. Optionally delete the
-  // sandbox afterward ("finish"). Nothing lands without a confirm.
-  const bringToHost = async (deleteAfter: boolean) => {
+  // Clone-mode "feature" integrate flow lives in a shared helper (also used by
+  // the sandbox header). Close the menu first, then run it.
+  const bringToHost = (deleteAfter: boolean) => {
     setContextMenu({ visible: false })
-    const ws = sandbox.workspace
-    const res = await window.minipit?.sandboxFetchWork(sandbox.name, ws).catch(() => null)
-    if (!res?.ok || !res.branch) { alert(res?.error || 'Could not fetch the sandbox\'s changes.'); return }
-    const branch = res.branch
-    let done = false
-    if (res.hasRemote) {
-      if (confirm(`Fetched changes to "${branch}".\n\nOpen a pull request? (Cancel keeps the branch for review.)`)) {
-        const pr = await window.minipit?.sandboxOpenPr(ws, branch).catch(() => null)
-        if (pr?.ok && pr.url) { window.minipit?.openPath(pr.url); done = true }
-        else if (pr?.ok) { alert(`Pushed "${branch}". Open a PR from your git host.`); done = true }
-        else alert(pr?.error || 'Push / PR failed.')
-      }
-    } else if (confirm(`Fetched changes to "${branch}".\n\nMerge into your current branch? (Cancel keeps the branch.)`)) {
-      const m = await window.minipit?.sandboxMergeBranch(ws, branch).catch(() => null)
-      if (m?.ok) { alert(`Merged "${branch}"${m.base ? ` into ${m.base}` : ''}.`); done = true }
-      else alert(m?.error || 'Merge failed.')
-    }
-    if (done && deleteAfter && confirm(`Delete the sandbox "${sandbox.name}" now?`)) {
-      updateSandbox(sandbox.id, { status: 'deleting' })
-      window.minipit?.deleteSandbox(sandbox.name).catch(() => {})
-    }
+    bringSandboxToHost(sandbox, deleteAfter)
   }
 
   return (
@@ -301,8 +282,12 @@ export function ContextMenu() {
         <SubMenu label="Feature changes">
           <div className="ctx-sub-label">Review changes in the Files → Changes tab</div>
           <div className="ctx-sub-sep" />
-          <div className="ctx-sub-item" onClick={() => bringToHost(false)}>Merge changes to your repo…</div>
-          <div className="ctx-sub-item" onClick={() => bringToHost(true)}>Merge, then delete sandbox…</div>
+          <div className="ctx-sub-item ctx-sub-item-icon" onClick={() => bringToHost(false)}>
+            <Github size={13} /> Merge changes to your repo…
+          </div>
+          <div className="ctx-sub-item ctx-sub-item-icon" onClick={() => bringToHost(true)}>
+            <Github size={13} /> Merge, then delete sandbox…
+          </div>
         </SubMenu>
       )}
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
