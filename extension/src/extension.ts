@@ -69,8 +69,8 @@ async function enableSsh(): Promise<boolean> {
 
 const DEFAULT_REMOTE_WORKSPACE = '/home/agent/workspace'
 
-// `sbx ssh setup` writes the single `Host sbx` alias + managed key (idempotent),
-// after which connecting is `ssh <name>@sbx` — the sandbox name is the username.
+// `sbx ssh setup` writes a wildcard `Host *.sbx` block + managed key (idempotent),
+// after which connecting is `ssh <name>.sbx` — the sandbox name is the hostname.
 async function ensureSshSetup(): Promise<void> {
   await sbx(['ssh', 'setup'], 30000)
 }
@@ -106,7 +106,7 @@ async function openInVscode(raw: SbxSandbox): Promise<void> {
     try {
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `Starting ${raw.name}…` },
-        () => sbx(['run', raw.name], 60000)
+        () => sbx(['run', '--name', raw.name], 60000)
       )
     } catch (e) {
       vscode.window.showErrorMessage(`Couldn't start ${raw.name}: ${(e as Error).message}`)
@@ -115,7 +115,7 @@ async function openInVscode(raw: SbxSandbox): Promise<void> {
   }
 
   const remotePath = await remoteWorkspacePath(raw.name)
-  const uri = vscode.Uri.parse(`vscode-remote://ssh-remote+${raw.name}@sbx${remotePath}`)
+  const uri = vscode.Uri.parse(`vscode-remote://ssh-remote+${raw.name}.sbx${remotePath}`)
   await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true })
 }
 
@@ -158,7 +158,7 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         await vscode.window.withProgress(
           { location: vscode.ProgressLocation.Notification, title: `Starting ${item.raw.name}…` },
-          () => sbx(['run', item.raw.name], 60000)
+          () => sbx(['run', '--name', item.raw.name], 60000)
         )
       } catch (e) { vscode.window.showErrorMessage((e as Error).message) }
       provider.refresh()
