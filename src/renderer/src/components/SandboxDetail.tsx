@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal, ChevronDown } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Code2 } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
@@ -109,6 +109,26 @@ export function SandboxDetail() {
     }
   }
 
+  // Attach desktop VSCode over the sbx SSH endpoint. Mirrors the context-menu
+  // action: first run offers to enable the experimental SSH feature, then retry.
+  const handleOpenVscode = async () => {
+    type VscodeRes = { ok: boolean; needsFeature?: boolean; error?: string }
+    const attempt = (): Promise<VscodeRes | undefined> =>
+      window.minipit?.openVscode(sandbox.name).catch((e) => ({ ok: false, error: String(e) })) as Promise<VscodeRes | undefined>
+    let res = await attempt()
+    if (res?.needsFeature) {
+      const ok = confirm(
+        'Opening a sandbox in VSCode needs the experimental sbx SSH endpoint.\n\n' +
+        'Enable it now? This may briefly restart the sbx daemon (running sandboxes keep running).'
+      )
+      if (!ok) return
+      const en = await window.minipit?.setSshFeature(true, true).catch(() => null)
+      if (!en?.enabled) { alert(en?.error || 'Could not enable the SSH endpoint. Check Settings → General → Experimental.'); return }
+      res = await attempt()
+    }
+    if (res && !res.ok) alert(res.error || 'Could not open VSCode.')
+  }
+
   const handleMenu = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     // Anchor the menu's right edge under the button (menu is 200px wide).
@@ -149,6 +169,10 @@ export function SandboxDetail() {
               {sandbox.status === 'starting' ? 'Starting…' : 'Start'}
             </button>
           )}
+
+          <button className="btn btn-ghost btn-sm" onClick={handleOpenVscode} title="Open in VSCode" disabled={isTransitioning}>
+            <Code2 size={14} />
+          </button>
 
           <button className="btn btn-ghost btn-sm" onClick={handleMenu} title="More actions">
             <MoreVertical size={14} />
