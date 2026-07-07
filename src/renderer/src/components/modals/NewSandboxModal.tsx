@@ -19,10 +19,10 @@ function deriveName(agent: string, workspace: string): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, defaultKits, sandboxes, groups, createGroup, setSandboxGroup } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, groups, createGroup, setSandboxGroup } = useStore()
   const feature = newSandboxFeature
   // Feature mode always isolates (a feature is an isolated clone you merge back).
-  const closeModal = () => { setNewSandboxFeature(false); setModal(null) }
+  const closeModal = () => { setNewSandboxFeature(false); setNewSandboxGroup(null); setModal(null) }
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -45,7 +45,8 @@ export function NewSandboxModal() {
   // keep concurrent sandboxes from stomping the same working tree (toggleable).
   const [clone, setClone]             = useState(!!newSandboxWorkspace || newSandboxFeature)
   // Optional group assignment. '' = no group, '__new' = create one from newGroupName.
-  const [groupSel, setGroupSel]       = useState('')
+  // Pre-selected when opened from a group header's "New sandbox…".
+  const [groupSel, setGroupSel]       = useState(newSandboxGroup ?? '')
   const [newGroupName, setNewGroupName] = useState('')
   // For --clone: whether the workspace is a Git repo (null = unknown/checking).
   const [wsIsRepo, setWsIsRepo]       = useState<boolean | null>(null)

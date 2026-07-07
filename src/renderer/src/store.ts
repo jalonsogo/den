@@ -42,6 +42,9 @@ interface AppState {
   secretScopeTarget: string | null
   newSandboxWorkspace: string | null
   newSandboxTemplate: string | null
+  // When set, the New Sandbox modal pre-selects this group (used by the group
+  // header's "New sandbox…"). Cleared when the modal closes.
+  newSandboxGroup: string | null
   // When true, the New Sandbox modal opens in "feature" mode: isolation (--clone)
   // is forced on and the UI is framed as starting an isolated feature.
   newSandboxFeature: boolean
@@ -68,6 +71,9 @@ interface AppState {
   // Per-sandbox working-tree isolation (by name): true = --clone (own tree),
   // false = direct mount of the host folder. Used to warn about shared folders.
   sandboxIsolation: Record<string, boolean>
+  // Per-sandbox "auto-sync to review branch" toggle (clone mode only): true =
+  // on each workspace change, fetch the sandbox's clone into `sandbox/<name>`.
+  sandboxAutoSync: Record<string, boolean>
   // Host-side git summary per workspace path (lazy-loaded, cached).
   gitInfo: Record<string, { isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
   // Uncommitted-change counts per sandbox name (running sandboxes only).
@@ -102,6 +108,7 @@ interface AppState {
   setSecretTarget:    (service: SecretService | null, scope?: string | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
   setNewSandboxTemplate: (ref: string | null) => void
+  setNewSandboxGroup: (id: string | null) => void
   setNewSandboxFeature: (v: boolean) => void
   setEditKit: (kit: { dir: string; name: string } | null) => void
   setThemePref:       (pref: 'light' | 'dark' | 'system') => void
@@ -116,6 +123,8 @@ interface AppState {
   setCustomizeSandbox:(name: string | null) => void
   syncProjectConfig:  () => void
   loadSandboxIsolation: () => void
+  loadAutoSync:       () => void
+  setAutoSync:        (name: string, on: boolean) => void
   loadGroups:         () => void
   createGroup:        (name: string) => string
   renameGroup:        (id: string, name: string) => void
@@ -164,6 +173,7 @@ export const useStore = create<AppState>((set) => ({
   secretScopeTarget: null,
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
+  newSandboxGroup: null,
   newSandboxFeature: false,
   editKit: null,
   themePref: initialThemePref,
@@ -187,6 +197,7 @@ export const useStore = create<AppState>((set) => ({
     try { return JSON.parse(localStorage.getItem('minipit:sandboxOrder') ?? '[]') ?? [] } catch { return [] }
   })(),
   sandboxIsolation: {},
+  sandboxAutoSync: {},
   gitInfo: {},
   sandboxChanges: {},
   display: (() => {
@@ -219,6 +230,7 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   setNewSandboxWorkspace: (path) => set({ newSandboxWorkspace: path }),
+  setNewSandboxGroup: (id) => set({ newSandboxGroup: id }),
   setNewSandboxFeature: (v) => set({ newSandboxFeature: v }),
 
   setNewSandboxTemplate: (ref) => set({ newSandboxTemplate: ref }),
@@ -336,6 +348,18 @@ export const useStore = create<AppState>((set) => ({
     window.minipit?.sandboxIsolation()
       .then((m) => set({ sandboxIsolation: m ?? {} }))
       .catch(() => {})
+  },
+
+  loadAutoSync: () => {
+    window.minipit?.autoSyncGet()
+      .then((m) => set({ sandboxAutoSync: m ?? {} }))
+      .catch(() => {})
+  },
+
+  setAutoSync: (name, on) => {
+    // Optimistic: reflect the toggle immediately, then persist in main.
+    set((s) => ({ sandboxAutoSync: { ...s.sandboxAutoSync, [name]: on } }))
+    window.minipit?.autoSyncSet(name, on).catch(() => {})
   },
 
   setSandboxIcon: (name, iconKey) =>

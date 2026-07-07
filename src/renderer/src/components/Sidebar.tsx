@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
@@ -618,10 +618,20 @@ export function Sidebar() {
                 ))}
               </div>
             ))
-          ) : (
+          ) : grouped && collapsed ? (
             // Collapsed rail can't show group headers, but keep the grouped
-            // ordering so the sequence matches the expanded view.
-            (grouped ? grouped.flatMap((sec) => sec.list) : sorted).map((s, i, arr) => (
+            // ordering and draw a thin divider between groups so the boundaries
+            // stay visible.
+            grouped.map((sec, si) => (
+              <Fragment key={sec.key}>
+                {si > 0 && <div className="sb-rail-sep" />}
+                {sec.list.map((s) => (
+                  <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} />
+                ))}
+              </Fragment>
+            ))
+          ) : (
+            sorted.map((s, i, arr) => (
               <SandboxItem key={s.id} sandbox={s} active={activeSandboxId === s.id && activePage === 'sandbox'} collapsed={collapsed} nextName={arr[i + 1]?.name ?? null} onReorder={collapsed ? undefined : (d, b) => { reorderSandbox(d, b); setSort('manual') }} />
             ))
           )}

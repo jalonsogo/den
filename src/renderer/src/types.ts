@@ -43,7 +43,13 @@ export interface Group {
 export interface Port {
   host: number
   container: number
-  protocol: 'TCP' | 'UDP'
+  // May carry an address-family suffix (TCP4/UDP4/TCP6/UDP6) so unpublish can
+  // reproduce the exact spec sbx reported. Strip the suffix for display.
+  protocol: 'TCP' | 'UDP' | 'TCP4' | 'UDP4' | 'TCP6' | 'UDP6'
+  // Host bind address as reported by sbx (e.g. 127.0.0.1 or 0.0.0.0). Needed to
+  // unpublish a network-exposed (0.0.0.0) binding, since an omitted host IP
+  // defaults to loopback and would miss it.
+  hostIp?: string
   active: boolean
 }
 
@@ -321,6 +327,8 @@ declare global {
       sandboxFetchWork(name: string, repoDir: string): Promise<{ ok: boolean; branch?: string; hasRemote?: boolean; error?: string }>
       sandboxOpenPr(repoDir: string, branch: string): Promise<{ ok: boolean; url?: string; pushedOnly?: boolean; error?: string }>
       sandboxMergeBranch(repoDir: string, branch: string): Promise<{ ok: boolean; base?: string; output?: string; conflict?: boolean; error?: string }>
+      autoSyncGet(): Promise<Record<string, boolean>>
+      autoSyncSet(name: string, on: boolean): Promise<boolean>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void

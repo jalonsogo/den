@@ -12,9 +12,12 @@ const STATUS_META: Record<string, { color: string; Icon: LucideIcon; label: stri
 
 // A flat list of changed files with a status icon/colour. `onOpen` receives the
 // repo-relative path + filename (deleted files aren't openable, so they're inert).
-export function ChangesList({ changes, onOpen, empty }: {
+// `onContext` fires on right-click with the same path/name, for a file menu
+// (Reveal in Finder, Download, …) mirroring the Files tab.
+export function ChangesList({ changes, onOpen, onContext, empty }: {
   changes: FileChange[]
   onOpen?: (relPath: string, name: string) => void
+  onContext?: (e: React.MouseEvent, relPath: string, name: string) => void
   empty?: string
 }) {
   if (changes.length === 0) return <div className="changes-empty">{empty ?? 'No uncommitted changes.'}</div>
@@ -33,6 +36,7 @@ export function ChangesList({ changes, onOpen, empty }: {
             className={`changes-row${openable ? '' : ' static'}`}
             title={`${m.label} · ${c.path}`}
             onClick={() => openable && onOpen!(c.path, name)}
+            onContextMenu={onContext ? (e) => { e.preventDefault(); e.stopPropagation(); onContext(e, c.path, name) } : undefined}
           >
             <Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
             <span className="changes-name">{name}</span>

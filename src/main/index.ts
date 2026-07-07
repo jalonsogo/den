@@ -84,10 +84,18 @@ function guiEnv(): NodeJS.ProcessEnv {
 // that could trigger an unexpected OS handler.
 const SAFE_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
 function openExternalSafe(url: string): void {
+  let parsed: URL
   try {
-    if (SAFE_EXTERNAL_SCHEMES.has(new URL(url).protocol)) shell.openExternal(url)
-    else console.warn('blocked openExternal for disallowed scheme:', url)
-  } catch { /* not a parseable URL — drop it */ }
+    parsed = new URL(url)
+  } catch {
+    console.warn('openExternal: not a parseable URL, dropped:', url)
+    return
+  }
+  if (!SAFE_EXTERNAL_SCHEMES.has(parsed.protocol)) {
+    console.warn('blocked openExternal for disallowed scheme:', url)
+    return
+  }
+  shell.openExternal(url).catch((e) => console.error('openExternal failed for', url, e))
 }
 
 // Community kit gallery source (browsed live, imported via git). sbx consumes a
@@ -265,15 +273,60 @@ function toPortNum(v: unknown): number {
   return NaN
 }
 
+// Look up a field by any of several possible key names, case-insensitively —
+// `sbx ls` and `sbx ports` disagree on casing/naming across versions.
+function pickField(p: RawPort, keys: string[]): unknown {
+  const lower: Record<string, unknown> = {}
+  for (const k of Object.keys(p)) lower[k.toLowerCase()] = p[k]
+  for (const k of keys) {
+    const v = lower[k.toLowerCase()]
+    if (v !== undefined && v !== null) return v
+  }
+  return undefined
+}
+
 function normalizePorts(ports?: RawPort[]) {
-  return (ports ?? [])
+  const mapped = (ports ?? [])
     .map((p) => ({
-      host: toPortNum(p.host_port ?? p.host),
-      container: toPortNum(p.sandbox_port ?? p.sandbox ?? p.container_port ?? p.container),
-      protocol: String(p.protocol ?? 'tcp').toUpperCase(),
+      host: toPortNum(pickField(p, ['host_port', 'host', 'hostport', 'published_port', 'public_port'])),
+      container: toPortNum(pickField(p, ['sandbox_port', 'sandbox', 'container_port', 'container', 'target_port', 'port'])),
+      protocol: String(pickField(p, ['protocol', 'proto']) ?? 'tcp').toUpperCase(),
+      hostIp: String(pickField(p, ['host_ip', 'hostip', 'ip', 'address']) ?? ''),
       active: true
     }))
     .filter((p) => !Number.isNaN(p.host) && !Number.isNaN(p.container))
+  // A single published port is reported once per host binding address (IPv4
+  // 127.0.0.1 and IPv6 ::1), which we don't surface — collapse to one row per
+  // host:container/protocol so the panel doesn't show every port twice.
+  const seen = new Set<string>()
+  return mapped.filter((p) => {
+    const key = `${p.host}:${p.container}/${p.protocol}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+// `sbx ports --json` may return a bare array, a `{ ports: [...] }` wrapper, or
+// an object keyed by sandbox name — pull the port array out of any of them.
+function extractPortArray(data: unknown, name: string): RawPort[] {
+  if (Array.isArray(data)) return data as RawPort[]
+  if (data && typeof data === 'object') {
+    const o = data as Record<string, unknown>
+    for (const key of ['ports', 'published', 'mappings', 'portMappings']) {
+      if (Array.isArray(o[key])) return o[key] as RawPort[]
+    }
+    const byName = o[name] as { ports?: unknown } | unknown[] | undefined
+    if (Array.isArray(byName)) return byName as RawPort[]
+    if (byName && typeof byName === 'object' && Array.isArray((byName as { ports?: unknown }).ports)) {
+      return (byName as { ports: RawPort[] }).ports
+    }
+    // Last resort: the first array-of-objects value on the object.
+    for (const v of Object.values(o)) {
+      if (Array.isArray(v) && v.every((x) => x && typeof x === 'object')) return v as RawPort[]
+    }
+  }
+  return []
 }
 
 function normalizeSandbox(raw: SbxSandbox) {
@@ -321,6 +374,14 @@ function updatePowerBlocker(runningCount: number): void {
   } catch (e) { console.error('powerSaveBlocker:', e) }
 }
 
+// Last successful sandbox list. `sbx ls` can fail transiently (Docker daemon
+// momentarily busy, a cold-start timeout), and since we poll every 5s a single
+// failed tick must not wipe every sandbox from the UI/tray and reset the power
+// blocker. On error we return the last good list; the next successful poll
+// reconciles. Stays null until the first success so a genuine cold start
+// (nothing yet fetched) still reports empty rather than fabricating entries.
+let lastGoodSandboxes: ReturnType<typeof normalizeSandbox>[] | null = null
+
 async function listSandboxes() {
   try {
     const out = await sbx(['ls', '--json'])
@@ -328,19 +389,27 @@ async function listSandboxes() {
     const sandboxes: SbxSandbox[] = parsed.sandboxes ?? parsed
     const list = sandboxes.map(normalizeSandbox)
     updatePowerBlocker(list.filter((s) => s.status === 'running').length)
+    lastGoodSandboxes = list
     return list
   } catch (err) {
     console.error('sbx ls failed:', err)
-    return []
+    return lastGoodSandboxes ?? []
   }
 }
 
 async function getPortsForSandbox(name: string) {
   try {
     const out = await sbx(['ports', name, '--json'])
-    const data = JSON.parse(out)
-    return normalizePorts(data.ports)
-  } catch {
+    const trimmed = out.trim()
+    const ports = normalizePorts(extractPortArray(JSON.parse(trimmed), name))
+    // If sbx returned data but we parsed nothing, the shape/field names have
+    // drifted again — log the raw output so it's diagnosable.
+    if (ports.length === 0 && trimmed && trimmed !== '[]' && trimmed !== '{}') {
+      console.error('get-ports: parsed 0 ports from non-empty sbx output:', trimmed.slice(0, 500))
+    }
+    return ports
+  } catch (err) {
+    console.error('get-ports failed:', err)
     return []
   }
 }
@@ -836,6 +905,7 @@ function startEventTail(name: string, attempt = 0): void {
           if (ev.tool_name && FILE_TOOLS.has(ev.tool_name)) {
             hookLog(`${name} → files-changed (${ev.tool_name})`)
             mainWindow?.webContents.send('minipit:files-changed', name)
+            scheduleAutoSync(name)
           }
           break
       }
@@ -900,6 +970,76 @@ async function gitStatus(name: string, workspace: string): Promise<{ isRepo: boo
   }
 }
 
+// Fetch a --clone sandbox's work into the local review branch `sandbox/<name>`
+// without touching the working tree — never an auto-merge. Shared by the manual
+// fetch-back IPC handler and the optional auto-sync-on-change path below.
+async function fetchSandboxWork(name: string, repoDir: string): Promise<
+  { ok: true; branch: string; hasRemote: boolean } | { ok: false; error: string }
+> {
+  const remote = `sandbox-${name}`
+  const git = (args: string[]) => new Promise<{ code: number; out: string; err: string }>((resolve) => {
+    execFile('git', args, { cwd: repoDir, timeout: 120000, env: guiEnv() },
+      (e, so, se) => resolve({ code: e ? ((e as { code?: number }).code ?? 1) : 0, out: (so || '').trim(), err: (se || '').trim() }))
+  })
+  try {
+    const remotes = await git(['remote'])
+    if (!remotes.out.split('\n').includes(remote)) {
+      return { ok: false, error: `No "${remote}" remote — clone-mode fetch-back needs the sandbox running (its git daemon runs only while active).` }
+    }
+    const fetched = await git(['fetch', remote])
+    if (fetched.code !== 0) return { ok: false, error: fetched.err || `git fetch ${remote} failed — is the sandbox running?` }
+    const srcBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+    const review = `sandbox/${name}`
+    const made = await git(['branch', '-f', review, `${remote}/${srcBranch}`])
+    if (made.code !== 0) return { ok: false, error: made.err || `Couldn't create review branch ${review}.` }
+    const hasRemote = (await git(['remote', 'get-url', 'origin'])).code === 0
+    return { ok: true, branch: review, hasRemote }
+  } catch (err) {
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
+// ── Auto-sync (clone mode) ──────────────────────────────────────────────────
+// Optional per-sandbox toggle: on each workspace change, quietly fetch the
+// sandbox's clone into its `sandbox/<name>` review branch so the host always has
+// an up-to-date branch to diff/PR — never a merge into the working tree, so it's
+// safe to run unattended. Persisted in the store, keyed by sandbox name.
+const AUTO_SYNC_DEBOUNCE_MS = 4000
+const autoSyncTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function getAutoSyncMap(): Record<string, boolean> {
+  return (store.get('sandboxAutoSync') as Record<string, boolean>) ?? {}
+}
+function setAutoSyncFlag(name: string, on: boolean): void {
+  const map = getAutoSyncMap()
+  if (on) map[name] = true
+  else delete map[name]
+  store.set('sandboxAutoSync', map)
+}
+
+// Debounced fetch after a burst of writes coalesces into one `git fetch`.
+async function runAutoSync(name: string): Promise<void> {
+  const repoDir = (lastGoodSandboxes ?? []).find((s) => s.name === name)?.workspace
+  if (!repoDir) return
+  const res = await fetchSandboxWork(name, repoDir)
+  if (res.ok) {
+    hookLog(`${name} → auto-synced to ${res.branch}`)
+    mainWindow?.webContents.send('minipit:auto-synced', name, res.branch)
+  } else {
+    // Fetch fails silently (e.g. sandbox stopping) — we retry on the next change.
+    hookLog(`${name} → auto-sync fetch skipped: ${res.error}`)
+  }
+}
+function scheduleAutoSync(name: string): void {
+  if (!getAutoSyncMap()[name]) return
+  const existing = autoSyncTimers.get(name)
+  if (existing) clearTimeout(existing)
+  autoSyncTimers.set(name, setTimeout(() => {
+    autoSyncTimers.delete(name)
+    runAutoSync(name).catch(() => {})
+  }, AUTO_SYNC_DEBOUNCE_MS))
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -923,12 +1063,15 @@ async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
   let out: string
   try {
     out = await sbx(['exec', name, 'sh', '-c', cmd, 'sh', dir || '.'])
-  } catch {
-    // A failure here (sandbox stopped, path gone, missing tool) isn't actionable
-    // for the caller — return an empty listing rather than throwing, so it doesn't
-    // spam the main-process console as an unhandled IPC handler error. Mirrors the
-    // resilient pattern in gitStatus().
-    return []
+  } catch (err) {
+    // Rethrow so the caller can tell a real listing failure (sandbox not ready
+    // yet on reconnect, exec transport error, path gone) apart from a genuinely
+    // empty directory — the latter returns exit 0 with no output and is handled
+    // below. If we swallowed this and returned [], the renderer would cache it as
+    // "empty" and a transient reconnect-window failure would stick until a manual
+    // refresh. The IPC layer forwards the rejection to the renderer, which catches
+    // it (shows a retryable error, skips caching), so it isn't an unhandled error.
+    throw err instanceof Error ? err : new Error(String(err))
   }
 
   const entries: FileEntry[] = []
@@ -962,14 +1105,20 @@ async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
 // Attach to a sandbox's agent via `sbx run NAME` in a PTY. Agents like Claude
 // Code are full-screen TUIs that need a real TTY, and their raw ANSI output is
 // streamed straight to the renderer's xterm (no line reformatting).
-function spawnSandboxProcess(name: string, cols = 80, rows = 24) {
+function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { continueSession?: boolean }) {
   const existing = sbxProcesses.get(name)
   if (existing) {
     existing.kill()
     sbxProcesses.delete(name)
   }
 
-  const proc = pty.spawn(getSbxPath(), ['run', '--name', name], {
+  // Reconnecting to an already-running sandbox: resume the agent's prior
+  // conversation rather than starting fresh. `--continue` is a claude agent
+  // flag (gated by the caller), passed through after the `--` separator.
+  const args = ['run', '--name', name]
+  if (opts?.continueSession) args.push('--', '--continue')
+
+  const proc = pty.spawn(getSbxPath(), args, {
     name: 'xterm-256color',
     cols,
     rows,
@@ -1280,6 +1429,8 @@ function setupIPC(): void {
     await sbx(['rm', '--force', name])
     uptimeMap.delete(name)
     forgetIsolation(name)
+    setAutoSyncFlag(name, false)
+    const t = autoSyncTimers.get(name); if (t) { clearTimeout(t); autoSyncTimers.delete(name) }
   })
 
   ipcMain.handle('minipit:create-sandbox', async (_, config: {
@@ -1816,25 +1967,17 @@ function setupIPC(): void {
   })
 
   // Fetch the sandbox's work into a local review branch `sandbox/<name>`.
-  ipcMain.handle('minipit:sandbox-fetch-work', async (_, name: string, repoDir: string) => {
-    const remote = `sandbox-${name}`
-    const git = gitIn(repoDir)
-    try {
-      const remotes = await git(['remote'])
-      if (!remotes.out.split('\n').includes(remote)) {
-        return { ok: false, error: `No "${remote}" remote — clone-mode fetch-back needs the sandbox running (its git daemon runs only while active).` }
-      }
-      const fetched = await git(['fetch', remote])
-      if (fetched.code !== 0) return { ok: false, error: fetched.err || `git fetch ${remote} failed — is the sandbox running?` }
-      const srcBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
-      const review = `sandbox/${name}`
-      const made = await git(['branch', '-f', review, `${remote}/${srcBranch}`])
-      if (made.code !== 0) return { ok: false, error: made.err || `Couldn't create review branch ${review}.` }
-      const hasRemote = (await git(['remote', 'get-url', 'origin'])).code === 0
-      return { ok: true, branch: review, hasRemote }
-    } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
-    }
+  ipcMain.handle('minipit:sandbox-fetch-work', (_, name: string, repoDir: string) => fetchSandboxWork(name, repoDir))
+
+  // Per-sandbox "auto-sync to review branch" toggle (clone mode). Enabling runs
+  // an immediate fetch so the branch is current right away; subsequent workspace
+  // changes are picked up by scheduleAutoSync (debounced).
+  ipcMain.handle('minipit:auto-sync-get', () => getAutoSyncMap())
+  ipcMain.handle('minipit:auto-sync-set', (_, name: string, on: boolean) => {
+    setAutoSyncFlag(name, on)
+    if (on) runAutoSync(name).catch(() => {})
+    else { const t = autoSyncTimers.get(name); if (t) { clearTimeout(t); autoSyncTimers.delete(name) } }
+    return true
   })
 
   // Push the review branch and open a PR (via gh, falling back to a compare URL).
@@ -2420,8 +2563,13 @@ function setupIPC(): void {
   ipcMain.handle('minipit:agent-ensure', (_, name: string, cols: number, rows: number) => {
     const proc = sbxProcesses.get(name)
     if (!proc) {
-      // No live session yet — start one at the terminal's real size.
-      spawnSandboxProcess(name, cols, rows)
+      // No live session in this app instance. If the container is already
+      // running, this is a reconnect — resume the claude agent's prior
+      // conversation with --continue. (A stopped sandbox started here is a
+      // fresh run; other agents don't take the claude --continue flag.)
+      const sb = (lastGoodSandboxes ?? []).find((s) => s.name === name)
+      const continueSession = sb?.status === 'running' && (sb.agent ?? '').startsWith('claude')
+      spawnSandboxProcess(name, cols, rows, { continueSession })
     } else {
       // Session exists — nudge the size so the TUI repaints cleanly at this size.
       try { proc.resize(Math.max(2, cols - 1), rows) } catch { /* ignore */ }
