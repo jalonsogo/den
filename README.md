@@ -63,6 +63,12 @@ Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network
   sbx login
   ```
 
+## Troubleshooting
+
+Hitting an error? See the [FAQ & Troubleshooting guide](docs/faq.md) — it starts
+with known problems (like the `sbx` daemon "another daemon is already running"
+race) and their fixes.
+
 ## Development
 
 ```bash
