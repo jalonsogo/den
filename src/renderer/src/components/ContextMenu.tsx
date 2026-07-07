@@ -58,6 +58,9 @@ export function ContextMenu() {
   const createGroup = useStore((s) => s.createGroup)
   const renameGroup = useStore((s) => s.renameGroup)
   const deleteGroup = useStore((s) => s.deleteGroup)
+  const setModal = useStore((s) => s.setModal)
+  const setNewSandboxWorkspace = useStore((s) => s.setNewSandboxWorkspace)
+  const setNewSandboxGroup = useStore((s) => s.setNewSandboxGroup)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: contextMenu.y, left: contextMenu.x })
 
@@ -98,6 +101,21 @@ export function ContextMenu() {
       close()
       openPrompt({ title: 'Rename group', label: 'Group name', defaultValue: group.name, confirmText: 'Rename', onSubmit: (v) => renameGroup(groupId, v) })
     }
+    // Sandboxes in a group usually sit on the same folder, so default a new one
+    // to the group's most common workspace (still editable in the modal).
+    const groupWorkspace = (() => {
+      const counts = new Map<string, number>()
+      for (const m of members) counts.set(m.workspace, (counts.get(m.workspace) ?? 0) + 1)
+      let best: string | null = null, top = 0
+      for (const [ws, c] of counts) if (ws && c > top) { best = ws; top = c }
+      return best
+    })()
+    const newInGroup = () => {
+      close()
+      setNewSandboxWorkspace(groupWorkspace)
+      setNewSandboxGroup(groupId)
+      setModal('new-sandbox')
+    }
     const startAll = async () => { close(); for (const s of stopped) { try { await window.minipit?.runSandbox(s.name); updateSandbox(s.id, { status: 'running' }) } catch (e) { console.error(e) } } }
     const stopAll = async () => {
       close()
@@ -116,6 +134,8 @@ export function ContextMenu() {
     }
     return (
       <div ref={ref} className="ctx-menu" style={{ top: pos.top, left: pos.left }} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ctx-item" onClick={newInGroup}>New sandbox…</div>
+        <div className="ctx-sep" />
         <div className="ctx-item" onClick={rename}>Rename group…</div>
         {(stopped.length > 0 || running.length > 0) && <div className="ctx-sep" />}
         {stopped.length > 0 && <div className="ctx-item" onClick={startAll}>Start {stopped.length} sandbox{stopped.length > 1 ? 'es' : ''}</div>}

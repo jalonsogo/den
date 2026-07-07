@@ -430,6 +430,8 @@ html, body, #root {
 .sb-new:hover { background: var(--sb-hover); color: var(--sb-fg); }
 
 .sb-div { height: 1px; background: var(--sb-border); margin: 10px 8px; }
+/* Divider between groups on the collapsed rail (headers are hidden there). */
+.sb-rail-sep { height: 1px; background: var(--sb-border); margin: 7px 16px; }
 
 .sb-nav { padding: 0 8px; }
 .sb-nav-item {
@@ -974,6 +976,7 @@ html, body, #root {
 }
 .d-feature-item:hover { background: var(--bg-subtle); }
 .d-feature-item svg { flex-shrink: 0; opacity: 0.85; }
+.d-feature-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 
 .seg-btn { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
 .seg-btn-item {
@@ -2355,6 +2358,20 @@ html, body, #root {
 .clone-warn span { flex: 1; }
 .clone-warn code { font-size: 11px; background: var(--bg-subtle); padding: 1px 5px; border-radius: 4px; }
 .clone-warn .btn { flex-shrink: 0; }
+
+/* Files panel note: this sandbox's workspace is an isolated clone, so its files
+   don't sync to the host until fetched back. */
+.files-clone-note {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  margin: 6px 8px 8px; padding: 7px 9px; border-radius: 6px;
+  font-size: 11.5px; line-height: 1.35; color: var(--t2);
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+}
+.files-clone-note > svg { flex-shrink: 0; color: var(--yellow); }
+.files-clone-note span { flex: 1; }
+.files-clone-note .btn { flex-shrink: 0; white-space: nowrap; }
 
 /* ── Library (Templates / Kits / Mixins) ── */
 .lib-tbl { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

@@ -109,6 +109,8 @@ const api = {
   sandboxFetchWork: (name: string, repoDir: string) => ipcRenderer.invoke('minipit:sandbox-fetch-work', name, repoDir),
   sandboxOpenPr: (repoDir: string, branch: string) => ipcRenderer.invoke('minipit:sandbox-open-pr', repoDir, branch),
   sandboxMergeBranch: (repoDir: string, branch: string) => ipcRenderer.invoke('minipit:sandbox-merge-branch', repoDir, branch),
+  autoSyncGet: ()                       => ipcRenderer.invoke('minipit:auto-sync-get'),
+  autoSyncSet: (name: string, on: boolean) => ipcRenderer.invoke('minipit:auto-sync-set', name, on),
 
   onSandboxesUpdated: (cb: (sandboxes: unknown[]) => void) => {
     const handler = (_: Electron.IpcRendererEvent, s: unknown[]) => cb(s)

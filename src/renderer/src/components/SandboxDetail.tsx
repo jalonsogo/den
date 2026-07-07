@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal, ChevronDown } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
@@ -13,7 +13,7 @@ import type { FileChange } from '../types'
 type Dock = 'files' | 'info' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
 
   // Clone-mode sandboxes keep their work inside a private clone; expose the
@@ -133,7 +133,7 @@ export function SandboxDetail() {
   return (
     <div className="detail">
       <div className="detail-header">
-        <SandboxAvatar sandbox={sandbox} size={22} editable linkToContextMenu />
+        <SandboxAvatar sandbox={sandbox} size={30} editable linkToContextMenu />
         <div className="d-name">{sandbox.name}</div>
         <span className={`d-status ${sandbox.status === 'running' ? 'on' : 'off'}`}>
           {sandbox.status === 'running'
@@ -149,10 +149,10 @@ export function SandboxDetail() {
               <button
                 className="seg-btn-item d-feature-btn"
                 onClick={() => setFeatureOpen((o) => !o)}
-                title="Bring this sandbox's changes to your repo"
+                title="Bring this sandbox's changes to your repo (PR or merge)"
               >
                 <Github size={13} />
-                Changes
+                Integrate
                 <ChevronDown size={12} />
               </button>
               {featureOpen && (
@@ -163,6 +163,15 @@ export function SandboxDetail() {
                   </div>
                   <div className="d-feature-item" onClick={() => { setFeatureOpen(false); bringSandboxToHost(sandbox, true) }}>
                     <Github size={13} /> Merge, then delete sandbox…
+                  </div>
+                  <div className="d-feature-sep" />
+                  <div
+                    className="d-feature-item d-feature-toggle"
+                    title="On each change, fetch this sandbox's work into its sandbox/<name> review branch (never merges into your working tree)"
+                    onClick={() => setAutoSync(sandbox.name, !(sandboxAutoSync[sandbox.name] === true))}
+                  >
+                    <Check size={13} style={{ opacity: sandboxAutoSync[sandbox.name] === true ? 1 : 0 }} />
+                    Auto-sync to review branch
                   </div>
                 </div>
               )}

@@ -20,7 +20,7 @@ import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
-  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation } = useStore()
+  const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation, loadAutoSync } = useStore()
 
   useEffect(() => {
     // Initial load
@@ -30,6 +30,8 @@ export function App() {
     syncProjectConfig()
     // Per-sandbox working-tree isolation (for the shared-folder warning).
     loadSandboxIsolation()
+    // Per-sandbox auto-sync-to-review-branch toggle (clone mode).
+    loadAutoSync()
     // Named sandbox groups.
     useStore.getState().loadGroups()
 
