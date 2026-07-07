@@ -11,15 +11,6 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done (keep briefly for context)
 
 These shipped but were only typecheck/build-verified. Confirm in the running app:
 
-- [ ] **Drag-to-reorder** sandboxes within a group (insertion line, drops correctly incl.
-      last position) and **drag-to-move** across groups (group highlights).
-- [ ] **Group reorder** by dragging a group header (insertion line in the gap).
-- [ ] **Collapsed sidebar rail** shows the plug icon + tooltip, no empty footer box.
-- [ ] **Custom-color swatch** renders as a clean circle (no square-in-circle) in the
-      accent picker and the sandbox icon/color picker.
-- [ ] **Kit capability columns** align table-style across rows in the full list.
-- [ ] The `--clone` **bring-work-home** flow (fetch → PR / merge → optional delete)
-      end-to-end against a real repo.
 
 ## Near-term features
 
@@ -37,6 +28,8 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
 - [ ] **Secrets: more providers via 1Password** and a "test resolve" button that confirms
       an `op://` reference resolves before saving.
 - [ ] **Search / command palette** (⌘K) across sandboxes, groups, kits, and actions.
+- [ ] **VSCode Integration** Following https://github.com/DockerSolutionsEngineering/ai.gov.sbx-vscode-ssh 
+
 
 ## Platform & release
 
@@ -50,6 +43,7 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
 - [ ] **Automated tests** — there is none today. Start with unit tests for the pure logic
       (kit spec parsing, ordering/grouping, semver compare) and a smoke test for IPC
       wiring.
+- [ ] **Integration tests** Write integration test with Playwright
 - [ ] **Dropdown/control consistency audit** — a pass was done for New Sandbox; sweep the
       rest of the app for size/padding/radius drift.
 - [ ] **Error surfacing** — replace remaining `alert()`/`confirm()` in flows (e.g.
@@ -65,6 +59,7 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
       width, sandbox order/colors/icons/groups) unless a one-time migration copies old
       keys to new. Plan when we do it: rename IPC + global to `den`, add a localStorage
       migration shim, keep durable keys as-is. Owner requested we hold off for now.
+- [ ] **Add an integrated terminal** 
 
 ---
 
