@@ -53,6 +53,9 @@ interface AppState {
   editKit: { dir: string; name: string } | null
   themePref: 'light' | 'dark' | 'system'
   theme: 'light' | 'dark'   // resolved from themePref (system → OS preference)
+  // What a left-click on a file does: open the in-app previewer or hand off to
+  // the host's default app.
+  fileOpenMode: 'preview' | 'system'
   sidebarCollapsed: boolean
   accent: string
   accentColor: string
@@ -112,6 +115,7 @@ interface AppState {
   setNewSandboxFeature: (v: boolean) => void
   setEditKit: (kit: { dir: string; name: string } | null) => void
   setThemePref:       (pref: 'light' | 'dark' | 'system') => void
+  setFileOpenMode:    (mode: 'preview' | 'system') => void
   toggleSidebar:      () => void
   setAccent:          (id: string) => void
   setCustomAccent:    (hex: string) => void
@@ -178,6 +182,7 @@ export const useStore = create<AppState>((set) => ({
   editKit: null,
   themePref: initialThemePref,
   theme: resolveTheme(initialThemePref),
+  fileOpenMode: (localStorage.getItem('minipit:fileOpenMode') as 'preview' | 'system') ?? 'preview',
   sidebarCollapsed: localStorage.getItem('minipit:sidebarCollapsed') === '1',
   accent: localStorage.getItem('minipit:accent') ?? 'blue',
   accentColor: localStorage.getItem('minipit:accentColor') ?? '#3b82f6',
@@ -465,6 +470,11 @@ export const useStore = create<AppState>((set) => ({
       applyAccent(state.accent, state.accentColor)
       return { themePref: pref, theme }
     }),
+
+  setFileOpenMode: (mode) => {
+    localStorage.setItem('minipit:fileOpenMode', mode)
+    set({ fileOpenMode: mode })
+  },
 
   toggleSidebar: () =>
     set((state) => {

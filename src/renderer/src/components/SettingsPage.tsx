@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Sun, Moon, Monitor } from 'lucide-react'
+import { Sun, Moon, Monitor, Eye, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import { ACCENTS } from '../lib/accent'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
@@ -27,7 +27,8 @@ export function SettingsPage() {
   const {
     themePref, setThemePref, accent, accentColor, customAccents,
     setAccent, setCustomAccent, saveCustomAccent, removeCustomAccent,
-    termTheme, setTermTheme, display, setDisplay
+    termTheme, setTermTheme, display, setDisplay,
+    fileOpenMode, setFileOpenMode
   } = useStore()
   const [tab, setTab] = useState<'general' | 'runtime' | 'secrets'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
@@ -242,6 +243,32 @@ export function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+
+        <div className="ss">
+          <div className="ss-hdr">Files</div>
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Open files with</div>
+              <div className="ss-sub">
+                What a click on a file does. The other option stays available from the right-click menu.
+              </div>
+            </div>
+            <div className="seg" role="group" aria-label="Open files with">
+              {([
+                { id: 'preview', label: 'Preview', Icon: Eye },
+                { id: 'system', label: 'Default app', Icon: ExternalLink }
+              ] as const).map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  className={`seg-opt${fileOpenMode === id ? ' on' : ''}`}
+                  onClick={() => setFileOpenMode(id)}
+                >
+                  <Icon size={13} /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="ss">
