@@ -158,7 +158,7 @@ export function Sidebar() {
   const {
     sandboxes, activeSandboxId, activePage, setModal, setActivePage,
     setNewSandboxWorkspace, sidebarCollapsed,
-    toggleSidebar, setContextMenu, groups, sandboxGroups, setSandboxGroup, createGroup, openPrompt,
+    setContextMenu, groups, sandboxGroups, setSandboxGroup, createGroup, openPrompt,
     sandboxOrder, reorderGroups, reorderSandbox
   } = useStore()
   const newGroup = () => openPrompt({
@@ -175,14 +175,6 @@ export function Sidebar() {
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, sandboxId: null, workspace: null, groupId })
   }
   const collapsed = sidebarCollapsed
-
-  // Clicking blank sidebar space (not a row, button, header, input, or the
-  // resize handle) toggles the whole sidebar collapsed/expanded.
-  const onEmptyClick = (e: React.MouseEvent) => {
-    const el = e.target as HTMLElement
-    if (el.closest('button, a, input, label, .sb-item, .sb-nav-item, .sb-proj, .sb-sec-head, .sb-group-hd, .sb-resize')) return
-    toggleSidebar()
-  }
 
   // Drag-to-resize the sidebar width (expanded only), persisted.
   const asideRef = useRef<HTMLElement>(null)
@@ -390,7 +382,6 @@ export function Sidebar() {
       ref={asideRef}
       className={`sidebar${collapsed ? ' collapsed' : ''}`}
       style={collapsed ? undefined : { width: sbWidth }}
-      onClick={onEmptyClick}
     >
       {/* Sandboxes — the landing view (Home dashboard); inline filter, add
           sandbox, add project. Grouped by project with per-project headers. */}

@@ -222,6 +222,9 @@ export function SbxRuntimePanel({
   const [resetConfirm, setResetConfirm] = useState('')
   const [resetBusy, setResetBusy] = useState(false)
   const [resetMsg, setResetMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  // The destructive "Reset everything" button only turns red once the user has
+  // typed the confirmation word; until then it's a neutral, disabled button.
+  const canReset = resetConfirm.trim().toLowerCase() === 'reset'
 
   const loadAccount = () =>
     window.minipit?.dockerAccount()
@@ -277,7 +280,7 @@ export function SbxRuntimePanel({
   }
 
   const handleReset = async () => {
-    if (resetBusy || resetConfirm.trim().toLowerCase() !== 'reset') return
+    if (resetBusy || !canReset) return
     setResetBusy(true)
     setResetMsg(null)
     const res = await window.minipit?.sbxReset(preserveSecrets).catch((e) => ({ ok: false, error: String(e) }))
@@ -598,10 +601,10 @@ export function SbxRuntimePanel({
               style={{ width: 110 }}
             />
             <button
-              className="btn btn-sm"
+              className={`btn btn-sm ${canReset ? '' : 'btn-default'}`}
               onClick={handleReset}
-              disabled={resetBusy || resetConfirm.trim().toLowerCase() !== 'reset'}
-              style={{ background: 'var(--destruct)', color: '#fff', borderColor: 'var(--destruct)' }}
+              disabled={resetBusy || !canReset}
+              style={canReset ? { background: 'var(--destruct)', color: '#fff', borderColor: 'var(--destruct)' } : undefined}
             >
               {resetBusy ? 'Resetting…' : 'Reset everything'}
             </button>

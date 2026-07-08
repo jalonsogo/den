@@ -254,9 +254,11 @@ declare global {
       gitInfo(dir: string): Promise<{ isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
       gitInit(dir: string): Promise<{ ok: boolean; error?: string }>
       readFile(name: string, path: string): Promise<string>
+      readFileBytes(name: string, path: string): Promise<{ base64: string; size: number }>
+      gitDiffFile(name: string, path: string): Promise<{ diff: string }>
       writeFile(name: string, path: string, content: string): Promise<void>
       openPath(path: string): Promise<string>
-      openFileWindow(name: string, path: string, fileName: string): Promise<void>
+      openFileWindow(name: string, path: string, fileName: string, diff?: boolean): Promise<void>
       deletePath(name: string, path: string): Promise<void>
       copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
       downloadFrom(name: string, path: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>

@@ -2109,6 +2109,55 @@ function setupIPC(): void {
     })
   }))
 
+  // Read a file as raw bytes (base64) — used by the previewer for images and to
+  // detect binary content, which `read-file` (utf8 `cat`) would corrupt. We ask
+  // `cat` for the bytes and let execFile decode stdout as base64, so no shell
+  // quoting of binary is involved. Files over ~25 MB are refused (base64 inflates
+  // ~33%, and previewing something that large isn't useful anyway).
+  ipcMain.handle('minipit:read-file-bytes', (_, name: string, path: string) =>
+    new Promise<{ base64: string; size: number }>((resolve, reject) => {
+      execFile(
+        getSbxPath(),
+        ['exec', name, 'cat', path],
+        { timeout: 30000, encoding: 'base64', maxBuffer: 64 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          if (err) {
+            const msg = String(stderr || err.message)
+            reject(new Error(/maxBuffer/i.test(msg) ? 'File is too large to preview (25 MB max).' : msg))
+          } else {
+            const base64 = (stdout as string).replace(/\r?\n/g, '')
+            resolve({ base64, size: Math.floor((base64.length * 3) / 4) })
+          }
+        }
+      )
+    })
+  )
+
+  // Unified git diff for a single file, for the previewer's Diff tab. Runs from
+  // the file's own directory so git finds the repo (no workspace root needed).
+  // Prefers the diff against HEAD (staged + unstaged); for an untracked new file
+  // that yields nothing, so we fall back to `--no-index` against /dev/null to
+  // render the whole file as an addition. `--text` forces a textual diff so
+  // files git's heuristic misflags as binary (a stray NUL in the first 8 KB)
+  // still produce a real patch instead of "Binary files … differ". All git
+  // errors collapse to "" (no diff).
+  ipcMain.handle('minipit:git-diff-file', (_, name: string, path: string) =>
+    new Promise<{ diff: string }>((resolve) => {
+      const dir = path.replace(/\/[^/]*$/, '') || '/'
+      const script =
+        'cd "$1" 2>/dev/null || exit 0; ' +
+        'd=$(git diff --text HEAD -- "$2" 2>/dev/null); ' +
+        '[ -z "$d" ] && d=$(git diff --text --no-index -- /dev/null "$2" 2>/dev/null); ' +
+        'printf %s "$d"'
+      execFile(
+        getSbxPath(),
+        ['exec', name, 'sh', '-c', script, 'sh', dir, path],
+        { timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
+        (_err, stdout) => resolve({ diff: stdout ?? '' })
+      )
+    })
+  )
+
   // Write contents back to a file (content piped to `cat > FILE`).
   ipcMain.handle('minipit:write-file', async (_, name: string, path: string, content: string) => {
     await sbxWithInput(['exec', name, 'sh', '-c', 'cat > "$1"', 'sh', path], content)
@@ -2123,7 +2172,7 @@ function setupIPC(): void {
   })
 
   // Open the built-in file editor in its own window.
-  ipcMain.handle('minipit:open-file-window', (_, name: string, path: string, fileName: string) => {
+  ipcMain.handle('minipit:open-file-window', (_, name: string, path: string, fileName: string, diff?: boolean) => {
     const win = new BrowserWindow({
       width: 820,
       height: 640,
@@ -2134,7 +2183,9 @@ function setupIPC(): void {
         contextIsolation: true
       }
     })
-    const params = `sandbox=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}&name=${encodeURIComponent(fileName)}`
+    const params =
+      `sandbox=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}&name=${encodeURIComponent(fileName)}` +
+      (diff ? '&diff=1' : '')
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
       win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#/editor?${params}`)
     } else {
@@ -2706,7 +2757,11 @@ app.whenReady().then(() => {
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'none'",
-    "frame-src 'none'"
+    // Allow the file previewer's HTML preview, which renders file contents in a
+    // same-origin `srcdoc` iframe. The iframe itself is fully sandboxed
+    // (sandbox="" — no scripts, no same-origin), so this stays locked down; it
+    // does not permit any external/remote frames.
+    "frame-src 'self'"
   ].join('; ')
   session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
     cb({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [CSP] } })

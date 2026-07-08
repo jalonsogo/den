@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
+import { Globe, Box } from 'lucide-react'
 import { useStore } from '../../store'
-import { SECRET_SERVICES, GLOBAL_SCOPE, isGlobalScope, type SecretService, type StoredSecret } from '../../types'
+import { SECRET_SERVICES, GLOBAL_SCOPE, isGlobalScope, serviceLabel, type SecretService, type StoredSecret } from '../../types'
+import { FieldSelect, type FieldOption } from '../FieldSelect'
+import { SecretIcon } from '../SecretIcon'
 
 // 1Password brand mark (keyhole in a circle), in the brand blue.
 function OnePasswordIcon({ size = 18 }: { size?: number }) {
@@ -15,7 +18,8 @@ function OnePasswordIcon({ size = 18 }: { size?: number }) {
 
 export function NewSecretModal() {
   const { setModal, secretTarget, secretScopeTarget, sandboxes } = useStore()
-  // Editing an existing secret (locks provider + scope) vs. adding a new one.
+  // Editing an existing secret (provider stays locked; scope can be changed,
+  // which moves the secret) vs. adding a new one.
   const editing = secretTarget != null
   const [stored, setStored] = useState<StoredSecret[]>([])
   const [service, setService] = useState<SecretService>(secretTarget ?? SECRET_SERVICES[0].id)
@@ -42,6 +46,27 @@ export function NewSecretModal() {
 
   // The scope token for sbx commands shown in hints: `-g` or a sandbox name.
   const scopeArg = isGlobalScope(scope) ? '-g' : scope
+
+  // Human label for a scope value.
+  const scopeLabel = (s: string) => (isGlobalScope(s) ? 'Global — all sandboxes' : `Sandbox: ${s}`)
+  const sameScope = (a: string, b: string) => (isGlobalScope(a) && isGlobalScope(b)) || a === b
+  // Editing + a different scope = a move (write to new scope, remove from old).
+  const moving = editing && !sameScope(scope, secretScopeTarget ?? GLOBAL_SCOPE)
+
+  // Options for the custom (icon) dropdowns.
+  const providerOptions: FieldOption[] = SECRET_SERVICES.map((s) => {
+    const isAdded = configured.has(s.id) && s.id !== secretTarget
+    return {
+      value: s.id,
+      label: `${s.label}${isAdded ? ' — added' : ''}`,
+      icon: <SecretIcon service={s.id} size={16} />,
+      disabled: isAdded
+    }
+  })
+  const scopeOptions: FieldOption[] = [
+    { value: GLOBAL_SCOPE, label: 'Global — all sandboxes', icon: <Globe size={16} /> },
+    ...sandboxes.map((sb) => ({ value: sb.name, label: `Sandbox: ${sb.name}`, icon: <Box size={16} /> }))
+  ]
 
   // OAuth flows only exist for the global scope (Anthropic custom flow; OpenAI
   // via sbx's built-in --oauth). Hidden when scoping to a single sandbox.
@@ -90,11 +115,20 @@ export function NewSecretModal() {
       setError('1Password support needs an app restart to load. Quit den and relaunch, then try again.')
       return
     }
+    // Moving scope removes the secret from its old scope — confirm first.
+    const oldScope = secretScopeTarget ?? GLOBAL_SCOPE
+    if (moving && !window.confirm(
+      `Move the ${serviceLabel(service)} secret from “${scopeLabel(oldScope)}” to “${scopeLabel(scope)}”?\n\n` +
+      `It will be written to the new scope and removed from the old one.`
+    )) return
     setSaving(true)
     setError('')
     try {
+      // Write the new scope first, then remove the old one — a failure never
+      // loses the secret.
       if (useOp) await window.minipit?.setSecretOp(service, opRef.trim(), scope)
       else await window.minipit?.setSecret(service, apiKey, scope)
+      if (moving) await window.minipit?.removeSecret(service, oldScope)
       setModal(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -113,49 +147,27 @@ export function NewSecretModal() {
         <div className="m-body">
           <div className="fg">
             <label className="flabel">Provider</label>
-            <select
-              className="finput"
-              style={{ cursor: editing ? 'default' : 'pointer' }}
+            <FieldSelect
+              ariaLabel="Provider"
               value={service}
+              options={providerOptions}
               disabled={editing}
-              onChange={(e) => setService(e.target.value as SecretService)}
-            >
-              {SECRET_SERVICES.map((s) => {
-                // Disable providers already set in this scope, unless being edited.
-                const isAdded = configured.has(s.id) && s.id !== secretTarget
-                return (
-                  <option key={s.id} value={s.id} disabled={isAdded}>
-                    {s.label}{isAdded ? ' — added' : ''}
-                  </option>
-                )
-              })}
-            </select>
+              onChange={(v) => setService(v as SecretService)}
+            />
           </div>
 
           <div className="fg">
             <label className="flabel">Scope</label>
-            {editing ? (
-              <input
-                className="finput"
-                value={isGlobalScope(scope) ? 'Global — all sandboxes' : `Sandbox: ${scope}`}
-                disabled
-                readOnly
-              />
-            ) : (
-              <select
-                className="finput"
-                style={{ cursor: 'pointer' }}
-                value={scope}
-                onChange={(e) => setScope(e.target.value)}
-              >
-                <option value={GLOBAL_SCOPE}>Global — all sandboxes</option>
-                {sandboxes.map((sb) => (
-                  <option key={sb.name} value={sb.name}>Sandbox: {sb.name}</option>
-                ))}
-              </select>
-            )}
+            <FieldSelect
+              ariaLabel="Scope"
+              value={scope}
+              options={scopeOptions}
+              onChange={(v) => setScope(v)}
+            />
             <div className="fhint">
-              Global secrets are available to every sandbox; a sandbox scope applies to that one only.
+              {moving
+                ? `Changing scope moves this secret: it’s written to ${scopeLabel(scope)} and removed from ${scopeLabel(secretScopeTarget ?? GLOBAL_SCOPE)}.`
+                : 'Global secrets are available to every sandbox; a sandbox scope applies to that one only.'}
             </div>
           </div>
 

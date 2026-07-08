@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { MoreVertical, Play, Square, GitBranch, FolderGit2, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, Folder, FolderOpen, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
@@ -209,8 +209,15 @@ export function SandboxDetail() {
         const repoShort = gi?.remoteUrl?.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '')
         return (
           <div className="detail-subhdr">
-            <FolderGit2 size={12} />
-            <span className="ds-folder" title={sandbox.workspace}>{sandbox.workspace.split('/').pop() || sandbox.workspace}</span>
+            <button
+              className="ds-folder-btn"
+              title={`Open in Finder — ${sandbox.workspace}`}
+              onClick={() => window.minipit?.openPath(sandbox.workspace)}
+            >
+              <Folder size={12} className="ds-folder-ico ds-folder-ico-closed" />
+              <FolderOpen size={12} className="ds-folder-ico ds-folder-ico-open" />
+              <span className="ds-folder">{sandbox.workspace.split('/').pop() || sandbox.workspace}</span>
+            </button>
             {gi?.branch && (
               <span className="ds-branch" title={`On branch ${gi.branch}`}>
                 <GitBranch size={12} />{gi.branch}
@@ -234,7 +241,7 @@ export function SandboxDetail() {
                   <div className="ds-changes-menu">
                     <ChangesList
                       changes={changeFiles}
-                      onOpen={(rel, name) => { window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name); setChangesOpen(false) }}
+                      onOpen={(rel, name) => { window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true); setChangesOpen(false) }}
                     />
                   </div>
                 )}

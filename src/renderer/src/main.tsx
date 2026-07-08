@@ -33,6 +33,7 @@ if (hash.startsWith('#/editor')) {
       sandbox={params.get('sandbox') ?? ''}
       path={params.get('path') ?? ''}
       name={params.get('name') ?? ''}
+      openDiff={params.get('diff') === '1'}
     />
   )
 } else {
