@@ -13,6 +13,11 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # Serialize the matrix: with --publish always, parallel jobs each create
+      # their own draft release for the same tag (neither sees the other yet),
+      # splitting assets across two incomplete drafts. Running one at a time
+      # lets the second job find and append to the first's draft.
+      max-parallel: 1
       matrix:
         include:
           - os: macos-latest
