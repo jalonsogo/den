@@ -13,33 +13,30 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
 
 
 ## Near-term features
-
+- [ ] **Onboarding flow**
 - [ ] **Release channels (Stable / Nightly)** — in-app channel switching instead of
       leaking the Homebrew cask conflict to users. Design already drafted in
       [`release-channels-proposal.md`](release-channels-proposal.md).
-- [ ] **Bulk actions** — start/stop/delete across a multi-select of sandboxes (today it's
-      per-sandbox or per-group).
-- [ ] **Group polish** — collapse/expand a group section; show running/total count per
-      group header; empty-group affordance.
-- [ ] **PR flow depth** — let the user pick base branch / edit PR title+body before
+- [ ] **GIT Flows**
+      - [ ] Commit, Delete, Push
+      - [ ] **PR flow depth** — let the user pick base branch / edit PR title+body before
       opening, and surface the created PR inline (not just open the browser).
-- [ ] **Diff viewer** — view an agent's changes as a real diff (not just `git status`
+      - [ ] **Diff viewer** — view an agent's changes as a real diff (not just `git status`
       names) from the Changes tab.
-- [ ] **Secrets: more providers via 1Password** and a "test resolve" button that confirms
+- [ ] **Test Secrets: more providers via 1Password** and a "test resolve" button that confirms
       an `op://` reference resolves before saving.
 - [ ] **Search / command palette** (⌘K) across sandboxes, groups, kits, and actions.
 - [ ] **VSCode Integration** Following https://github.com/DockerSolutionsEngineering/ai.gov.sbx-vscode-ssh 
-
+- [ ] **Add an integrated terminal** 
 
 ## Platform & release
-
+- [ ] **Signing & notarization** for macOS distribution.
 - [ ] **Windows pass** — `build:win` exists but the app is exercised on macOS; audit
       paths, `op`/`brew` assumptions, tray, and PTY behavior on Windows.
 - [ ] **Auto-update** for den itself (electron-builder / update feed).
-- [ ] **Signing & notarization** for macOS distribution.
+
 
 ## Tech debt & quality
-
 - [ ] **Automated tests** — there is none today. Start with unit tests for the pure logic
       (kit spec parsing, ordering/grouping, semver compare) and a smoke test for IPC
       wiring.
@@ -59,7 +56,6 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
       width, sandbox order/colors/icons/groups) unless a one-time migration copies old
       keys to new. Plan when we do it: rename IPC + global to `den`, add a localStorage
       migration shim, keep durable keys as-is. Owner requested we hold off for now.
-- [ ] **Add an integrated terminal** 
 
 ---
 
