@@ -72,10 +72,16 @@ const api = {
   sbxSettingSet: (key: string, value: string) => ipcRenderer.invoke('minipit:sbx-setting-set', key, value),
   sbxReset:      (preserveSecrets: boolean) => ipcRenderer.invoke('minipit:sbx-reset', preserveSecrets),
   diagnose:      (mode?: 'text' | 'json' | 'github-issue' | 'upload') => ipcRenderer.invoke('minipit:diagnose', mode),
+  daemonRestart: ()                     => ipcRenderer.invoke('minipit:daemon-restart'),
   onDiagnoseOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:diagnose-output', handler)
     return () => ipcRenderer.removeListener('minipit:diagnose-output', handler)
+  },
+  onDaemonOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:daemon-output', handler)
+    return () => ipcRenderer.removeListener('minipit:daemon-output', handler)
   },
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),

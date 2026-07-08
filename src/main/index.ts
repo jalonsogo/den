@@ -79,6 +79,33 @@ function guiEnv(): NodeJS.ProcessEnv {
   return { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` }
 }
 
+// Run an sbx command through a pty and stream its output via `send`. sbx (like
+// most CLIs) only emits ANSI *colour* when it detects a real terminal, so
+// piping via spawn() gives colourless output. A pty makes it believe it's on a
+// colour terminal. Resolves with the collected output + exit code.
+function ptyRun(
+  args: string[],
+  send: (chunk: string) => void,
+  timeoutMs: number
+): Promise<{ code: number; output: string }> {
+  return new Promise((resolve, reject) => {
+    const proc = pty.spawn(getSbxPath(), args, {
+      name: 'xterm-256color',
+      cols: 100,
+      rows: 50,
+      cwd: process.env.HOME ?? '/',
+      env: { ...guiEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
+    })
+    let buf = ''
+    const timer = setTimeout(() => {
+      try { proc.kill() } catch { /* already gone */ }
+      reject(new Error('sbx timed out'))
+    }, timeoutMs)
+    proc.onData((d) => { buf += d; send(d) })
+    proc.onExit(({ exitCode }) => { clearTimeout(timer); resolve({ code: exitCode, output: buf }) })
+  })
+}
+
 // Only hand web/mail URLs to the OS. Renderer- or agent-influenced links must
 // never reach shell.openExternal with a file://, custom-scheme, or other URL
 // that could trigger an unexpected OS handler.
@@ -1708,14 +1735,25 @@ function setupIPC(): void {
   ipcMain.handle(
     'minipit:diagnose',
     async (_, mode: 'text' | 'json' | 'github-issue' | 'upload' = 'text') => {
-      const args =
-        mode === 'upload'
-          ? ['diagnose', '--upload']
-          : mode === 'text'
-            ? ['diagnose']
-            : ['diagnose', '--output', mode]
       const send = (chunk: string) =>
         mainWindow?.webContents.send('minipit:diagnose-output', chunk)
+
+      // Human-readable report → run through a pty so sbx emits its full colour
+      // checklist (piping strips colour). The renderer resolves the ANSI/cursor
+      // stream into a coloured, final-frame view.
+      if (mode === 'text') {
+        try {
+          const { code, output } = await ptyRun(['diagnose'], send, 300000)
+          if (code !== 0) return { ok: false, error: (output.trim() || `sbx diagnose exited ${code}`) }
+          return { ok: true, output }
+        } catch (err) {
+          return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+        }
+      }
+
+      // json / github-issue / upload → plain pipe. These are machine-readable
+      // or shareable artifacts, so their output must stay free of colour codes.
+      const args = mode === 'upload' ? ['diagnose', '--upload'] : ['diagnose', '--output', mode]
       try {
         const output = await new Promise<string>((resolve, reject) => {
           const proc = spawn(getSbxPath(), args, { env: guiEnv() })
@@ -1737,6 +1775,30 @@ function setupIPC(): void {
       }
     }
   )
+
+  // Restart the sbx daemon: `sbx daemon stop` then `sbx daemon start -d`. Runs
+  // the two steps in sequence and streams to its OWN channel so the output can
+  // render under the Restart daemon button, separate from the diagnostics box.
+  // The first step is best-effort — if the daemon is already down, `stop` may
+  // exit non-zero, which shouldn't block the restart.
+  ipcMain.handle('minipit:daemon-restart', async () => {
+    const send = (chunk: string) =>
+      mainWindow?.webContents.send('minipit:daemon-output', chunk)
+    const step = async (args: string[]) => {
+      send(`$ sbx ${args.join(' ')}\r\n`)
+      const { code } = await ptyRun(args, send, 60000)
+      return code
+    }
+    try {
+      await step(['daemon', 'stop'])          // best-effort — ignore its exit code
+      const code = await step(['daemon', 'start', '-d'])
+      if (code !== 0) return { ok: false, error: `sbx daemon start exited ${code}` }
+      send('\nDaemon restarted.\n')
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
 
   // Publish a kit as an OCI artifact to a registry (Docker Hub, ghcr, …).
   // Auth uses the Docker credential store (the user must `docker login` first).
