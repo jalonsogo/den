@@ -367,6 +367,7 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
               title="Sandbox info"
             >
               <Info size={14} />
+              Info
             </button>
           )}
           {onToggleFiles && (

@@ -7,7 +7,6 @@ import { FilesPanel } from './FilesPanel'
 import { SandboxAvatar } from './SandboxAvatar'
 import { ChangesList } from './ChangesList'
 import { formatUptime } from '../lib/utils'
-import { bringSandboxToHost } from '../lib/featureChanges'
 import type { FileChange } from '../types'
 
 type Dock = 'files' | 'info' | null
@@ -87,6 +86,15 @@ export function SandboxDetail() {
     )
   }
 
+  // Open the Files dock on the Changes tab (the review & merge surface). The
+  // deferred event lets FilesPanel mount and attach its listener first.
+  const openChangesPanel = () => {
+    setChangesOpen(false)
+    setFeatureOpen(false)
+    setDock('files')
+    setTimeout(() => window.dispatchEvent(new CustomEvent('den:open-changes')), 0)
+  }
+
   const handleStop = async () => {
     updateSandbox(sandbox.id, { status: 'stopping' })
     try {
@@ -157,12 +165,8 @@ export function SandboxDetail() {
               </button>
               {featureOpen && (
                 <div className="d-feature-menu">
-                  <div className="d-feature-label">Review in the Files → Changes tab</div>
-                  <div className="d-feature-item" onClick={() => { setFeatureOpen(false); bringSandboxToHost(sandbox, false) }}>
-                    <Github size={13} /> Merge changes to your repo…
-                  </div>
-                  <div className="d-feature-item" onClick={() => { setFeatureOpen(false); bringSandboxToHost(sandbox, true) }}>
-                    <Github size={13} /> Merge, then delete sandbox…
+                  <div className="d-feature-item" onClick={openChangesPanel}>
+                    <Github size={13} /> Review &amp; merge…
                   </div>
                   <div className="d-feature-sep" />
                   <div
@@ -239,10 +243,15 @@ export function SandboxDetail() {
                 </button>
                 {changesOpen && (
                   <div className="ds-changes-menu">
-                    <ChangesList
-                      changes={changeFiles}
-                      onOpen={(rel, name) => { window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true); setChangesOpen(false) }}
-                    />
+                    <div className="ds-changes-scroll">
+                      <ChangesList
+                        changes={changeFiles}
+                        onOpen={(rel, name) => { window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true); setChangesOpen(false) }}
+                      />
+                    </div>
+                    <button className="ds-changes-link" onClick={openChangesPanel}>
+                      Review & merge · all {changeFiles.length} changes →
+                    </button>
                   </div>
                 )}
               </div>

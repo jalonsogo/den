@@ -1021,10 +1021,13 @@ html, body, #root {
 .ds-changes > svg { opacity: 0.7; }
 .ds-changes-menu {
   position: absolute; top: calc(100% + 5px); left: 0; z-index: 50;
-  min-width: 260px; max-width: 380px; max-height: 320px; overflow-y: auto;
+  min-width: 260px; max-width: 380px;
+  display: flex; flex-direction: column; max-height: min(360px, 70vh);
   background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
   box-shadow: 0 8px 28px rgba(0,0,0,0.18); padding: 4px;
 }
+/* File list scrolls; the Review & merge link stays pinned as a footer. */
+.ds-changes-scroll { overflow-y: auto; min-height: 0; }
 .ds-remote { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin-left: auto; color: var(--t3); cursor: pointer; text-decoration: none; }
 .ds-remote:hover { color: var(--accent, var(--primary)); }
 .ds-remote > svg { opacity: 0.7; }
@@ -1270,7 +1273,7 @@ html, body, #root {
 /* Info as a right-side dock */
 .info-dock { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .info-dock-hd {
-  flex-shrink: 0; height: 38px; display: flex; align-items: center;
+  flex-shrink: 0; height: 36px; display: flex; align-items: center;
   padding: 0 10px 0 14px; border-bottom: 1px solid var(--border);
 }
 .info-dock-title { font-size: 12.5px; font-weight: 600; color: var(--t1); }
@@ -1284,26 +1287,21 @@ html, body, #root {
 .info-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; }
 
 /* Compact label/value rows (replaces the bulky stat cards) */
+/* Compact 2-column stats — no box, no dividers (less vertical space). */
 .info-stats {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 18px;
-  overflow: hidden;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 15px 16px;
+  margin: 4px 0 20px;
 }
-.info-stat {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.info-stat:last-child { border-bottom: none; }
+.info-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .is-k {
-  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
-  color: var(--t3); flex-shrink: 0;
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--t3);
 }
 .is-v {
-  font-size: 13px; font-weight: 500; color: var(--t1); text-align: right;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 500; color: var(--t1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
 }
+.is-agent { display: inline-flex; align-items: center; gap: 5px; }
 .is-sub { font-weight: 400; color: var(--t3); }
 
 .info-grid {
@@ -1385,10 +1383,7 @@ html, body, #root {
   border-radius: 5px; padding: 2px 7px;
 }
 .np-note { font-size: 11.5px; color: var(--t3); margin-top: 10px; line-height: 1.45; }
-.np-add-box {
-  margin-top: 14px; padding: 12px;
-  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius);
-}
+.np-add-box { margin-top: 14px; }
 .np-add-lbl {
   display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.4px; color: var(--t3); margin-bottom: 7px;
@@ -1401,6 +1396,66 @@ html, body, #root {
   padding: 6px 9px; color: var(--t1); outline: none;
 }
 .np-add-input:focus { border-color: var(--border-hi); }
+/* Default-preset control — sits above the rules, shown as a segmented picker.
+   A bottom border separates it from the rule cards below. */
+.np-preset { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.np-preset-lbl {
+  display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--t3); margin-bottom: 7px;
+}
+.np-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.np-seg-opt {
+  flex: 1 1 92px; min-width: 92px; display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  font: inherit; text-align: left; padding: 9px 10px; cursor: pointer;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--t2); transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.np-seg-opt:hover { border-color: var(--border-hi); background: var(--bg-subtle); }
+.np-seg-opt.on {
+  border-color: var(--accent, var(--primary)); color: var(--t1);
+  box-shadow: 0 0 0 1px var(--accent, var(--primary));
+}
+.np-seg-ic { color: var(--t3); flex-shrink: 0; }
+.np-seg-opt.on .np-seg-ic { color: var(--accent, var(--primary)); }
+.np-seg-l { font-size: 12px; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.np-seg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.np-seg-s { font-size: 10px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* Preview of a not-yet-applied preset. */
+.np-preview {
+  margin-top: 9px; padding: 9px 11px; border: 1px dashed var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+.np-preview-hd { font-size: 11px; font-weight: 600; color: var(--t2); margin-bottom: 5px; }
+.np-preview-line { font-size: 11.5px; color: var(--t1); line-height: 1.5; padding-left: 12px; position: relative; }
+.np-preview-line::before { content: '·'; position: absolute; left: 3px; color: var(--t3); }
+.np-preview-note { font-size: 10.5px; color: var(--t3); margin-top: 6px; line-height: 1.4; }
+.np-preset-actions { display: flex; align-items: center; justify-content: flex-end; margin-top: 9px; }
+/* "+ Add rule" CTA — right-aligned secondary button; Apply sits next to it. */
+.np-add-cta { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+/* Add-rule form: a draft "fake card" (dashed) — decision segmented control,
+   then a full-width URL, then actions. Sits above the + Add rule / Apply row. */
+.np-add-form { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.np-rule-draft { border-style: dashed; margin-bottom: 8px; }
+.np-dec-seg {
+  display: inline-flex; align-self: flex-start; gap: 2px;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 2px;
+}
+.np-dec-opt {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 12px; padding: 4px 12px;
+  border: none; background: none; color: var(--t2); border-radius: 4px; cursor: pointer;
+}
+.np-dec-opt:hover { color: var(--t1); }
+.np-dec-opt.on { background: var(--bg); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.np-dec-ic-allow { color: var(--green); }
+.np-dec-ic-block { color: var(--destruct); }
+.np-add-form-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.np-rule-pending { border-style: dashed; }
+.np-pending-x {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--t3); font-size: 15px; line-height: 1; padding: 0 2px;
+}
+.np-pending-x:hover { color: var(--t1); }
 
 .np-banner {
   display: flex; align-items: center; gap: 10px;
@@ -1439,11 +1494,31 @@ html, body, #root {
 .p-dot.on { background: var(--green); }
 .port-map { font-size: 12.5px; color: var(--t1); font-family: 'SF Mono','Menlo',monospace; }
 .port-proto { font-size: 11px; color: var(--t3); }
-.ports-add {
-  align-self: flex-start; margin-top: 6px;
-  font-size: 12px; color: var(--t2); background: none; border: none; cursor: pointer; padding: 2px 0;
-}
-.ports-add:hover { color: var(--t1); }
+.ports-add { align-self: flex-end; margin: 12px 0; }
+/* Add-port form — full width; inputs fill the row, actions split Cancel/Open. */
+.ports-add-form { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.ports-add-row { display: flex; align-items: center; gap: 6px; }
+.pf-port { flex: 1; min-width: 0; }
+.pf-arrow { opacity: 0.5; flex-shrink: 0; }
+.pf-proto { flex: 0 0 auto; width: 72px; cursor: pointer; }
+.pf-expose { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12px; color: var(--t2); }
+.pf-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.pf-btns { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+
+/* Runtime mounts (sbx mount) — in the Workspaces section. */
+.mounts { display: flex; flex-direction: column; margin-top: 8px; }
+.mount-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.mount-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mount-host { font-size: 12px; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mount-target { font-size: 10.5px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mounts-add { align-self: flex-end; margin: 10px 0 4px; }
+.mount-add { display: flex; flex-direction: column; gap: 7px; padding: 8px 0; }
+.mount-pick { align-self: flex-start; }
+.mount-host-full { font-size: 10.5px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mount-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mount-ro { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--t2); cursor: pointer; }
+.mount-actions-btns { display: flex; gap: 7px; }
+.mounts-hint { font-size: 11px; color: var(--t3); margin-top: 6px; line-height: 1.4; }
 .ports-hint { font-size: 11px; color: var(--t3); margin-top: 6px; }
 
 /* ── Files ── */
@@ -1597,7 +1672,7 @@ html, body, #root {
 }
 
 /* Changes list (Files-panel tab + subheader dropdown) */
-.files-changes { padding: 4px; }
+.files-changes { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .changes-list { display: flex; flex-direction: column; }
 .changes-row {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -1611,6 +1686,49 @@ html, body, #root {
 .changes-dir { font-size: 11px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 1; min-width: 0; }
 .changes-tag { font-size: 10px; font-weight: 700; font-family: 'SF Mono','Menlo',monospace; flex-shrink: 0; margin-left: auto; }
 .changes-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 28px 16px; }
+.changes-stat { font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; flex-shrink: 0; white-space: nowrap; }
+.changes-add { color: var(--green); }
+.changes-del { color: var(--destruct); }
+.changes-bin { color: var(--t3); }
+
+/* Review surface (Changes tab): scrollable file list + fixed action bar. */
+.changes-review { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.changes-scroll { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.changes-actions {
+  flex-shrink: 0; position: sticky; top: 0; z-index: 1;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+  display: flex; flex-direction: column;
+}
+/* Single toolbar row — same height as the Files-tab bar (.files-bar). */
+.ca-bar {
+  height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px;
+}
+.ca-bar-spacer { flex: 1; }
+.ca-branch {
+  font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; color: var(--t2);
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;
+}
+.ca-delete { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--t2); cursor: pointer; white-space: nowrap; }
+.ca-prform { display: flex; flex-direction: column; gap: 5px; padding: 4px 10px 10px; }
+.ca-prform .flabel { margin-bottom: 0; }
+.ca-body { resize: vertical; font-family: 'SF Mono','Menlo',monospace; font-size: 12px; }
+.ca-prform-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 2px; }
+.ca-pr { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--t1); padding: 6px 10px 10px; }
+.ca-pr-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ca-msg { font-size: 11.5px; padding: 0 10px 8px; }
+.ca-msg.ok { color: var(--green); }
+.ca-msg.err { color: var(--destruct); }
+
+/* Header changes dropdown → link into the Changes panel. */
+.ds-changes-link {
+  display: block; width: 100%; text-align: left; flex-shrink: 0;
+  font: inherit; font-size: 11.5px; color: var(--t2);
+  background: none; border: none; border-top: 1px solid var(--border);
+  padding: 8px 10px; margin-top: 4px; cursor: pointer;
+}
+.ds-changes-link:hover { background: var(--bg-subtle); color: var(--t1); }
 .files-footer {
   height: 30px;
   flex-shrink: 0;
@@ -1777,7 +1895,17 @@ html, body, #root {
 [data-theme="dark"] .fp-diff-line.d-del { background: rgba(248,81,73,0.18); }
 
 /* HTML preview — sandboxed iframe on white (pages assume a light canvas). */
+.fp-html { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fp-html-bar {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 12px; font-size: 12px; color: var(--t2);
+  background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+}
 .fp-iframe { flex: 1; min-height: 0; width: 100%; border: none; background: #fff; }
+
+/* Markdown image states. */
+.md-img-loading { display: inline-block; width: 16px; height: 16px; }
+.md-img-missing { color: var(--t3); font-size: 12.5px; }
 
 /* Binary / can't-preview fallback. */
 .fp-binary {
@@ -1818,7 +1946,7 @@ html, body, #root {
 .md-body th, .md-body td { border: 1px solid var(--border); padding: 6px 12px; }
 .md-body th { background: var(--bg-subtle); font-weight: 600; }
 .md-body hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
-.md-body img { max-width: 100%; }
+.md-body img { max-width: 100%; height: auto; }
 .md-body input[type="checkbox"] { margin-right: 0.5em; }
 
 /* ── Syntax highlighting palette (highlight.js token classes) ──────────────

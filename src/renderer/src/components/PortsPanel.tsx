@@ -111,36 +111,42 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
       )}
 
       {adding ? (
-        <div className="ports-add-form" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '6px 0' }}>
-          <input
-            className="s-input" style={{ width: 78 }} placeholder="host"
-            value={hostPort} onChange={(e) => setHostPort(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') publish() }}
-          />
-          <span style={{ opacity: 0.5 }}>→</span>
-          <input
-            className="s-input" style={{ width: 78 }} placeholder="sandbox"
-            value={sbxPort} onChange={(e) => setSbxPort(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') publish() }}
-          />
-          <select className="s-input" style={{ width: 68, cursor: 'pointer' }} value={proto} onChange={(e) => setProto(e.target.value as 'tcp' | 'udp')}>
-            <option value="tcp">TCP</option>
-            <option value="udp">UDP</option>
-          </select>
-          <button className="btn btn-primary btn-sm" onClick={publish} disabled={busy === 'publish' || !hostPort.trim()}>
-            {busy === 'publish' ? 'Opening…' : 'Open'}
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setAdding(false); setErr(null); setExpose(false) }}>Cancel</button>
-          <label
-            style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, opacity: 0.8, flexBasis: '100%' }}
-            title="Bind 0.0.0.0 so the port is reachable from other machines on your network. Off = loopback only (localhost / 127.0.0.1)."
-          >
-            <input type="checkbox" checked={expose} onChange={(e) => setExpose(e.target.checked)} style={{ cursor: 'pointer' }} />
-            Expose to network
-          </label>
+        <div className="ports-add-form">
+          <div className="ports-add-row">
+            <input
+              className="s-input pf-port" placeholder="host"
+              value={hostPort} onChange={(e) => setHostPort(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') publish() }}
+            />
+            <span className="pf-arrow">→</span>
+            <input
+              className="s-input pf-port" placeholder="sandbox"
+              value={sbxPort} onChange={(e) => setSbxPort(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') publish() }}
+            />
+            <select className="s-input pf-proto" value={proto} onChange={(e) => setProto(e.target.value as 'tcp' | 'udp')}>
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+            </select>
+          </div>
+          <div className="pf-actions">
+            <label
+              className="pf-expose"
+              title="Bind 0.0.0.0 so the port is reachable from other machines on your network. Off = loopback only (localhost / 127.0.0.1)."
+            >
+              <input type="checkbox" checked={expose} onChange={(e) => setExpose(e.target.checked)} style={{ cursor: 'pointer' }} />
+              Expose to network
+            </label>
+            <div className="pf-btns">
+              <button className="btn btn-ghost btn-sm" onClick={() => { setAdding(false); setErr(null); setExpose(false) }}>Cancel</button>
+              <button className="btn btn-default btn-sm" onClick={publish} disabled={busy === 'publish' || !hostPort.trim()}>
+                {busy === 'publish' ? 'Opening…' : 'Open'}
+              </button>
+            </div>
+          </div>
         </div>
       ) : (
-        <button className="ports-add" onClick={() => setAdding(true)} disabled={!running} title={running ? undefined : 'Start the sandbox to open a port'}>
+        <button className="btn btn-default btn-sm ports-add" onClick={() => setAdding(true)} disabled={!running} title={running ? undefined : 'Start the sandbox to open a port'}>
           + Open port
         </button>
       )}

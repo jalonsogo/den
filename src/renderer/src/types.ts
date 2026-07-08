@@ -64,6 +64,42 @@ export interface FileChange {
   status: 'new' | 'modified' | 'deleted' | 'renamed'
 }
 
+export interface MountEntry {
+  host: string
+  target?: string
+  ro?: boolean
+}
+
+export interface ReviewFile {
+  path: string
+  status: 'new' | 'modified' | 'deleted' | 'renamed'
+  added: number
+  deleted: number
+  binary: boolean
+}
+
+export interface ReviewSummary {
+  ok: boolean
+  mode?: 'branch' | 'worktree'
+  base?: string
+  branch?: string
+  hasRemote?: boolean
+  added?: number
+  deleted?: number
+  files?: ReviewFile[]
+  error?: string
+}
+
+export interface PullRequest {
+  ok: boolean
+  url?: string
+  number?: number
+  title?: string
+  state?: string
+  pushedOnly?: boolean
+  error?: string
+}
+
 export interface FileEntry {
   name: string
   type: 'file' | 'dir'
@@ -256,9 +292,14 @@ declare global {
       readFile(name: string, path: string): Promise<string>
       readFileBytes(name: string, path: string): Promise<{ base64: string; size: number }>
       gitDiffFile(name: string, path: string): Promise<{ diff: string }>
+      reviewSummary(name: string, repoDir: string): Promise<ReviewSummary>
+      reviewFileDiff(name: string, repoDir: string, branch: string | null, path: string): Promise<{ diff: string }>
+      listBranches(repoDir: string): Promise<string[]>
+      prDefaults(repoDir: string, branch: string, base: string): Promise<{ title: string; body: string }>
+      sandboxCommit(repoDir: string, message: string): Promise<{ ok: boolean; error?: string }>
       writeFile(name: string, path: string, content: string): Promise<void>
       openPath(path: string): Promise<string>
-      openFileWindow(name: string, path: string, fileName: string, diff?: boolean): Promise<void>
+      openFileWindow(name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null): Promise<void>
       deletePath(name: string, path: string): Promise<void>
       copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
       downloadFrom(name: string, path: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>
@@ -329,10 +370,13 @@ declare global {
       groupsSet(groups: { id: string; name: string }[]): Promise<void>
       sandboxIsolation(): Promise<Record<string, boolean>>
       sandboxFetchWork(name: string, repoDir: string): Promise<{ ok: boolean; branch?: string; hasRemote?: boolean; error?: string }>
-      sandboxOpenPr(repoDir: string, branch: string): Promise<{ ok: boolean; url?: string; pushedOnly?: boolean; error?: string }>
+      sandboxOpenPr(repoDir: string, branch: string, opts?: { base?: string; title?: string; body?: string }): Promise<PullRequest>
       sandboxMergeBranch(repoDir: string, branch: string): Promise<{ ok: boolean; base?: string; output?: string; conflict?: boolean; error?: string }>
       autoSyncGet(): Promise<Record<string, boolean>>
       autoSyncSet(name: string, on: boolean): Promise<boolean>
+      mountsGet(name: string): Promise<MountEntry[]>
+      sbxMount(name: string, host: string, target: string, ro: boolean): Promise<{ ok: boolean; error?: string; mounts?: MountEntry[] }>
+      sbxUmount(name: string, host: string, target: string): Promise<{ ok: boolean; error?: string; mounts?: MountEntry[] }>
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
