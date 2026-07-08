@@ -309,7 +309,9 @@ declare global {
       onRuntimeOutput(cb: (chunk: string) => void): () => void
       onCreateOutput(cb: (chunk: string) => void): () => void
       diagnose(mode?: 'text' | 'json' | 'github-issue' | 'upload'): Promise<{ ok: boolean; output?: string; error?: string }>
+      daemonRestart(): Promise<{ ok: boolean; error?: string }>
       onDiagnoseOutput(cb: (chunk: string) => void): () => void
+      onDaemonOutput(cb: (chunk: string) => void): () => void
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>

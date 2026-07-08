@@ -2870,6 +2870,22 @@ html, body, #root {
   padding: 0;
 }
 .rt-output .logs-pre { margin: 0; color: #d4d4d4; }
+
+/* Floating copy actions pinned to the top-right of the diagnostics output. */
+.diag-toolbar {
+  position: absolute; top: 6px; right: 6px; z-index: 1;
+  display: flex; gap: 4px;
+}
+.diag-toolbar button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  background: rgba(38, 38, 38, 0.85); color: #d4d4d4;
+  border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; transition: background 0.1s, color 0.1s;
+}
+.diag-toolbar button:hover:not(:disabled) { background: rgba(72, 72, 72, 0.95); color: #fff; }
+.diag-toolbar button:disabled { opacity: 0.5; cursor: default; }
+
 .rt-cmdhint { font-size: 11.5px; color: var(--t3); line-height: 1.5; }
 .rt-cmdhint code {
   font-family: 'SF Mono','Menlo',monospace; font-size: 11px;

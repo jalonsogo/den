@@ -13,6 +13,34 @@ planned, [`README.md`](../README.md) for what den does.
 
 Issues we've hit and their fixes, most recent first.
 
+### `ECONNREFUSED` / `ECONNRESET` / connection errors talking to the daemon
+
+**Symptom.** den shows errors like `connect ECONNREFUSED …/sandboxd.sock`,
+`ECONNRESET`, or `socket hang up`, and the sandbox list stops updating. Commands
+that worked a moment ago start failing at the connection layer.
+
+**What it means.** den talks to the `sbx` daemon (`sandboxd`) over a local
+socket. An `ECONN*` error means the client couldn't reach that daemon — usually
+because the daemon crashed, hung, or is in a bad state (often after the Mac
+wakes from sleep or Docker Desktop restarts). This is the daemon, not den.
+
+**Fix: restart the daemon.**
+
+```bash
+# 1. Stop the daemon (no-op if it's already down)
+sbx daemon stop
+
+# 2. Start it back up, detached
+sbx daemon start -d
+
+# 3. Verify it's answering
+sbx ls
+```
+
+If `sbx ls` returns your sandboxes, you're back. If `sbx daemon stop` reports
+nothing to stop but connections still fail, the pid file may be stale — see the
+next entry for clearing `sandboxd.pid` and the socket.
+
 ### `sbx ls failed: … another daemon is already running (PID: …)`
 
 **Symptom.** den shows an error (or the sandbox list stops updating) with text like:
@@ -70,7 +98,7 @@ pkill -f 'sbx daemon start'
 rm -f "$DIR/sandboxd.pid" "$DIR/sandboxd.sock"
 
 # 3. Restart and verify
-sbx daemon start &
+sbx daemon start -d
 sbx ls
 ```
 

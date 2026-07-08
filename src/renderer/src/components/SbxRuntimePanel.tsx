@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { ExternalLink, Copy, UploadCloud, Stethoscope } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
+import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
 import type { SbxRelease } from '../types'
 
 type DiagMode = 'text' | 'json' | 'github-issue' | 'upload'
@@ -33,6 +33,152 @@ function fmtDate(iso?: string): string {
   }
 }
 
+// `sbx diagnose` / `sbx daemon` animate their checklist with a spinner — ANSI
+// escape codes plus carriage returns and cursor moves that redraw lines in
+// place. Streaming those raw bytes into a <pre> shows every intermediate frame
+// and control code, which mangles the layout. We resolve the stream into the
+// final frame a terminal would show — honoring \r (return to column 0), \n
+// (next row), cursor up/down, column reset, and erase-to-EOL — while KEEPING
+// the SGR (color/bold/…) attributes on each cell so the output renders in
+// colour rather than being flattened to plain text.
+type Style = { fg?: string; bold?: boolean; dim?: boolean; italic?: boolean; underline?: boolean }
+type TCell = { ch: string; style: Style }
+
+// Basic 16-colour ANSI palette, tuned for the near-black output box.
+const ANSI_16: Record<number, string> = {
+  30: '#6b6b6b', 31: '#f14c4c', 32: '#23d18b', 33: '#f5f543',
+  34: '#3b8eea', 35: '#d670d6', 36: '#29b8db', 37: '#d4d4d4',
+  90: '#8a8a8a', 91: '#f14c4c', 92: '#23d18b', 93: '#f5f543',
+  94: '#3b8eea', 95: '#d670d6', 96: '#29b8db', 97: '#ffffff'
+}
+
+// xterm 256-colour cube → hex (16-231 = 6×6×6 cube, 232-255 = grayscale ramp).
+function xterm256(n: number): string {
+  if (n < 16) return ANSI_16[n < 8 ? n + 30 : n + 82] ?? '#d4d4d4'
+  if (n >= 232) { const v = 8 + (n - 232) * 10; return `rgb(${v},${v},${v})` }
+  const c = n - 16
+  const levels = [0, 95, 135, 175, 215, 255]
+  return `rgb(${levels[Math.floor(c / 36) % 6]},${levels[Math.floor(c / 6) % 6]},${levels[c % 6]})`
+}
+
+// Fold an SGR parameter list into the running style. Handles reset (0),
+// bold/dim/italic/underline, the 16-colour set, and 256/truecolour foreground
+// (`38;5;n` / `38;2;r;g;b`). Background codes are consumed but not applied.
+function applySgr(prev: Style, params: string): Style {
+  const codes = (params === '' ? '0' : params).split(';').map((p) => parseInt(p, 10) || 0)
+  let s: Style = { ...prev }
+  for (let i = 0; i < codes.length; i++) {
+    const c = codes[i]
+    if (c === 0) s = {}
+    else if (c === 1) s.bold = true
+    else if (c === 2) s.dim = true
+    else if (c === 3) s.italic = true
+    else if (c === 4) s.underline = true
+    else if (c === 22) { s.bold = false; s.dim = false }
+    else if (c === 23) s.italic = false
+    else if (c === 24) s.underline = false
+    else if (c === 39) delete s.fg
+    else if (ANSI_16[c]) s.fg = ANSI_16[c]
+    else if (c === 38) {
+      if (codes[i + 1] === 5) { s.fg = xterm256(codes[i + 2] ?? 0); i += 2 }
+      else if (codes[i + 1] === 2) { s.fg = `rgb(${codes[i + 2] ?? 0},${codes[i + 3] ?? 0},${codes[i + 4] ?? 0})`; i += 4 }
+    } else if (c === 48) {                                              // background — skip its args
+      if (codes[i + 1] === 5) i += 2
+      else if (codes[i + 1] === 2) i += 4
+    }
+  }
+  return s
+}
+
+function styleToCss(style: Style): CSSProperties {
+  const s: CSSProperties = {}
+  if (style.fg) s.color = style.fg
+  if (style.bold) s.fontWeight = 700
+  if (style.dim) s.opacity = 0.7
+  if (style.italic) s.fontStyle = 'italic'
+  if (style.underline) s.textDecoration = 'underline'
+  return s
+}
+
+const EMPTY_STYLE: Style = {}
+const styleKey = (s: Style) => `${s.fg ?? ''}|${s.bold ? 1 : 0}${s.dim ? 1 : 0}${s.italic ? 1 : 0}${s.underline ? 1 : 0}`
+const isBlank = (c: TCell) => c.ch === ' ' && styleKey(c.style) === styleKey(EMPTY_STYLE)
+
+// Resolve a raw terminal stream (ANSI escapes, \r, cursor moves) into a grid of
+// styled cells — the final frame a terminal would show, colours kept.
+function terminalGrid(raw: string): TCell[][] {
+  const rows: TCell[][] = [[]]
+  let row = 0
+  let col = 0
+  let style: Style = {}
+  const ensureRow = () => { while (rows.length <= row) rows.push([]) }
+  const padTo = (r: TCell[]) => { while (r.length < col) r.push({ ch: ' ', style: {} }) }
+  for (let i = 0; i < raw.length; ) {
+    const ch = raw[i]
+    if (ch === '\x1b') {
+      const m = /^\x1b\[([0-9;?]*)([A-Za-z])/.exec(raw.slice(i))
+      if (m) {
+        const params = m[1]
+        const n = parseInt(params || '1', 10) || 1
+        switch (m[2]) {
+          case 'm': style = applySgr(style, params); break              // SGR (colour/bold/…)
+          case 'A': row = Math.max(0, row - n); col = 0; break          // cursor up
+          case 'B': row += n; col = 0; ensureRow(); break               // cursor down
+          case 'G': col = 0; break                                      // to column 1
+          case 'K': ensureRow(); rows[row] = rows[row].slice(0, col); break // erase to EOL
+          default: break                                                // other escapes — no-op
+        }
+        i += m[0].length
+      } else {
+        i += 1                                                          // lone/unknown escape — skip
+      }
+      continue
+    }
+    if (ch === '\r') { col = 0; i += 1; continue }
+    if (ch === '\n') { row += 1; col = 0; ensureRow(); i += 1; continue }
+    ensureRow()
+    padTo(rows[row])
+    rows[row][col] = { ch, style }                                      // overwrite at cursor
+    col += 1
+    i += 1
+  }
+  return rows
+}
+
+// Render the resolved grid as coloured React nodes for the <pre>. Consecutive
+// cells sharing a style collapse into one <span>; rows join with '\n'.
+function terminalNodes(raw: string): ReactNode[] {
+  const rows = terminalGrid(raw)
+  const out: ReactNode[] = []
+  rows.forEach((cells, r) => {
+    let end = cells.length
+    while (end > 0 && isBlank(cells[end - 1])) end -= 1                 // trim trailing blanks
+    const segs: { key: string; style: Style; text: string }[] = []
+    for (let c = 0; c < end; c++) {
+      const cell = cells[c]
+      const key = styleKey(cell.style)
+      const last = segs[segs.length - 1]
+      if (last && last.key === key) last.text += cell.ch
+      else segs.push({ key, style: cell.style, text: cell.ch })
+    }
+    segs.forEach((seg, si) => {
+      out.push(seg.key === styleKey(EMPTY_STYLE)
+        ? seg.text
+        : <span key={`${r}-${si}`} style={styleToCss(seg.style)}>{seg.text}</span>)
+    })
+    if (r < rows.length - 1) out.push('\n')
+  })
+  return out
+}
+
+// Plain-text version of the resolved grid — for the clipboard (Copy JSON / For
+// bug report), where escape codes in pasted text would be noise.
+function terminalText(raw: string): string {
+  return terminalGrid(raw)
+    .map((cells) => cells.map((c) => c.ch).join('').replace(/\s+$/, ''))
+    .join('\n')
+}
+
 export function SbxRuntimePanel({
   sbxPath,
   onChangePath
@@ -57,8 +203,17 @@ export function SbxRuntimePanel({
   // collide with the update/login stream above.
   const [diagBusy, setDiagBusy] = useState<null | DiagMode>(null)
   const [diagOut, setDiagOut] = useState('')
-  const [diagCopied, setDiagCopied] = useState(false)
+  const [diagCopied, setDiagCopied] = useState<null | 'json' | 'github-issue'>(null)
+  // The export/share options (Copy JSON, For bug report, Upload bundle) stay
+  // hidden until a diagnostics run has completed at least once — they only make
+  // sense once you've actually run the probe.
+  const [diagRan, setDiagRan] = useState(false)
+  // Daemon restart (`sbx daemon stop` + `sbx daemon start -d`) — its own output
+  // box, rendered under the Restart daemon button.
+  const [daemonBusy, setDaemonBusy] = useState(false)
+  const [daemonOut, setDaemonOut] = useState('')
   const diagRef = useRef<HTMLDivElement>(null)
+  const daemonRef = useRef<HTMLDivElement>(null)
 
   // Runtime settings (`sbx settings set`) + reset (`sbx reset`).
   const [imagePaste, setImagePaste] = useState(false)
@@ -157,23 +312,54 @@ export function SbxRuntimePanel({
     if (diagRef.current) diagRef.current.scrollTop = diagRef.current.scrollHeight
   }, [diagOut])
 
-  // Run a diagnostics variant. For json/github-issue we also copy the finished
-  // report to the clipboard (that's what those formats are for). `upload` sends
-  // a bundle to Docker — the returned text carries the shareable id/URL.
-  const runDiag = async (mode: DiagMode) => {
-    if (diagBusy) return
+  // Stream `sbx daemon` (restart) output into its own box.
+  useEffect(() => {
+    const unsub = window.minipit?.onDaemonOutput((chunk) =>
+      setDaemonOut((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next })
+    )
+    return () => unsub?.()
+  }, [])
+
+  useEffect(() => {
+    if (daemonRef.current) daemonRef.current.scrollTop = daemonRef.current.scrollHeight
+  }, [daemonOut])
+
+  // Run a diagnostics variant that renders into the output box: `text` (the
+  // colour report) and `upload` (streams progress, prints the shareable id).
+  const runDiag = async (mode: 'text' | 'upload') => {
+    if (diagBusy || daemonBusy) return
     setDiagBusy(mode)
     setDiagOut('')
-    setDiagCopied(false)
     const res = await window.minipit?.diagnose(mode).catch((e) => ({ ok: false, output: undefined, error: String(e) }))
     setDiagBusy(null)
-    if (res?.ok && res.output && (mode === 'json' || mode === 'github-issue')) {
+    if (res?.ok) setDiagRan(true)
+  }
+
+  // Copy a diagnostics report to the clipboard in the background — json (for
+  // tooling) or github-issue (pre-formatted bug report). These run their own
+  // `sbx diagnose` but deliberately leave the visible report untouched.
+  const copyDiag = async (mode: 'json' | 'github-issue') => {
+    if (diagBusy || daemonBusy) return
+    setDiagBusy(mode)
+    const res = await window.minipit?.diagnose(mode).catch(() => null)
+    setDiagBusy(null)
+    if (res?.ok && res.output) {
       try {
-        await navigator.clipboard.writeText(res.output)
-        setDiagCopied(true)
-        setTimeout(() => setDiagCopied(false), 2000)
-      } catch { /* clipboard unavailable — output is still shown below */ }
+        await navigator.clipboard.writeText(terminalText(res.output))
+        setDiagCopied(mode)
+        setTimeout(() => setDiagCopied((cur) => (cur === mode ? null : cur)), 2000)
+      } catch { /* clipboard unavailable */ }
     }
+  }
+
+  // Stop and restart the sbx daemon. Output streams into its own box under the
+  // Restart daemon button.
+  const restartDaemon = async () => {
+    if (daemonBusy || diagBusy) return
+    setDaemonBusy(true)
+    setDaemonOut('')
+    await window.minipit?.daemonRestart().catch(() => null)
+    setDaemonBusy(false)
   }
 
   const run = async (action: 'update' | 'redownload') => {
@@ -296,38 +482,73 @@ export function SbxRuntimePanel({
             <button
               className="btn btn-default btn-sm"
               onClick={() => runDiag('text')}
-              disabled={diagBusy !== null}
+              disabled={diagBusy !== null || daemonBusy}
             >
               <Stethoscope size={13} /> {diagBusy === 'text' ? 'Running…' : 'Run'}
             </button>
-            <button
-              className="btn btn-default btn-sm"
-              onClick={() => runDiag('json')}
-              disabled={diagBusy !== null}
-            >
-              <Copy size={13} /> {diagBusy === 'json' ? 'Running…' : diagCopied ? '✓ Copied' : 'Copy JSON'}
-            </button>
-            <button
-              className="btn btn-default btn-sm"
-              onClick={() => runDiag('github-issue')}
-              disabled={diagBusy !== null}
-            >
-              <Copy size={13} /> {diagBusy === 'github-issue' ? 'Running…' : 'For bug report'}
-            </button>
-            <button
-              className="btn btn-default btn-sm"
-              onClick={() => runDiag('upload')}
-              disabled={diagBusy !== null}
-              title="Uploads a diagnostics bundle to Docker and prints a shareable id"
-            >
-              <UploadCloud size={13} /> {diagBusy === 'upload' ? 'Uploading…' : 'Upload bundle'}
-            </button>
+            {diagRan && (
+              <>
+                <button
+                  className="btn btn-default btn-sm"
+                  onClick={() => copyDiag('github-issue')}
+                  disabled={diagBusy !== null || daemonBusy}
+                  title="Copy a pre-formatted report to paste into a bug report"
+                >
+                  {diagCopied === 'github-issue'
+                    ? <><Check size={13} /> Copied</>
+                    : <><Bug size={13} /> {diagBusy === 'github-issue' ? 'Preparing…' : 'For bug report'}</>}
+                </button>
+                <button
+                  className="btn btn-default btn-sm"
+                  onClick={() => runDiag('upload')}
+                  disabled={diagBusy !== null || daemonBusy}
+                  title="Uploads a diagnostics bundle to Docker and prints a shareable id"
+                >
+                  <UploadCloud size={13} /> {diagBusy === 'upload' ? 'Uploading…' : 'Upload'}
+                </button>
+              </>
+            )}
           </div>
         </div>
         {diagOut && (
           <div className="ss-row" style={{ paddingTop: 0 }}>
-            <div className="rt-output" ref={diagRef}>
-              <pre className="logs-pre">{diagOut}</pre>
+            <div style={{ position: 'relative', width: '100%' }}>
+              <div className="diag-toolbar">
+                <button
+                  onClick={() => copyDiag('json')}
+                  disabled={diagBusy !== null || daemonBusy}
+                  title="Copy diagnostics as JSON"
+                >
+                  {diagCopied === 'json' ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </div>
+              <div className="rt-output" ref={diagRef}>
+                <pre className="logs-pre">{terminalNodes(diagOut)}</pre>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Restart daemon</div>
+            <div className="ss-sub">
+              Stop and restart the sbx daemon (<code>sbx daemon stop</code> then{' '}
+              <code>sbx daemon start -d</code>) — try this if you hit connection errors
+              (<code>ECONNREFUSED</code>/<code>ECONNRESET</code>).
+            </div>
+          </div>
+          <button
+            className="btn btn-default btn-sm"
+            onClick={restartDaemon}
+            disabled={diagBusy !== null || daemonBusy}
+          >
+            <RotateCw size={13} /> {daemonBusy ? 'Restarting…' : 'Restart daemon'}
+          </button>
+        </div>
+        {daemonOut && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-output" ref={daemonRef}>
+              <pre className="logs-pre">{terminalNodes(daemonOut)}</pre>
             </div>
           </div>
         )}
