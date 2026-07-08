@@ -18,7 +18,9 @@
       }
     ],
     "mac": {
-      "icon": "resources/icon/dock.png"
+      "icon": "resources/icon/dock.png",
+      "notarize": true,
+      "identity": "Developer ID Application: Javier Alonso Gómez (2KVDGP5463)"
     },
     "win": {
       "icon": "resources/icon/dock.png"

@@ -1026,6 +1026,58 @@ async function fetchSandboxWork(name: string, repoDir: string): Promise<
   }
 }
 
+// Per-file diff inside the sandbox (working tree vs HEAD; --no-index fallback so
+// untracked new files still show). Shared by the previewer's git-diff-file and
+// the review surface's worktree mode. `--text` forces a textual diff for files
+// git's heuristic misflags as binary.
+function inSandboxFileDiff(name: string, path: string): Promise<string> {
+  return new Promise((resolve) => {
+    const dir = path.replace(/\/[^/]*$/, '') || '/'
+    const script =
+      'cd "$1" 2>/dev/null || exit 0; ' +
+      'd=$(git diff --text HEAD -- "$2" 2>/dev/null); ' +
+      '[ -z "$d" ] && d=$(git diff --text --no-index -- /dev/null "$2" 2>/dev/null); ' +
+      'printf %s "$d"'
+    execFile(getSbxPath(), ['exec', name, 'sh', '-c', script, 'sh', dir, path],
+      { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (_e, stdout) => resolve(stdout ?? ''))
+  })
+}
+
+type ReviewFile = { path: string; status: 'new' | 'modified' | 'deleted' | 'renamed'; added: number; deleted: number; binary: boolean }
+
+// `git diff --numstat` → per-path counts ("-\t-" = binary). Used with
+// --no-renames so paths line up 1:1 with --name-status.
+function parseNumstat(out: string): Record<string, { added: number; deleted: number; binary: boolean }> {
+  const map: Record<string, { added: number; deleted: number; binary: boolean }> = {}
+  for (const line of out.split('\n')) {
+    if (!line.trim()) continue
+    const parts = line.split('\t')
+    if (parts.length < 3) continue
+    const binary = parts[0] === '-' || parts[1] === '-'
+    map[parts.slice(2).join('\t')] = {
+      added: binary ? 0 : parseInt(parts[0], 10) || 0,
+      deleted: binary ? 0 : parseInt(parts[1], 10) || 0,
+      binary
+    }
+  }
+  return map
+}
+
+// `git diff --name-status --no-renames` → [{path, status}].
+function parseNameStatus(out: string): { path: string; status: ReviewFile['status'] }[] {
+  const files: { path: string; status: ReviewFile['status'] }[] = []
+  for (const line of out.split('\n')) {
+    if (!line.trim()) continue
+    const parts = line.split('\t')
+    const code = parts[0]
+    const path = parts[parts.length - 1]
+    const status: ReviewFile['status'] =
+      code.startsWith('A') ? 'new' : code.startsWith('D') ? 'deleted' : 'modified'
+    files.push({ path, status })
+  }
+  return files
+}
+
 // ── Auto-sync (clone mode) ──────────────────────────────────────────────────
 // Optional per-sandbox toggle: on each workspace change, quietly fetch the
 // sandbox's clone into its `sandbox/<name>` review branch so the host always has
@@ -2043,16 +2095,34 @@ function setupIPC(): void {
   })
 
   // Push the review branch and open a PR (via gh, falling back to a compare URL).
-  ipcMain.handle('minipit:sandbox-open-pr', async (_, repoDir: string, branch: string) => {
+  ipcMain.handle('minipit:sandbox-open-pr', async (_, repoDir: string, branch: string, opts?: { base?: string; title?: string; body?: string }) => {
     const git = gitIn(repoDir)
     try {
       const pushed = await git(['push', '-u', 'origin', branch])
       if (pushed.code !== 0) return { ok: false, error: pushed.err || 'git push failed.' }
+      const args = ['pr', 'create', '--head', branch]
+      if (opts?.base) args.push('--base', opts.base)
+      if (opts?.title) { args.push('--title', opts.title); args.push('--body', opts.body ?? '') }
+      else args.push('--fill')   // no title provided → derive from commits
       const gh = await new Promise<{ code: number; out: string }>((resolve) => {
-        execFile('gh', ['pr', 'create', '--head', branch, '--fill'], { cwd: repoDir, timeout: 60000, env: guiEnv() },
+        execFile('gh', args, { cwd: repoDir, timeout: 60000, env: guiEnv() },
           (e, so) => resolve({ code: e ? 1 : 0, out: (so || '').trim() }))
       })
-      if (gh.code === 0) return { ok: true, url: (gh.out.match(/https?:\/\/\S+/) || [])[0] }
+      if (gh.code === 0) {
+        const url = (gh.out.match(/https?:\/\/\S+/) || [])[0]
+        // Fetch richer detail so the created PR can be shown inline.
+        const view = await new Promise<string | null>((resolve) => {
+          execFile('gh', ['pr', 'view', branch, '--json', 'number,title,url,state'], { cwd: repoDir, timeout: 30000, env: guiEnv() },
+            (e, so) => resolve(e ? null : (so || '').trim()))
+        })
+        if (view) {
+          try {
+            const pr = JSON.parse(view) as { number?: number; title?: string; url?: string; state?: string }
+            return { ok: true, url: pr.url || url, number: pr.number, title: pr.title, state: pr.state }
+          } catch { /* fall through to url only */ }
+        }
+        return { ok: true, url }
+      }
       // gh unavailable/failed — hand back a compare URL derived from origin.
       const originUrl = (await git(['remote', 'get-url', 'origin'])).out
       const m = originUrl.match(/^(?:git@|https?:\/\/)([^/:]+)[/:](.+?)(?:\.git)?$/)
@@ -2142,21 +2212,93 @@ function setupIPC(): void {
   // still produce a real patch instead of "Binary files … differ". All git
   // errors collapse to "" (no diff).
   ipcMain.handle('minipit:git-diff-file', (_, name: string, path: string) =>
-    new Promise<{ diff: string }>((resolve) => {
-      const dir = path.replace(/\/[^/]*$/, '') || '/'
-      const script =
-        'cd "$1" 2>/dev/null || exit 0; ' +
-        'd=$(git diff --text HEAD -- "$2" 2>/dev/null); ' +
-        '[ -z "$d" ] && d=$(git diff --text --no-index -- /dev/null "$2" 2>/dev/null); ' +
-        'printf %s "$d"'
-      execFile(
-        getSbxPath(),
-        ['exec', name, 'sh', '-c', script, 'sh', dir, path],
-        { timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
-        (_err, stdout) => resolve({ diff: stdout ?? '' })
-      )
-    })
-  )
+    inSandboxFileDiff(name, path).then((diff) => ({ diff })))
+
+  // Whole-review summary for the Changes panel. Clone/branch mode diffs the
+  // agent's committed work (base...sandbox/<name>) on the host; direct-mount
+  // mode reports the in-sandbox working-tree changes. Mode is detected by
+  // whether the `sandbox-<name>` remote exists.
+  ipcMain.handle('minipit:review-summary', async (_, name: string, repoDir: string) => {
+    const git = gitIn(repoDir)
+    try {
+      const hasSandboxRemote = (await git(['remote'])).out.split('\n').includes(`sandbox-${name}`)
+      if (hasSandboxRemote) {
+        const fw = await fetchSandboxWork(name, repoDir)
+        if (!fw.ok) return { ok: false, error: fw.error }
+        const base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+        const range = `${base}...${fw.branch}`
+        const nums = parseNumstat((await git(['diff', '--no-renames', '--numstat', range])).out)
+        const files: ReviewFile[] = parseNameStatus((await git(['diff', '--no-renames', '--name-status', range])).out)
+          .map((f) => ({ ...f, ...(nums[f.path] ?? { added: 0, deleted: 0, binary: false }) }))
+        const added = files.reduce((s, f) => s + f.added, 0)
+        const deleted = files.reduce((s, f) => s + f.deleted, 0)
+        return { ok: true, mode: 'branch', base, branch: fw.branch, hasRemote: fw.hasRemote, added, deleted, files }
+      }
+      // Direct-mount: in-sandbox working-tree changes.
+      const st = await gitStatus(name, repoDir)
+      const numOut = await new Promise<string>((resolve) => {
+        execFile(getSbxPath(), ['exec', name, 'git', '-C', repoDir, 'diff', '--no-renames', '--numstat', 'HEAD'],
+          { timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (_e, so) => resolve(so || ''))
+      })
+      const nums = parseNumstat(numOut)
+      const files: ReviewFile[] = st.changes.map((c) => ({ ...c, ...(nums[c.path] ?? { added: 0, deleted: 0, binary: false }) }))
+      const added = files.reduce((s, f) => s + f.added, 0)
+      const deleted = files.reduce((s, f) => s + f.deleted, 0)
+      const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+      const hasRemote = (await git(['remote', 'get-url', 'origin'])).code === 0
+      return { ok: true, mode: 'worktree', branch, hasRemote, added, deleted, files }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Per-file diff for the review surface. With a branch → host branch diff
+  // (base...branch); otherwise the in-sandbox working-tree diff.
+  ipcMain.handle('minipit:review-file-diff', async (_, name: string, repoDir: string, branch: string | null, path: string) => {
+    if (branch) {
+      const git = gitIn(repoDir)
+      const base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
+      const r = await git(['diff', '--text', '--no-renames', `${base}...${branch}`, '--', path])
+      return { diff: r.out }
+    }
+    return { diff: await inSandboxFileDiff(name, path) }
+  })
+
+  // Local + origin branches (for the PR base picker).
+  ipcMain.handle('minipit:list-branches', async (_, repoDir: string) => {
+    const git = gitIn(repoDir)
+    const out = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'])).out
+    const set = new Set<string>()
+    for (const l of out.split('\n')) {
+      const b = l.trim()
+      if (b && b !== 'origin/HEAD' && b !== 'origin') set.add(b.replace(/^origin\//, ''))
+    }
+    return Array.from(set)
+  })
+
+  // Prefill PR title/body from the branch's commits (base..branch).
+  ipcMain.handle('minipit:pr-defaults', async (_, repoDir: string, branch: string, base: string) => {
+    const git = gitIn(repoDir)
+    const subjects = (await git(['log', '--format=%s', `${base}..${branch}`])).out.split('\n').map((s) => s.trim()).filter(Boolean)
+    const title = subjects[subjects.length - 1] || branch
+    const body = subjects.length > 1 ? subjects.slice().reverse().map((s) => `- ${s}`).join('\n') : ''
+    return { title, body }
+  })
+
+  // Stage all + commit the working-tree changes (direct-mount review). Runs on
+  // the host (shared bind-mounted tree) so it uses the host's git identity.
+  ipcMain.handle('minipit:sandbox-commit', async (_, repoDir: string, message: string) => {
+    const git = gitIn(repoDir)
+    try {
+      const added = await git(['add', '-A'])
+      if (added.code !== 0) return { ok: false, error: added.err || 'git add failed.' }
+      const committed = await git(['commit', '-m', message])
+      if (committed.code !== 0) return { ok: false, error: committed.err || committed.out || 'Nothing to commit.' }
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
 
   // Write contents back to a file (content piped to `cat > FILE`).
   ipcMain.handle('minipit:write-file', async (_, name: string, path: string, content: string) => {
@@ -2172,7 +2314,7 @@ function setupIPC(): void {
   })
 
   // Open the built-in file editor in its own window.
-  ipcMain.handle('minipit:open-file-window', (_, name: string, path: string, fileName: string, diff?: boolean) => {
+  ipcMain.handle('minipit:open-file-window', (_, name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null) => {
     const win = new BrowserWindow({
       width: 820,
       height: 640,
@@ -2185,7 +2327,8 @@ function setupIPC(): void {
     })
     const params =
       `sandbox=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}&name=${encodeURIComponent(fileName)}` +
-      (diff ? '&diff=1' : '')
+      (diff ? '&diff=1' : '') +
+      (reviewBranch ? `&reviewBranch=${encodeURIComponent(reviewBranch)}` : '')
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
       win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#/editor?${params}`)
     } else {
@@ -2511,11 +2654,24 @@ function setupIPC(): void {
     }
   })
 
-  // Set the default network preset non-interactively (open | balanced |
-  // locked-down). Unlike `policy reset`, this doesn't prompt.
+  // Set the default network preset (allow-all | balanced | deny-all).
+  // `policy set-default` is deprecated in favour of `policy init`, but `init`
+  // only works on an uninitialized policy — once initialized, changing it needs
+  // `policy reset`. So try init first and fall back to reset (which prompts for
+  // the preset, fed over stdin) when the policy already exists.
   ipcMain.handle('minipit:policy-set-default', async (_, preset: string) => {
     try {
-      const output = await sbx(['policy', 'set-default', preset], { timeout: 15000 })
+      let output: string
+      try {
+        output = await sbx(['policy', 'init', preset], { timeout: 15000 })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (/already initialized/i.test(msg)) {
+          output = await sbxWithInput(['policy', 'reset'], `${preset}\n`, 20000)
+        } else {
+          throw e
+        }
+      }
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
@@ -2550,6 +2706,42 @@ function setupIPC(): void {
     // (shown by default on macOS; gated by this flag on Windows/Linux).
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
+  })
+
+  // ── Runtime mounts (`sbx mount` / `sbx umount`) ───────────────────────────
+  // Expose a host dir into a *running* sandbox live. sbx has no `mount ls`, so
+  // den tracks the mounts it created in the durable store (per sandbox name).
+  type MountEntry = { host: string; target?: string; ro?: boolean }
+  const mountsAll = () => ((store.get('sandboxMounts') as Record<string, MountEntry[]>) ?? {})
+  const mountSpec = (m: MountEntry) => m.host + (m.target ? `:${m.target}${m.ro ? ':ro' : ''}` : '')
+  const umountSpec = (m: MountEntry) => m.host + (m.target ? `:${m.target}` : '')
+  const sameMount = (a: MountEntry, host: string, target: string) => a.host === host && (a.target ?? '') === (target || '')
+
+  ipcMain.handle('minipit:mounts-get', (_, name: string) => mountsAll()[name] ?? [])
+
+  ipcMain.handle('minipit:sbx-mount', async (_, name: string, host: string, target: string, ro: boolean) => {
+    const entry: MountEntry = { host, target: target || undefined, ro: !!ro }
+    try {
+      await sbx(['mount', name, mountSpec(entry)], { timeout: 20000 })
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+    const all = mountsAll()
+    all[name] = [...(all[name] ?? []).filter((m) => !sameMount(m, host, target)), entry]
+    store.set('sandboxMounts', all)
+    return { ok: true, mounts: all[name] }
+  })
+
+  ipcMain.handle('minipit:sbx-umount', async (_, name: string, host: string, target: string) => {
+    try {
+      await sbx(['umount', name, umountSpec({ host, target: target || undefined })], { timeout: 20000 })
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+    const all = mountsAll()
+    all[name] = (all[name] ?? []).filter((m) => !sameMount(m, host, target))
+    store.set('sandboxMounts', all)
+    return { ok: true, mounts: all[name] }
   })
 
   // ── Per-sandbox appearance (color / icon) + group membership ──────────────

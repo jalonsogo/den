@@ -34,6 +34,7 @@ if (hash.startsWith('#/editor')) {
       path={params.get('path') ?? ''}
       name={params.get('name') ?? ''}
       openDiff={params.get('diff') === '1'}
+      reviewBranch={params.get('reviewBranch')}
     />
   )
 } else {

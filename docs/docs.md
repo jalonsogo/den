@@ -45,16 +45,30 @@ xterm.js over a real PTY.
   - **Other binary** — "we can't preview this file" with Download / Open-in-app.
   - The previewer follows the selected light/dark theme live.
 
-## Changes & diff
+## Changes & diff — Review & merge
 
-- **Changes tab** — the agent's live `git status` (created/modified/renamed/
-  deleted), with inline status badges in the file tree too. Works for mounted and
-  cloned workspaces.
-- **Diff view** — opening a changed file (from the Changes list) opens the
-  previewer on a **Diff** tab. A layout dropdown switches between **Side by side**
-  (old left / new right, per-side line numbers) and **Inline** (unified),
-  colored by add/remove; the choice is remembered. The Diff tab also appears for
-  any file with local git changes.
+The **Files → Changes tab** is the review surface (honoring "a branch per
+sandbox — review the full diff and merge back"):
+
+- **File list** with per-file **`+adds −dels`** and status. For clone-mode
+  sandboxes it shows the agent's committed branch diff (`sandbox/<name>` vs base);
+  for direct-mount it shows the working-tree diff.
+- **Fixed action bar** at the bottom: total **`+/−`** stat and branch, plus
+  actions. Clone mode: **Open PR…** and **Merge…** (+ "Delete after"). Direct
+  mount: **Commit…** (stage-all + commit with a message) and **Open PR…** (push
+  the current branch + PR).
+- **Open PR…** expands inline into a form — **base** picker, editable **title**
+  and **description** (prefilled from the branch's commits) — then **Create PR**
+  shows the created PR inline (number/state + Open in browser); no auto-open.
+- **Merge…** merges the branch into your current branch (conflicts abort cleanly),
+  optionally deleting the sandbox after.
+- The sandbox header's **changes dropdown** shows a short preview with a
+  **Review & merge →** link into this panel.
+
+- **Diff view** — clicking a changed file opens the previewer on a **Diff** tab
+  (the branch diff in clone mode). A layout dropdown in the Diff tab switches
+  between **Side by side** (old left / new right, per-side line numbers) and
+  **Inline** (unified); the choice is remembered.
 
 ## Git workflow
 
@@ -79,6 +93,14 @@ xterm.js over a real PTY.
   sandbox kit.
 - **Add anywhere** — attach at creation or inject into a running sandbox.
 - **Share via any OCI registry** — push to Docker Hub / ghcr; pull by reference.
+
+## Workspaces & runtime mounts
+
+The Info panel's **Workspaces** section lists the sandbox's workspaces and lets
+you **mount a host directory into a running sandbox live** (via `sbx mount`):
+pick a host folder, an optional container path, and read-only — it appears
+immediately (no restart). Unmount from the same list. den tracks the mounts it
+created (sbx has no list command).
 
 ## Network policy
 

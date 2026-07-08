@@ -17,8 +17,6 @@ jobs:
         include:
           - os: macos-latest
             target: mac
-          # Pinned to 2022: the node-gyp that compiles node-pty doesn't
-          # recognize the newer Visual Studio on the windows-latest (2025) image.
           - os: windows-2022
             target: win
     runs-on: ${{ matrix.os }}
@@ -33,9 +31,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      # node-pty is compiled from source by electron-builder's install-app-deps.
-      # node-gyp needs Python with distutils, which 3.12 dropped — pin 3.11 and
-      # install setuptools to provide it.
       - name: Setup Python for node-gyp
         uses: actions/setup-python@v5
         with:
@@ -47,14 +42,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
         env:
-          # Help node-gyp locate the runner's Visual Studio C++ toolchain.
           npm_config_msvs_version: '2022'
+
+      - name: Import macOS certificate
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "" build.keychain
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
       - name: Build and publish ${{ matrix.target }}
         run: npm run build && npx electron-builder --${{ matrix.target }} --publish always
         env:
-          # Used by electron-builder to create/attach the GitHub Release.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No signing certs configured yet — skip auto-discovery so the
-          # macOS build doesn't fail trying to sign. Harmless on Windows.
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

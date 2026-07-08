@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react'
-import { X, Layers, AlertTriangle, ShieldAlert, ChevronRight, ChevronDown } from 'lucide-react'
+import { X, Layers, AlertTriangle, ShieldAlert, ChevronRight, ChevronDown, Check, Ban, Globe, Scale, Lock } from 'lucide-react'
 import { useStore } from '../store'
 import { formatUptime } from '../lib/utils'
 import { PortsPanel } from './PortsPanel'
-import { AGENTS, type Sandbox, type NetworkPolicy, type PolicyBlock } from '../types'
+import { MountsPanel } from './MountsPanel'
+import { AgentIcon } from './AgentIcon'
+import { AGENTS, type Sandbox, type NetworkPolicy, type PolicyBlock, type PolicyRule } from '../types'
 
 const NO_BLOCKS: PolicyBlock[] = []
+
+// Infer which preset is currently in force from the policy's rules, so the
+// picker highlights the *active* preset (not just whatever the user last clicked).
+function detectPreset(rules: PolicyRule[]): 'allow-all' | 'balanced' | 'deny-all' {
+  const names = rules.map((r) => r.rule.toLowerCase())
+  if (names.some((n) => n.includes('allow-all')) ||
+      rules.some((r) => r.decision.toUpperCase() === 'ALLOW' && r.resources.includes('**'))) return 'allow-all'
+  if (names.some((n) => n.includes('deny-all'))) return 'deny-all'
+  return 'balanced'
+}
 
 // Collapsible section with a badge that stays visible when collapsed (so
 // attention items like network blocks aren't hidden). Open state persists.
@@ -52,39 +64,59 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
   useEffect(() => {
     window.minipit?.appliedKits(sandbox.name).then((k) => setKits(k ?? [])).catch(() => setKits([]))
   }, [sandbox.name])
-  const [allowInput, setAllowInput] = useState('')
-  const [allowBusy, setAllowBusy] = useState(false)
+  const [allowBusy, setAllowBusy] = useState(false)   // one-click allow from a recent block
   const [allowMsg, setAllowMsg] = useState<{ ok: boolean; text: string; offerRestart?: boolean } | null>(null)
   const [restarting, setRestarting] = useState(false)
-  const [denyInput, setDenyInput] = useState('')
-  const [denyBusy, setDenyBusy] = useState(false)
   const [rmBusy, setRmBusy] = useState<string | null>(null)
   const [preset, setPreset] = useState('balanced')
   const [presetBusy, setPresetBusy] = useState(false)
+  // Staged rules: "+ Add rule" appends a pending card; "Apply" commits them all.
+  const [addOpen, setAddOpen] = useState(false)
+  const [addDecision, setAddDecision] = useState<'allow' | 'block'>('allow')
+  const [addInput, setAddInput] = useState('')
+  const [pending, setPending] = useState<{ decision: 'allow' | 'block'; resources: string }[]>([])
+  const [applyBusy, setApplyBusy] = useState(false)
 
   const loadPolicy = () => {
     setPolLoading(true)
     window.minipit?.networkPolicy(sandbox.name)
-      .then((p) => setPolicy(p ?? null))
+      .then((p) => {
+        setPolicy(p ?? null)
+        // Sync the picker to the active preset so it reflects reality.
+        if (p?.ok && p.rules) setPreset(detectPreset(p.rules))
+      })
       .catch(() => setPolicy(null))
       .finally(() => setPolLoading(false))
   }
   useEffect(loadPolicy, [sandbox.name])
 
-  const handleAllow = async () => {
-    const resources = allowInput.trim()
-    if (!resources || allowBusy) return
-    setAllowBusy(true)
+  // Stage a rule as a pending card (committed later via Apply).
+  const addPending = () => {
+    const resources = addInput.trim()
+    if (!resources) return
+    setPending((p) => [...p, { decision: addDecision, resources }])
+    setAddInput('')
+    setAddOpen(false)
     setAllowMsg(null)
-    const res = await window.minipit?.policyAllow(sandbox.name, resources).catch(() => null)
-    setAllowBusy(false)
-    if (res?.ok) {
-      setAllowInput('')
-      setAllowMsg({ ok: true, text: 'Rule added.', offerRestart: true })
-      loadPolicy()
-    } else {
-      setAllowMsg({ ok: false, text: res?.error || 'Failed to add rule.' })
+  }
+
+  // Commit all staged rules (allow → policyAllow, block → policyDeny).
+  const applyPending = async () => {
+    if (!pending.length || applyBusy) return
+    setApplyBusy(true)
+    setAllowMsg(null)
+    const remaining: typeof pending = []
+    let failed: string | null = null
+    for (const r of pending) {
+      const res = r.decision === 'allow'
+        ? await window.minipit?.policyAllow(sandbox.name, r.resources).catch(() => null)
+        : await window.minipit?.policyDeny(sandbox.name, r.resources).catch(() => null)
+      if (!res?.ok) { remaining.push(r); if (!failed) failed = res?.error || `Failed to add ${r.resources}.` }
     }
+    setPending(remaining)
+    setApplyBusy(false)
+    if (failed) setAllowMsg({ ok: false, text: failed })
+    else { setAllowMsg({ ok: true, text: 'Rules applied.', offerRestart: true }); loadPolicy() }
   }
 
   // One-click allow straight from a recent block.
@@ -102,23 +134,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
     }
   }
 
-  // Add a deny (block) rule — mirror of handleAllow.
-  const handleDeny = async () => {
-    const resources = denyInput.trim()
-    if (!resources || denyBusy) return
-    setDenyBusy(true)
-    setAllowMsg(null)
-    const res = await window.minipit?.policyDeny(sandbox.name, resources).catch(() => null)
-    setDenyBusy(false)
-    if (res?.ok) {
-      setDenyInput('')
-      setAllowMsg({ ok: true, text: 'Block rule added.', offerRestart: true })
-      loadPolicy()
-    } else {
-      setAllowMsg({ ok: false, text: res?.error || 'Failed to add block rule.' })
-    }
-  }
-
   // Remove a local rule by its resource value (the chip you click ×).
   const removeResource = async (resource: string) => {
     if (rmBusy) return
@@ -131,21 +146,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       loadPolicy()
     } else {
       setAllowMsg({ ok: false, text: res?.error || `Failed to remove ${resource}.` })
-    }
-  }
-
-  // Change the default network preset (open / balanced / locked-down).
-  const applyPreset = async () => {
-    if (presetBusy) return
-    setPresetBusy(true)
-    setAllowMsg(null)
-    const res = await window.minipit?.policySetDefault(preset).catch(() => null)
-    setPresetBusy(false)
-    if (res?.ok) {
-      setAllowMsg({ ok: true, text: `Default preset set to “${preset}”.`, offerRestart: true })
-      loadPolicy()
-    } else {
-      setAllowMsg({ ok: false, text: res?.error || 'Failed to set default preset.' })
     }
   }
 
@@ -173,6 +173,9 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       await window.minipit?.runSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'running' })
       setAllowMsg({ ok: true, text: 'Sandbox restarted — new policy applied.' })
+      // The new policy only takes effect on (re)start, so re-read it now to
+      // refresh the rule list (and the active-preset highlight).
+      loadPolicy()
     } catch {
       setAllowMsg({ ok: false, text: 'Restart failed — try Stop then Run manually.' })
     } finally {
@@ -201,7 +204,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
         </div>
         <div className="info-stat">
           <span className="is-k">Agent</span>
-          <span className="is-v">{AGENTS.find((a) => a.id === sandbox.agent)?.label ?? sandbox.agent}</span>
+          <span className="is-v is-agent"><AgentIcon agent={sandbox.agent} size={14} />{AGENTS.find((a) => a.id === sandbox.agent)?.label ?? sandbox.agent}</span>
         </div>
         <div className="info-stat">
           <span className="is-k">Memory</span>
@@ -250,10 +253,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
             <span className="ir-val">{ws.path}</span>
           </div>
         ))}
-      </AccordionSection>
-
-      <AccordionSection id="ports" title="Ports" badge={sandbox.ports.length || undefined} defaultOpen>
-        <PortsPanel sandbox={sandbox} />
+        <MountsPanel sandbox={sandbox} />
       </AccordionSection>
 
       {kits.length > 0 && (
@@ -264,6 +264,10 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
         </AccordionSection>
       )}
 
+      <AccordionSection id="ports" title="Ports" badge={sandbox.ports.length || undefined} defaultOpen>
+        <PortsPanel sandbox={sandbox} />
+      </AccordionSection>
+
       <AccordionSection
         id="network"
         title="Network policy"
@@ -271,11 +275,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
         alert={blocks.length > 0}
         defaultOpen={blocks.length > 0}
       >
-        <div style={{ display: 'flex', marginBottom: 8 }}>
-          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={loadPolicy} disabled={polLoading}>
-            {polLoading ? 'Checking…' : 'Refresh'}
-          </button>
-        </div>
 
         {polLoading ? (
           <div className="np-empty">Reading policy…</div>
@@ -298,6 +297,58 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
                 </span>
               </div>
             )}
+            {!policy.governance && (() => {
+              const activePreset = detectPreset(policy.rules ?? [])
+              const PRESETS = [
+                { v: 'allow-all', l: 'Allow all', s: 'All outbound', Icon: Globe },
+                { v: 'balanced', l: 'Balanced', s: 'AI APIs & pkgs', Icon: Scale },
+                { v: 'deny-all', l: 'Deny all', s: 'Allowlist only', Icon: Lock }
+              ] as const
+              // What each preset does — shown as a preview when a different one is selected.
+              const PREVIEW: Record<string, string[]> = {
+                'allow-all': ['Allow all outbound traffic (**).'],
+                'balanced': ['Allow AI provider APIs (Anthropic, OpenAI, Google, …)', 'Allow package registries (npm, PyPI, crates, …)', 'Block everything else'],
+                'deny-all': ['Block all outbound', 'Only rules you add below are allowed']
+              }
+              const changing = preset !== activePreset
+              const label = PRESETS.find((p) => p.v === preset)?.l ?? preset
+              return (
+                <div className="np-preset">
+                  <span className="np-preset-lbl">Default preset</span>
+                  <div className="np-seg">
+                    {PRESETS.map((o) => (
+                      <button key={o.v} className={`np-seg-opt${preset === o.v ? ' on' : ''}`} onClick={() => setPreset(o.v)}>
+                        <o.Icon size={15} className="np-seg-ic" />
+                        <span className="np-seg-l">
+                          {o.l}
+                          {activePreset === o.v && <span className="np-seg-dot" title="Active preset" />}
+                        </span>
+                        <span className="np-seg-s">{o.s}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {changing && (
+                    <div className="np-preview">
+                      <div className="np-preview-hd">Preview · {label}</div>
+                      {PREVIEW[preset]?.map((line, i) => <div className="np-preview-line" key={i}>{line}</div>)}
+                      <div className="np-preview-note">
+                        Replaces the current rules{policy.rules && policy.rules.length ? ` (removes the ${policy.rules.length} below)` : ''}; takes effect after a restart.
+                      </div>
+                    </div>
+                  )}
+                  <div className="np-preset-actions">
+                    <button
+                      className="btn btn-default btn-sm"
+                      onClick={resetPolicy}
+                      disabled={presetBusy || !changing}
+                      title={changing ? 'Apply the selected preset (resets custom rules).' : 'This preset is already active.'}
+                    >
+                      {presetBusy ? 'Applying…' : changing ? 'Apply preset' : 'Current preset'}
+                    </button>
+                  </div>
+                </div>
+              )
+            })()}
             {policy.rules && policy.rules.length > 0 ? (
               <div className="np-rules">
                 {policy.rules.map((r, i) => (
@@ -337,6 +388,22 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
             ) : (
               <div className="np-empty">No explicit network rules — traffic follows the default policy.</div>
             )}
+            {pending.length > 0 && (
+              <div className="np-rules" style={{ marginTop: 7 }}>
+                {pending.map((p, i) => (
+                  <div className="np-rule np-rule-pending" key={i}>
+                    <div className="np-rule-hd">
+                      <span className={`np-dec np-dec-${p.decision === 'allow' ? 'allow' : 'deny'}`}>{p.decision === 'allow' ? 'ALLOW' : 'BLOCK'}</span>
+                      <span className="np-rule-name">Pending — apply to save</span>
+                      <button className="np-pending-x" title="Remove" onClick={() => setPending(pending.filter((_, j) => j !== i))}>×</button>
+                    </div>
+                    <div className="np-res">
+                      {p.resources.split(',').map((res, j) => res.trim() && <span className="np-chip" key={j}>{res.trim()}</span>)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="np-note">
               Agents can only reach the allowed resources above; anything else is blocked by the default deny policy.
             </div>
@@ -345,63 +412,42 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
 
         {!polLoading && (
           <div className="np-add-box">
-            <label className="np-add-lbl">Add allow rule</label>
-            <div className="np-add">
-              <input
-                className="np-add-input"
-                value={allowInput}
-                placeholder="chatgpt.com,  *.example.com:443"
-                onChange={(e) => setAllowInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAllow() }}
-              />
-              <button className="btn btn-primary btn-sm" onClick={handleAllow} disabled={allowBusy || !allowInput.trim()}>
-                {allowBusy ? 'Adding…' : 'Allow'}
-              </button>
-            </div>
-
-            {!policy?.governance && (
-              <>
-                <label className="np-add-lbl" style={{ marginTop: 10 }}>Add block rule</label>
-                <div className="np-add">
-                  <input
-                    className="np-add-input"
-                    value={denyInput}
-                    placeholder="ads.example.com,  tracker.example.com"
-                    onChange={(e) => setDenyInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleDeny() }}
-                  />
-                  <button className="btn btn-default btn-sm" onClick={handleDeny} disabled={denyBusy || !denyInput.trim()}>
-                    {denyBusy ? 'Adding…' : 'Block'}
+            {/* The draft "fake card" for a new rule sits above the CTA row. */}
+            {addOpen && (
+              <div className="np-add-form np-rule np-rule-draft">
+                <div className="np-dec-seg">
+                  <button className={`np-dec-opt${addDecision === 'allow' ? ' on' : ''}`} onClick={() => setAddDecision('allow')}>
+                    <Check size={13} className="np-dec-ic-allow" /> Allow
                   </button>
+                  {!policy?.governance && (
+                    <button className={`np-dec-opt${addDecision === 'block' ? ' on' : ''}`} onClick={() => setAddDecision('block')}>
+                      <Ban size={13} className="np-dec-ic-block" /> Block
+                    </button>
+                  )}
                 </div>
-
-                <label className="np-add-lbl" style={{ marginTop: 10 }}>Default preset</label>
-                <div className="np-add">
-                  <select
-                    className="np-add-input"
-                    value={preset}
-                    onChange={(e) => setPreset(e.target.value)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <option value="open">Open — allow all outbound</option>
-                    <option value="balanced">Balanced — allow AI APIs & package managers</option>
-                    <option value="locked-down">Locked down — block all, allowlist only</option>
-                  </select>
-                  <button className="btn btn-default btn-sm" onClick={applyPreset} disabled={presetBusy}>
-                    {presetBusy ? 'Applying…' : 'Apply'}
-                  </button>
+                <input
+                  className="np-add-input"
+                  value={addInput}
+                  placeholder="example.com,  *.example.com:443"
+                  autoFocus
+                  onChange={(e) => setAddInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addPending() }}
+                />
+                <div className="np-add-form-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setAddOpen(false); setAddInput('') }}>Cancel</button>
+                  <button className="btn btn-default btn-sm" onClick={addPending} disabled={!addInput.trim()}>Add</button>
                 </div>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={resetPolicy}
-                  disabled={presetBusy}
-                  style={{ marginTop: 6, color: 'var(--destruct)' }}
-                  title="Remove all custom rules and reset to the selected preset"
-                >
-                  Reset all rules…
-                </button>
-              </>
+              </div>
             )}
+
+            <div className="np-add-cta">
+              {pending.length > 0 && (
+                <button className="btn btn-default btn-sm" onClick={applyPending} disabled={applyBusy}>
+                  {applyBusy ? 'Applying…' : `Apply${pending.length > 1 ? ` (${pending.length})` : ''}`}
+                </button>
+              )}
+              <button className="btn btn-default btn-sm" onClick={() => { setAddOpen((o) => !o); setAllowMsg(null) }}>+ Add rule</button>
+            </div>
 
             {allowMsg && (
               <div className={`np-banner ${allowMsg.ok ? 'ok' : 'err'}`}>
