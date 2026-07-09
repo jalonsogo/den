@@ -6,6 +6,7 @@ import {
   ipcMain,
   shell,
   nativeImage,
+  nativeTheme,
   dialog,
   session,
   powerSaveBlocker
@@ -2918,18 +2919,23 @@ app.whenReady().then(() => {
   // Brand the running app: dock icon (dev shows the default Electron icon
   // otherwise) and the native "About den" panel (which pulls its icon/name from
   // the running app, so it'd be blank/Electron without this).
-  // Use the tightly-cropped dock icon (logo.png has large transparent margins
-  // that make the dock/About icon render small next to other apps).
-  const dockIconPath = join(__dirname, '../../resources/icon/dock.png')
-  const brandLogo = nativeImage.createFromPath(dockIconPath)
-  if (process.platform === 'darwin' && !brandLogo.isEmpty()) app.dock?.setIcon(brandLogo)
-  app.setAboutPanelOptions({
-    applicationName: 'den',
-    applicationVersion: `Version ${app.getVersion()}`,
-    version: '',
-    copyright: '© Docker · den.studio',
-    iconPath: dockIconPath
-  })
+  // Swap between the light ("Default") and dark 1024px renders following the
+  // system appearance, re-applying whenever the user toggles light/dark.
+  const applyBrandIcon = (): void => {
+    const iconName = nativeTheme.shouldUseDarkColors ? 'dock-dark.png' : 'dock.png'
+    const dockIconPath = join(__dirname, '../../resources/icon', iconName)
+    const brandLogo = nativeImage.createFromPath(dockIconPath)
+    if (process.platform === 'darwin' && !brandLogo.isEmpty()) app.dock?.setIcon(brandLogo)
+    app.setAboutPanelOptions({
+      applicationName: 'den',
+      applicationVersion: `Version ${app.getVersion()}`,
+      version: '',
+      copyright: '© Docker · den.studio',
+      iconPath: dockIconPath
+    })
+  }
+  applyBrandIcon()
+  nativeTheme.on('updated', applyBrandIcon)
 
   // Content-Security-Policy for the renderer. Production loads only bundled
   // local assets (script-src 'self'); the sole remote resource is the Gravatar

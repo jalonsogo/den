@@ -280,7 +280,7 @@ export function SandboxDetail() {
             <div className="files-resize" onMouseDown={startResize} />
             <div className="files-side" style={{ width: dockWidth }}>
               {dock === 'files'
-                ? <FilesPanel sandbox={sandbox} />
+                ? <FilesPanel sandbox={sandbox} onClose={() => setDock(null)} />
                 : <InfoPanel sandbox={sandbox} onClose={() => setDock(null)} />}
             </div>
           </>

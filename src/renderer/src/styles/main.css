@@ -1153,7 +1153,7 @@ html, body, #root {
 }
 
 .term-bar {
-  height: 36px;
+  height: 40px;
   background: var(--tbg, #111);
   border-bottom: 1px solid var(--tline);
   display: flex;
@@ -1273,7 +1273,7 @@ html, body, #root {
 /* Info as a right-side dock */
 .info-dock { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .info-dock-hd {
-  flex-shrink: 0; height: 36px; display: flex; align-items: center;
+  flex-shrink: 0; height: 40px; display: flex; align-items: center;
   padding: 0 10px 0 14px; border-bottom: 1px solid var(--border);
 }
 .info-dock-title { font-size: 12.5px; font-weight: 600; color: var(--t1); }
@@ -1658,7 +1658,7 @@ html, body, #root {
 .files-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 32px 16px; }
 
 /* Files | Changes tab bar */
-.files-tabs { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.files-tabs { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .files-tab {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; font-weight: 500; font-family: inherit;
@@ -3490,10 +3490,11 @@ html, body, #root {
 /* Advanced collapsible */
 .adv { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 12px; }
 .adv-toggle {
-  display: flex; align-items: center; gap: 5px;
+  display: flex; align-items: center; gap: 5px; width: 100%; text-align: left;
   background: none; border: none; cursor: pointer;
   font-size: 12.5px; font-weight: 600; color: var(--t2); padding: 0;
 }
+.adv-toggle svg { flex-shrink: 0; }
 .adv-toggle:hover { color: var(--t1); }
 .adv-body { margin-top: 14px; display: flex; flex-direction: column; gap: 16px; }
 
