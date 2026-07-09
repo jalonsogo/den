@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud } from 'lucide-react'
+import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
+import { FieldSelect } from '../FieldSelect'
 import { KitCaps } from '../KitCaps'
 import { randomName } from '../../lib/names'
 import { parseKitSpec, type ParsedKit } from '../../lib/kitSpec'
@@ -269,11 +270,16 @@ export function NewSandboxModal() {
           {/* Group — optional; assign to an existing group or create one */}
           <div className="fg">
             <label className="flabel">Group <span className="flabel-hint">optional</span></label>
-            <select className="finput" value={groupSel} onChange={(e) => setGroupSel(e.target.value)}>
-              <option value="">No group</option>
-              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-              <option value="__new">＋ New group…</option>
-            </select>
+            <FieldSelect
+              ariaLabel="Group"
+              value={groupSel}
+              options={[
+                { value: '', label: 'No group' },
+                ...groups.map((g) => ({ value: g.id, label: g.name })),
+                { value: '__new', label: '＋ New group…' }
+              ]}
+              onChange={setGroupSel}
+            />
             {groupSel === '__new' && (
               <input
                 className="finput"
@@ -472,8 +478,8 @@ export function NewSandboxModal() {
           {/* Advanced — collapsible */}
           <div className="adv">
             <button className="adv-toggle" onClick={() => setAdvanced((v) => !v)}>
-              <ChevronRight size={13} style={{ transform: advancedOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
               Advanced
+              <ChevronDown size={14} style={{ marginLeft: 'auto', color: 'var(--t3)', transform: advancedOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.12s' }} />
             </button>
 
             {advancedOpen && (
@@ -541,8 +547,8 @@ export function NewSandboxModal() {
               className="adv-toggle"
               onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
             >
-              <ChevronRight size={13} style={{ transform: cmdOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s' }} />
               Command
+              <ChevronDown size={14} style={{ marginLeft: 'auto', color: 'var(--t3)', transform: cmdOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.12s' }} />
             </button>
             {cmdOpen && (
               <div className="adv-body">
