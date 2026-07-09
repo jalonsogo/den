@@ -12,6 +12,13 @@ const resolvedTheme =
     ? 'dark'
     : 'light'
 document.documentElement.setAttribute('data-theme', resolvedTheme)
+// UI density → whole-window zoom (applies to this window and the editor window).
+// Keep in sync with store.ts densityFactor().
+const densityRaw = localStorage.getItem('minipit:density')
+const densityCustom = Math.min(2, Math.max(0.5, Number(localStorage.getItem('minipit:densityCustom')) || 1.2))
+const densityZoom =
+  densityRaw === 'custom' ? densityCustom : densityRaw === 'comfortable' ? 1.1 : 1
+window.minipit?.setZoomFactor?.(densityZoom)
 applyAccent(
   localStorage.getItem('minipit:accent') ?? 'blue',
   localStorage.getItem('minipit:accentColor') ?? '#3b82f6'

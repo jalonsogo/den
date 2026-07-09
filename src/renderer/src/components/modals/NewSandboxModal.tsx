@@ -1,14 +1,32 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
 import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
-import { FieldSelect } from '../FieldSelect'
 import { KitCaps } from '../KitCaps'
 import { randomName } from '../../lib/names'
 import { parseKitSpec, type ParsedKit } from '../../lib/kitSpec'
 import { AGENTS, type AgentType, type Template } from '../../types'
 
 const MEM_VALUES = ['default', '2g', '4g', '8g', '16g', '32g']
+
+// A collapsible section in the creation form. The disclosure chevron sits on the
+// LEFT and points right when collapsed / down when open.
+function Section({ title, open, onToggle, children }: {
+  title: string
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="adv">
+      <button className="adv-toggle" onClick={onToggle} aria-expanded={open}>
+        <ChevronDown size={14} className="adv-chev" style={{ transform: open ? undefined : 'rotate(-90deg)' }} />
+        {title}
+      </button>
+      {open && <div className="adv-body">{children}</div>}
+    </div>
+  )
+}
 
 const slugify = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9._+-]+/g, '-').replace(/^-+|-+$/g, '')
@@ -20,7 +38,7 @@ function deriveName(agent: string, workspace: string): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, groups, createGroup, setSandboxGroup } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup } = useStore()
   const feature = newSandboxFeature
   // Feature mode always isolates (a feature is an isolated clone you merge back).
   const closeModal = () => { setNewSandboxFeature(false); setNewSandboxGroup(null); setModal(null) }
@@ -45,10 +63,6 @@ export function NewSandboxModal() {
   // A session inside a project shares that one folder, so isolate by default to
   // keep concurrent sandboxes from stomping the same working tree (toggleable).
   const [clone, setClone]             = useState(!!newSandboxWorkspace || newSandboxFeature)
-  // Optional group assignment. '' = no group, '__new' = create one from newGroupName.
-  // Pre-selected when opened from a group header's "New sandbox…".
-  const [groupSel, setGroupSel]       = useState(newSandboxGroup ?? '')
-  const [newGroupName, setNewGroupName] = useState('')
   // For --clone: whether the workspace is a Git repo (null = unknown/checking).
   const [wsIsRepo, setWsIsRepo]       = useState<boolean | null>(null)
   const [gitIniting, setGitIniting]   = useState(false)
@@ -58,6 +72,7 @@ export function NewSandboxModal() {
   const [progress, setProgress]       = useState('')
   const progRef = useRef<HTMLPreElement>(null)
   const unsubRef = useRef<(() => void) | null>(null)
+  const [basicOpen, setBasic]         = useState(true)
   const [advancedOpen, setAdvanced]   = useState(false)
   // Command preview lives in its own accordion; remember the user's show/hide choice.
   const [cmdOpen, setCmdOpen]         = useState(localStorage.getItem('minipit:showCreateCmd') === '1')
@@ -209,9 +224,9 @@ export function NewSandboxModal() {
         })
         const sandboxes = await window.minipit?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
-        // Assign to a group if one was chosen (or created inline).
-        const gid = groupSel === '__new' ? (newGroupName.trim() ? createGroup(newGroupName) : null) : (groupSel || null)
-        if (gid) setSandboxGroup(finalName, gid)
+        // Honor a group pre-selected from a group header's "New sandbox…" (the
+        // manual group picker was removed to simplify creation).
+        if (newSandboxGroup) setSandboxGroup(finalName, newSandboxGroup)
         removeCreatingSandbox(finalName)
         setHighlightSandbox(finalName)
         unsub?.()
@@ -251,6 +266,7 @@ export function NewSandboxModal() {
           </div>
           ) : (
           <>
+          <Section title="Basic" open={basicOpen} onToggle={() => setBasic((v) => !v)}>
           {/* Name — random by default, regenerate or edit */}
           <div className="fg">
             <label className="flabel">Name</label>
@@ -265,30 +281,6 @@ export function NewSandboxModal() {
                 <RefreshCw size={13} />
               </button>
             </div>
-          </div>
-
-          {/* Group — optional; assign to an existing group or create one */}
-          <div className="fg">
-            <label className="flabel">Group <span className="flabel-hint">optional</span></label>
-            <FieldSelect
-              ariaLabel="Group"
-              value={groupSel}
-              options={[
-                { value: '', label: 'No group' },
-                ...groups.map((g) => ({ value: g.id, label: g.name })),
-                { value: '__new', label: '＋ New group…' }
-              ]}
-              onChange={setGroupSel}
-            />
-            {groupSel === '__new' && (
-              <input
-                className="finput"
-                style={{ marginTop: 6 }}
-                value={newGroupName}
-                placeholder="New group name"
-                onChange={(e) => setNewGroupName(e.target.value)}
-              />
-            )}
           </div>
 
           {/* Agent — big dropdown (always shown) */}
@@ -474,16 +466,10 @@ export function NewSandboxModal() {
               ) : null
             })()}
           </div>
+          </Section>
 
           {/* Advanced — collapsible */}
-          <div className="adv">
-            <button className="adv-toggle" onClick={() => setAdvanced((v) => !v)}>
-              Advanced
-              <ChevronDown size={14} style={{ marginLeft: 'auto', color: 'var(--t3)', transform: advancedOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.12s' }} />
-            </button>
-
-            {advancedOpen && (
-              <div className="adv-body">
+          <Section title="Advanced" open={advancedOpen} onToggle={() => setAdvanced((v) => !v)}>
                 {/* Base: new agent image vs an existing template */}
                 <div className="fg">
                   <label className="flabel">Base image</label>
@@ -538,20 +524,14 @@ export function NewSandboxModal() {
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+          </Section>
 
-          <div className="adv">
-            <button
-              className="adv-toggle"
-              onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
-            >
-              Command
-              <ChevronDown size={14} style={{ marginLeft: 'auto', color: 'var(--t3)', transform: cmdOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.12s' }} />
-            </button>
-            {cmdOpen && (
-              <div className="adv-body">
+          {/* Command preview — collapsible */}
+          <Section
+            title="Command preview"
+            open={cmdOpen}
+            onToggle={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
+          >
                 <div className="cmd-blk">
                   {cmdParts.split(' ').map((word, i) => {
                     if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
@@ -560,9 +540,7 @@ export function NewSandboxModal() {
                     return <span key={i} className="cm-v">{word} </span>
                   })}
                 </div>
-              </div>
-            )}
-          </div>
+          </Section>
           </>
           )}
 

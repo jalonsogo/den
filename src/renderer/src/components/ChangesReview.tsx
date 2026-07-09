@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GitPullRequest, GitMerge, GitCommitHorizontal, RefreshCw, ExternalLink } from 'lucide-react'
 import type { Sandbox, ReviewSummary, PullRequest } from '../types'
 import { ChangesList } from './ChangesList'
@@ -27,6 +27,8 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
   const [deleteAfter, setDeleteAfter] = useState(false)
   const [commitOpen, setCommitOpen] = useState(false)
   const [commitMsg, setCommitMsg] = useState('')
+  // Files ticked to include in a commit ("exclude from commit" = untick).
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const load = () => {
     if (stopped) return
@@ -39,9 +41,29 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
   // Load on mount / when the sandbox changes (the tab remounts on activation).
   useEffect(load, [sandbox.id, sandbox.workspace, stopped])
 
+  // Let other panels (e.g. the Files context menu after "Add to .gitignore")
+  // ask this surface to reload. A ref keeps the listener bound to the latest load.
+  const loadRef = useRef(load)
+  loadRef.current = load
+  useEffect(() => {
+    const onRefresh = () => loadRef.current()
+    window.addEventListener('den:refresh-changes', onRefresh)
+    return () => window.removeEventListener('den:refresh-changes', onRefresh)
+  }, [])
+
   const files = review?.files ?? []
   const branchMode = review?.mode === 'branch'
+  const worktreeMode = review?.mode === 'worktree'
   const reviewBranch = branchMode ? (review?.branch ?? null) : null
+
+  // Default to committing everything; re-seed whenever the review reloads.
+  useEffect(() => {
+    setSelected(worktreeMode ? new Set(files.map((f) => f.path)) : new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review])
+  const toggle = (p: string) =>
+    setSelected((s) => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n })
+  const allSelected = files.length > 0 && selected.size === files.length
   const statFor = (path: string) => {
     const f = files.find((x) => x.path === path)
     return f ? { added: f.added, deleted: f.deleted, binary: f.binary } : undefined
@@ -86,12 +108,17 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
   }
 
   const commit = async () => {
-    if (!commitMsg.trim()) return
+    if (!commitMsg.trim() || selected.size === 0) return
     setBusy('commit'); setMsg(null)
-    const r = await window.minipit?.sandboxCommit(sandbox.workspace, commitMsg.trim()).catch(() => null)
+    // Stage-all when everything's ticked; otherwise commit only the ticked paths.
+    const only = allSelected ? undefined : Array.from(selected)
+    const r = await window.minipit?.sandboxCommit(sandbox.workspace, commitMsg.trim(), only).catch(() => null)
     setBusy(null)
-    if (r?.ok) { setCommitOpen(false); setCommitMsg(''); setMsg({ ok: true, text: 'Changes committed.' }); load() }
-    else setMsg({ ok: false, text: r?.error || 'Commit failed.' })
+    if (r?.ok) {
+      setCommitOpen(false); setCommitMsg('')
+      setMsg({ ok: true, text: only ? `Committed ${only.length} file${only.length > 1 ? 's' : ''}.` : 'Changes committed.' })
+      load()
+    } else setMsg({ ok: false, text: r?.error || 'Commit failed.' })
   }
 
   if (stopped) return <div className="files-empty">Sandbox is stopped</div>
@@ -170,10 +197,17 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
             <div className="ca-prform">
               <label className="flabel">Commit message</label>
               <textarea className="finput ca-body" value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} rows={3} placeholder="Describe the change" autoFocus />
+              <div className="ca-commit-note">
+                {selected.size === 0
+                  ? 'Tick at least one file below to commit.'
+                  : allSelected
+                    ? `Committing all ${files.length} file${files.length > 1 ? 's' : ''}. Untick any below to leave them uncommitted.`
+                    : `Committing ${selected.size} of ${files.length} files — the rest stay uncommitted.`}
+              </div>
               <div className="ca-prform-actions">
                 <button className="btn btn-ghost btn-sm" onClick={() => setCommitOpen(false)} disabled={busy === 'commit'}>Cancel</button>
-                <button className="btn btn-primary btn-sm" onClick={commit} disabled={busy === 'commit' || !commitMsg.trim()}>
-                  {busy === 'commit' ? 'Committing…' : 'Commit'}
+                <button className="btn btn-primary btn-sm" onClick={commit} disabled={busy === 'commit' || !commitMsg.trim() || selected.size === 0}>
+                  {busy === 'commit' ? 'Committing…' : allSelected ? 'Commit' : `Commit ${selected.size}`}
                 </button>
               </div>
             </div>
@@ -196,6 +230,7 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
             allowDeleted={branchMode}
             onOpen={openFile}
             onContext={onContext}
+            selection={worktreeMode ? { selected, onToggle: toggle } : undefined}
           />
         )}
       </div>

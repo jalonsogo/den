@@ -55,8 +55,17 @@ sandbox — review the full diff and merge back"):
   for direct-mount it shows the working-tree diff.
 - **Fixed action bar** at the bottom: total **`+/−`** stat and branch, plus
   actions. Clone mode: **Open PR…** and **Merge…** (+ "Delete after"). Direct
-  mount: **Commit…** (stage-all + commit with a message) and **Open PR…** (push
+  mount: **Commit…** (commit with a message) and **Open PR…** (push
   the current branch + PR).
+- **Exclude from commit** — in direct-mount review each file has a checkbox
+  (all ticked by default); untick any and **Commit** stages/commits only the
+  ticked files (`git commit -- <paths>`), leaving the rest uncommitted. The
+  button shows the count (e.g. *Commit 3*) when a subset is selected.
+- **Add to .gitignore** — right-click a file (Files tree or Changes list) →
+  **Add to .gitignore** for that exact path, or **Ignore all `<glob>`** for a
+  broader pattern (e.g. `**/.claude/settings.local.json` for generated agent
+  config). The line is appended (deduped) to the workspace `.gitignore` and the
+  file drops out of the change list.
 - **Open PR…** expands inline into a form — **base** picker, editable **title**
   and **description** (prefilled from the branch's commits) — then **Create PR**
   shows the created PR inline (number/state + Open in browser); no auto-open.
@@ -136,7 +145,11 @@ Live-tail the `sbx` daemon logs, or read a specific sandbox's kit-startup log.
 ## Theming
 
 Light / dark / system, custom accent colors that retint the whole UI, and a
-terminal theme that can follow the app mode or be set independently.
+terminal theme that can follow the app mode or be set independently. A
+**Density** control (Default / Comfortable / Custom) scales the whole interface
+up or down at once (a window zoom factor), so you can size the UI without
+picking per-element font sizes. **Custom** takes your own zoom multiplier
+(0.5–2.0), letting you go smaller than Default or larger than Comfortable.
 
 ## Stay awake
 

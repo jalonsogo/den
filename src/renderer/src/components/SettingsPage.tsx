@@ -5,6 +5,7 @@ import { ACCENTS } from '../lib/accent'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
+import { FieldSelect, type FieldOption } from './FieldSelect'
 import {
   SOUND_OPTIONS, type SoundId, isSoundEnabled, setSoundEnabled,
   getSoundId, setSoundId, setCustomSound, getCustomSound, previewSound,
@@ -28,7 +29,7 @@ export function SettingsPage() {
     themePref, setThemePref, accent, accentColor, customAccents,
     setAccent, setCustomAccent, saveCustomAccent, removeCustomAccent,
     termTheme, setTermTheme, display, setDisplay,
-    fileOpenMode, setFileOpenMode
+    fileOpenMode, setFileOpenMode, density, setDensity, densityCustom, setDensityCustom
   } = useStore()
   const [tab, setTab] = useState<'general' | 'runtime' | 'secrets'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
@@ -166,17 +167,66 @@ export function SettingsPage() {
           </div>
           <div className="ss-row">
             <div>
+              <div className="ss-lbl">Density</div>
+              <div className="ss-sub">
+                Scales the whole interface at once. Choose Comfortable for larger,
+                or Custom for your own zoom multiplier.
+              </div>
+            </div>
+            <div className="ss-density">
+              <div className="seg" role="group" aria-label="Density">
+                {([
+                  { id: 'default', label: 'Default' },
+                  { id: 'comfortable', label: 'Comfortable' },
+                  { id: 'custom', label: 'Custom' }
+                ] as const).map(({ id, label }) => (
+                  <button
+                    key={id}
+                    className={`seg-opt${density === id ? ' on' : ''}`}
+                    onClick={() => setDensity(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {density === 'custom' && (
+                <label className="ss-density-custom">
+                  <span>×</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={2}
+                    step={0.1}
+                    value={densityCustom}
+                    onChange={(e) => setDensityCustom(Number(e.target.value))}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+          <div className="ss-row">
+            <div>
               <div className="ss-lbl">Terminal theme</div>
               <div className="ss-sub">Colors for the agent & shell terminals.</div>
             </div>
-            <select className="s-input" style={{ width: 200, cursor: 'pointer' }} value={termTheme} onChange={(e) => setTermTheme(e.target.value)}>
-              {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-              {TERM_THEME_GROUPS.map((g) => (
-                <optgroup key={g.mode} label={g.label}>
-                  {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-                </optgroup>
-              ))}
-            </select>
+            <div style={{ width: 240 }}>
+              <FieldSelect
+                ariaLabel="Terminal theme"
+                value={termTheme}
+                onChange={setTermTheme}
+                options={[
+                  ...TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map(
+                    (t): FieldOption => ({ value: t.id, label: t.label })
+                  ),
+                  ...TERM_THEME_GROUPS.flatMap((g): FieldOption[] => [
+                    { value: `__hdr_${g.mode}`, label: g.label, header: true },
+                    ...TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map(
+                      (t): FieldOption => ({ value: t.id, label: t.label })
+                    )
+                  ])
+                ]}
+              />
+            </div>
           </div>
           <div className="ss-row">
             <div>
@@ -310,15 +360,15 @@ export function SettingsPage() {
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <select
-                className="s-input"
-                style={{ width: 150, cursor: 'pointer' }}
-                value={soundId}
-                disabled={!soundOn}
-                onChange={(e) => { const id = e.target.value as SoundId; setSound(id); setSoundId(id) }}
-              >
-                {SOUND_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
+              <div style={{ width: 150 }}>
+                <FieldSelect
+                  ariaLabel="Finish sound"
+                  value={soundId}
+                  disabled={!soundOn}
+                  onChange={(v) => { const id = v as SoundId; setSound(id); setSoundId(id) }}
+                  options={SOUND_OPTIONS.map((o): FieldOption => ({ value: o.id, label: o.label }))}
+                />
+              </div>
               {soundId === 'custom' ? (
                 <label className="btn btn-default btn-sm" style={{ cursor: 'pointer' }}>
                   Choose…
@@ -349,15 +399,15 @@ export function SettingsPage() {
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <select
-                className="s-input"
-                style={{ width: 150, cursor: 'pointer' }}
-                value={askId}
-                disabled={!askOn}
-                onChange={(e) => { const id = e.target.value as SoundId; setAsk(id); setAskSoundId(id) }}
-              >
-                {SOUND_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
+              <div style={{ width: 150 }}>
+                <FieldSelect
+                  ariaLabel="Question sound"
+                  value={askId}
+                  disabled={!askOn}
+                  onChange={(v) => { const id = v as SoundId; setAsk(id); setAskSoundId(id) }}
+                  options={SOUND_OPTIONS.map((o): FieldOption => ({ value: o.id, label: o.label }))}
+                />
+              </div>
               {askId === 'custom' ? (
                 <label className="btn btn-default btn-sm" style={{ cursor: 'pointer' }}>
                   Choose…
