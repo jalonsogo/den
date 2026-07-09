@@ -2288,17 +2288,40 @@ function setupIPC(): void {
 
   // Stage all + commit the working-tree changes (direct-mount review). Runs on
   // the host (shared bind-mounted tree) so it uses the host's git identity.
-  ipcMain.handle('minipit:sandbox-commit', async (_, repoDir: string, message: string) => {
+  ipcMain.handle('minipit:sandbox-commit', async (_, repoDir: string, message: string, paths?: string[]) => {
     const git = gitIn(repoDir)
+    // `paths` (optional) = commit only these files ("exclude from commit"). An
+    // empty/omitted list means stage-all. `-A -- <paths>` stages adds/mods/dels
+    // under the given pathspecs, then `commit -- <paths>` commits exactly those.
+    const only = Array.isArray(paths) ? paths.filter(Boolean) : []
     try {
-      const added = await git(['add', '-A'])
+      const added = only.length ? await git(['add', '-A', '--', ...only]) : await git(['add', '-A'])
       if (added.code !== 0) return { ok: false, error: added.err || 'git add failed.' }
-      const committed = await git(['commit', '-m', message])
+      const committed = only.length
+        ? await git(['commit', '-m', message, '--', ...only])
+        : await git(['commit', '-m', message])
       if (committed.code !== 0) return { ok: false, error: committed.err || committed.out || 'Nothing to commit.' }
       return { ok: true }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
+  })
+
+  // Append one or more patterns to the workspace's .gitignore (deduped, one per
+  // line). Written inside the sandbox at the repo dir, so it works for both
+  // direct-mount (shared tree) and clone-mode (the agent's in-container clone).
+  ipcMain.handle('minipit:git-ignore-add', (_, name: string, repoDir: string, patterns: string[]) => {
+    const pats = (Array.isArray(patterns) ? patterns : []).map((p) => p.trim()).filter(Boolean)
+    if (pats.length === 0) return Promise.resolve({ ok: false, error: 'No pattern given.' })
+    return new Promise((resolve) => {
+      // $1 = repoDir; remaining positionals = patterns. grep -qxF avoids dupes.
+      const script =
+        'f="$1/.gitignore"; shift; ' +
+        'for p in "$@"; do grep -qxF -- "$p" "$f" 2>/dev/null || printf "%s\\n" "$p" >> "$f"; done'
+      execFile(getSbxPath(), ['exec', name, 'sh', '-c', script, 'sh', repoDir, ...pats],
+        { timeout: 10000 }, (err, _so, se) =>
+          resolve(err ? { ok: false, error: (se || err.message || 'Failed to update .gitignore.').trim() } : { ok: true }))
+    })
   })
 
   // Write contents back to a file (content piped to `cat > FILE`).

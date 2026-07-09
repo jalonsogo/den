@@ -289,6 +289,7 @@ declare global {
       isGitRepo(dir: string): Promise<boolean>
       gitInfo(dir: string): Promise<{ isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
       gitInit(dir: string): Promise<{ ok: boolean; error?: string }>
+      setZoomFactor(factor: number): void
       readFile(name: string, path: string): Promise<string>
       readFileBytes(name: string, path: string): Promise<{ base64: string; size: number }>
       gitDiffFile(name: string, path: string): Promise<{ diff: string }>
@@ -296,7 +297,8 @@ declare global {
       reviewFileDiff(name: string, repoDir: string, branch: string | null, path: string): Promise<{ diff: string }>
       listBranches(repoDir: string): Promise<string[]>
       prDefaults(repoDir: string, branch: string, base: string): Promise<{ title: string; body: string }>
-      sandboxCommit(repoDir: string, message: string): Promise<{ ok: boolean; error?: string }>
+      sandboxCommit(repoDir: string, message: string, paths?: string[]): Promise<{ ok: boolean; error?: string }>
+      gitIgnoreAdd(name: string, repoDir: string, patterns: string[]): Promise<{ ok: boolean; error?: string }>
       writeFile(name: string, path: string, content: string): Promise<void>
       openPath(path: string): Promise<string>
       openFileWindow(name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null): Promise<void>

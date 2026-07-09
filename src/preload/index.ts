@@ -1,7 +1,10 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
+  // UI density = a browser zoom factor applied to the whole window (scales every
+  // element uniformly). Renderer-side webFrame call, so no IPC round-trip.
+  setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
   listSandboxes: ()                     => ipcRenderer.invoke('minipit:list-sandboxes'),
   createSandbox: (config: unknown)      => ipcRenderer.invoke('minipit:create-sandbox', config),
   runSandbox:    (name: string)         => ipcRenderer.invoke('minipit:run-sandbox', name),
@@ -22,7 +25,8 @@ const api = {
   reviewFileDiff: (name: string, repoDir: string, branch: string | null, path: string) => ipcRenderer.invoke('minipit:review-file-diff', name, repoDir, branch, path),
   listBranches:  (repoDir: string) => ipcRenderer.invoke('minipit:list-branches', repoDir),
   prDefaults:    (repoDir: string, branch: string, base: string) => ipcRenderer.invoke('minipit:pr-defaults', repoDir, branch, base),
-  sandboxCommit: (repoDir: string, message: string) => ipcRenderer.invoke('minipit:sandbox-commit', repoDir, message),
+  sandboxCommit: (repoDir: string, message: string, paths?: string[]) => ipcRenderer.invoke('minipit:sandbox-commit', repoDir, message, paths),
+  gitIgnoreAdd:  (name: string, repoDir: string, patterns: string[]) => ipcRenderer.invoke('minipit:git-ignore-add', name, repoDir, patterns),
   writeFile:     (name: string, path: string, content: string) => ipcRenderer.invoke('minipit:write-file', name, path, content),
   openPath:      (path: string)         => ipcRenderer.invoke('minipit:open-path', path),
   openFileWindow:(name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null) => ipcRenderer.invoke('minipit:open-file-window', name, path, fileName, diff, reviewBranch),

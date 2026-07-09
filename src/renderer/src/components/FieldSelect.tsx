@@ -7,6 +7,8 @@ export interface FieldOption {
   label: string
   icon?: ReactNode
   disabled?: boolean
+  // A non-selectable group heading (like <optgroup>) rendered inline in the menu.
+  header?: boolean
 }
 
 // A custom form dropdown styled like `.finput` but able to show an icon beside
@@ -94,21 +96,25 @@ export function FieldSelect({
           role="listbox"
           style={{ left: pos.left, top: pos.top, width: pos.width }}
         >
-          {options.map((o) => (
-            <button
-              type="button"
-              key={o.value}
-              role="option"
-              aria-selected={o.value === value}
-              className={`fld-item${o.value === value ? ' sel' : ''}${o.disabled ? ' disabled' : ''}`}
-              disabled={o.disabled}
-              onClick={() => { if (!o.disabled) { onChange(o.value); setOpen(false) } }}
-            >
-              {o.icon && <span className="fld-ico">{o.icon}</span>}
-              <span className="fld-item-label">{o.label}</span>
-              {o.value === value && <Check size={14} className="fld-check" />}
-            </button>
-          ))}
+          {options.map((o) =>
+            o.header ? (
+              <div key={o.value} className="fld-hdr" role="presentation">{o.label}</div>
+            ) : (
+              <button
+                type="button"
+                key={o.value}
+                role="option"
+                aria-selected={o.value === value}
+                className={`fld-item${o.value === value ? ' sel' : ''}${o.disabled ? ' disabled' : ''}`}
+                disabled={o.disabled}
+                onClick={() => { if (!o.disabled) { onChange(o.value); setOpen(false) } }}
+              >
+                {o.icon && <span className="fld-ico">{o.icon}</span>}
+                <span className="fld-item-label">{o.label}</span>
+                {o.value === value && <Check size={14} className="fld-check" />}
+              </button>
+            )
+          )}
         </div>,
         document.body
       )}

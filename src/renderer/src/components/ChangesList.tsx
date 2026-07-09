@@ -1,4 +1,4 @@
-import { FilePlus, FilePen, FileMinus, FileSymlink, type LucideIcon } from 'lucide-react'
+import { FilePlus, FilePen, FileMinus, FileSymlink, Check, type LucideIcon } from 'lucide-react'
 import type { FileChange } from '../types'
 
 // Per-status colour + icon for a changed file. `new`/`deleted`/`renamed` map to
@@ -14,7 +14,7 @@ const STATUS_META: Record<string, { color: string; Icon: LucideIcon; label: stri
 // repo-relative path + filename (deleted files aren't openable, so they're inert).
 // `onContext` fires on right-click with the same path/name, for a file menu
 // (Reveal in Finder, Download, …) mirroring the Files tab.
-export function ChangesList({ changes, onOpen, onContext, empty, statFor, allowDeleted }: {
+export function ChangesList({ changes, onOpen, onContext, empty, statFor, allowDeleted, selection }: {
   changes: FileChange[]
   onOpen?: (relPath: string, name: string) => void
   onContext?: (e: React.MouseEvent, relPath: string, name: string) => void
@@ -23,6 +23,9 @@ export function ChangesList({ changes, onOpen, onContext, empty, statFor, allowD
   statFor?: (relPath: string) => { added: number; deleted: number; binary?: boolean } | undefined
   // Allow opening deleted files (their diff is still viewable in review mode).
   allowDeleted?: boolean
+  // Optional per-file selection (Commit "exclude from commit"). When present, a
+  // checkbox leads each row; ticked files are the ones a commit will include.
+  selection?: { selected: Set<string>; onToggle: (path: string) => void }
 }) {
   if (changes.length === 0) return <div className="changes-empty">{empty ?? 'No uncommitted changes.'}</div>
   const sorted = [...changes].sort((a, b) => a.path.localeCompare(b.path))
@@ -43,6 +46,17 @@ export function ChangesList({ changes, onOpen, onContext, empty, statFor, allowD
             onClick={() => openable && onOpen!(c.path, name)}
             onContextMenu={onContext ? (e) => { e.preventDefault(); e.stopPropagation(); onContext(e, c.path, name) } : undefined}
           >
+            {selection && (
+              <span
+                role="checkbox"
+                aria-checked={selection.selected.has(c.path)}
+                className={`changes-check${selection.selected.has(c.path) ? ' on' : ''}`}
+                title={selection.selected.has(c.path) ? 'Included in commit' : 'Excluded from commit'}
+                onClick={(e) => { e.stopPropagation(); selection.onToggle(c.path) }}
+              >
+                {selection.selected.has(c.path) && <Check size={11} />}
+              </span>
+            )}
             <Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
             <span className="changes-name">{name}</span>
             {dir && <span className="changes-dir">{dir}</span>}

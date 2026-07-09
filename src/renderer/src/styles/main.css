@@ -220,6 +220,18 @@ html, body, #root {
 .seg-opt:first-child { border-left: none; }
 .seg-opt:hover { background: var(--bg-subtle); color: var(--t1); }
 .seg-opt.on { color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--bg)); font-weight: 600; }
+.ss-density { display: flex; align-items: stretch; gap: 10px; }
+.ss-density-custom {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); border-radius: 7px; padding: 0 8px 0 10px;
+  background: var(--bg); color: var(--t2); font-size: 12px;
+}
+.ss-density-custom span { color: var(--t3); }
+.ss-density-custom input {
+  width: 46px; border: none; background: none; color: var(--t1);
+  font-size: 12px; font-weight: 600; text-align: right; padding: 0;
+}
+.ss-density-custom input:focus { outline: none; }
 .tb-acct-signout {
   display: flex; align-items: center; gap: 7px; width: 100%;
   font-size: 12.5px; color: var(--destruct); cursor: pointer;
@@ -1682,6 +1694,14 @@ html, body, #root {
 .changes-row:hover { background: var(--bg-subtle); }
 .changes-row.static { cursor: default; }
 .changes-row.static:hover { background: none; }
+.changes-check {
+  flex-shrink: 0; width: 15px; height: 15px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--bg);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; cursor: pointer;
+}
+.changes-check:hover { border-color: var(--t2); }
+.changes-check.on { background: var(--primary); border-color: var(--primary); }
 .changes-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 55%; }
 .changes-dir { font-size: 11px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 1; min-width: 0; }
 .changes-tag { font-size: 10px; font-weight: 700; font-family: 'SF Mono','Menlo',monospace; flex-shrink: 0; margin-left: auto; }
@@ -1717,6 +1737,7 @@ html, body, #root {
 .ca-prform-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 2px; }
 .ca-pr { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--t1); padding: 6px 10px 10px; }
 .ca-pr-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ca-commit-note { font-size: 11px; color: var(--t3); line-height: 1.4; }
 .ca-msg { font-size: 11.5px; padding: 0 10px 8px; }
 .ca-msg.ok { color: var(--green); }
 .ca-msg.err { color: var(--destruct); }
@@ -3420,6 +3441,12 @@ html, body, #root {
 .fld-item.disabled { color: var(--t3); cursor: default; }
 .fld-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fld-check { flex-shrink: 0; color: var(--accent, var(--blue)); }
+.fld-hdr {
+  padding: 7px 8px 3px; margin-top: 2px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--t3);
+}
+.fld-hdr:first-child { margin-top: 0; }
 .secret-op-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .secret-op-label { display: flex; align-items: center; gap: 8px; }
 .op-badge { display: inline-flex; align-items: center; color: #1668e3; flex-shrink: 0; }
@@ -3488,15 +3515,22 @@ html, body, #root {
 .agent-dd-item.on { background: var(--bg-subtle); }
 
 /* Advanced collapsible */
-.adv { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 12px; }
+.adv { border-top: 1px solid var(--border); }
+/* First section (Basic) sits right under the modal header divider — no second
+   line above it. */
+.m-body > .adv:first-child { border-top: none; }
 .adv-toggle {
-  display: flex; align-items: center; gap: 5px; width: 100%; text-align: left;
-  background: none; border: none; cursor: pointer;
-  font-size: 12.5px; font-weight: 600; color: var(--t2); padding: 0;
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer; line-height: 1;
+  font-size: 12.5px; font-weight: 600; color: var(--t2); padding: 12px 0;
 }
-.adv-toggle svg { flex-shrink: 0; }
+.adv-toggle svg { flex-shrink: 0; display: block; }
+.adv-chev { color: var(--t3); transition: transform 0.12s; }
 .adv-toggle:hover { color: var(--t1); }
-.adv-body { margin-top: 14px; display: flex; flex-direction: column; gap: 16px; }
+.adv-body { margin-top: 2px; padding-bottom: 12px; display: flex; flex-direction: column; gap: 16px; }
+/* Section bodies own the spacing via gap; drop the field's own margin so they
+   don't stack (14px + 16px). */
+.adv-body .fg { margin-bottom: 0; }
 
 .cmd-blk {
   background: #111;
@@ -3566,6 +3600,7 @@ html, body, #root {
 .ctx-item.destructive:hover { background: rgba(239,68,68,0.12); }
 .ctx-item.disabled { color: var(--t3); pointer-events: none; }
 .ctx-kbd { font-size: 11.5px; color: var(--t3); }
+.ctx-code { font-family: 'SF Mono','Menlo',monospace; font-size: 11px; color: var(--t2); }
 .ctx-sep { height: 1px; background: var(--border); margin: 3px 0; }
 
 /* Terminal theme submenu (flyout) inside the options menu */

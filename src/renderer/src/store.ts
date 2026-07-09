@@ -7,6 +7,16 @@ const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: d
 const resolveTheme = (pref: ThemePref): 'light' | 'dark' => (pref === 'system' ? (prefersDark() ? 'dark' : 'light') : pref)
 const initialThemePref = (localStorage.getItem('minipit:themePref') as ThemePref) ?? 'system'
 
+// UI density → a whole-window zoom factor (scales every element at once).
+// 'custom' uses a user-set multiplier (densityCustom).
+export type Density = 'default' | 'comfortable' | 'custom'
+const DENSITY_FIXED: Record<'default' | 'comfortable', number> = { default: 1, comfortable: 1.1 }
+export const densityFactor = (d: Density, custom: number): number => (d === 'custom' ? custom : DENSITY_FIXED[d])
+const clampFactor = (n: number): number => Math.min(2, Math.max(0.5, Number.isFinite(n) ? n : 1))
+const storedDensity = localStorage.getItem('minipit:density')
+const initialDensity: Density = storedDensity === 'comfortable' || storedDensity === 'custom' ? storedDensity : 'default'
+const initialDensityCustom = clampFactor(Number(localStorage.getItem('minipit:densityCustom')) || 1.2)
+
 interface ContextMenuState {
   visible: boolean
   x: number
@@ -56,6 +66,8 @@ interface AppState {
   // What a left-click on a file does: open the in-app previewer or hand off to
   // the host's default app.
   fileOpenMode: 'preview' | 'system'
+  density: Density
+  densityCustom: number
   sidebarCollapsed: boolean
   accent: string
   accentColor: string
@@ -116,6 +128,8 @@ interface AppState {
   setEditKit: (kit: { dir: string; name: string } | null) => void
   setThemePref:       (pref: 'light' | 'dark' | 'system') => void
   setFileOpenMode:    (mode: 'preview' | 'system') => void
+  setDensity:         (density: Density) => void
+  setDensityCustom:   (factor: number) => void
   toggleSidebar:      () => void
   setAccent:          (id: string) => void
   setCustomAccent:    (hex: string) => void
@@ -183,6 +197,8 @@ export const useStore = create<AppState>((set) => ({
   themePref: initialThemePref,
   theme: resolveTheme(initialThemePref),
   fileOpenMode: (localStorage.getItem('minipit:fileOpenMode') as 'preview' | 'system') ?? 'preview',
+  density: initialDensity,
+  densityCustom: initialDensityCustom,
   sidebarCollapsed: localStorage.getItem('minipit:sidebarCollapsed') === '1',
   accent: localStorage.getItem('minipit:accent') ?? 'blue',
   accentColor: localStorage.getItem('minipit:accentColor') ?? '#3b82f6',
@@ -475,6 +491,21 @@ export const useStore = create<AppState>((set) => ({
     localStorage.setItem('minipit:fileOpenMode', mode)
     set({ fileOpenMode: mode })
   },
+
+  setDensity: (density) =>
+    set((s) => {
+      localStorage.setItem('minipit:density', density)
+      window.minipit?.setZoomFactor(densityFactor(density, s.densityCustom))
+      return { density }
+    }),
+
+  setDensityCustom: (factor) =>
+    set((s) => {
+      const f = clampFactor(factor)
+      localStorage.setItem('minipit:densityCustom', String(f))
+      if (s.density === 'custom') window.minipit?.setZoomFactor(f)
+      return { densityCustom: f }
+    }),
 
   toggleSidebar: () =>
     set((state) => {
