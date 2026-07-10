@@ -9,6 +9,9 @@ dist-electron/
 # TypeScript incremental build info
 *.tsbuildinfo
 
+# Playwright MCP output (screenshots, traces) — transient tool artifacts
+.playwright-mcp/
+
 # Raw icon exports from Icon Composer — transient, tool-named renders.
 # Source of truth is resources/icon/den.icon; the committed, code-referenced
 # icons are resources/icon/dock.png + dock-dark.png (see `npm run sync:icons`).
