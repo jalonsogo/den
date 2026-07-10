@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { applyAccent, ensureRamp, savedAccents, writeSavedAccents, type SavedAccent } from './lib/accent'
+import { applyTheme, DEFAULT_THEME } from './lib/themes'
 import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template, Group } from './types'
 
 type ThemePref = 'light' | 'dark' | 'system'
@@ -69,9 +69,8 @@ interface AppState {
   density: Density
   densityCustom: number
   sidebarCollapsed: boolean
+  // Selected color theme id (drives the full palette: surfaces + accent).
   accent: string
-  accentColor: string
-  customAccents: SavedAccent[]
   termTheme: string
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
@@ -132,9 +131,6 @@ interface AppState {
   setDensityCustom:   (factor: number) => void
   toggleSidebar:      () => void
   setAccent:          (id: string) => void
-  setCustomAccent:    (hex: string) => void
-  saveCustomAccent:   (hex: string) => void
-  removeCustomAccent: (id: string) => void
   setTermTheme:       (id: string) => void
   setSandboxIcon:     (name: string, iconKey: string | null) => void
   setSandboxColor:    (name: string, hex: string | null) => void
@@ -200,9 +196,7 @@ export const useStore = create<AppState>((set) => ({
   density: initialDensity,
   densityCustom: initialDensityCustom,
   sidebarCollapsed: localStorage.getItem('minipit:sidebarCollapsed') === '1',
-  accent: localStorage.getItem('minipit:accent') ?? 'blue',
-  accentColor: localStorage.getItem('minipit:accentColor') ?? '#3b82f6',
-  customAccents: savedAccents(),
+  accent: localStorage.getItem('minipit:accent') ?? DEFAULT_THEME,
   termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
   sandboxIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
@@ -259,52 +253,13 @@ export const useStore = create<AppState>((set) => ({
   setEditKit: (kit) => set({ editKit: kit }),
 
 
+  // Pick a color theme — applies its full palette (surfaces + accent) for the
+  // active light/dark mode.
   setAccent: (id) =>
     set((state) => {
       localStorage.setItem('minipit:accent', id)
-      applyAccent(id, state.accentColor)
-      // Saved custom swatches are ramp-driven; ensure the ramp is built/cached.
-      const saved = state.customAccents.find((s) => s.id === id)
-      if (saved) ensureRamp(saved.hex).then(() => applyAccent(id)).catch(() => {})
+      applyTheme(id, state.theme)
       return { accent: id }
-    }),
-
-  setCustomAccent: (hex) =>
-    set(() => {
-      localStorage.setItem('minipit:accent', 'custom')
-      localStorage.setItem('minipit:accentColor', hex)
-      applyAccent('custom', hex)
-      // Generate the ramp (async, in main) then re-apply so the harmonized
-      // mid-tone drives --primary instead of the raw picked hex.
-      ensureRamp(hex).then(() => applyAccent('custom', hex)).catch(() => {})
-      return { accent: 'custom', accentColor: hex }
-    }),
-
-  // Persist the current picker color as a reusable swatch and make it active.
-  saveCustomAccent: (hex) =>
-    set((state) => {
-      const id = `custom-${hex.replace('#', '').toLowerCase()}`
-      const list = state.customAccents.some((s) => s.id === id)
-        ? state.customAccents
-        : [...state.customAccents, { id, hex }]
-      writeSavedAccents(list)
-      localStorage.setItem('minipit:accent', id)
-      ensureRamp(hex).then(() => applyAccent(id)).catch(() => applyAccent(id))
-      applyAccent(id)
-      return { customAccents: list, accent: id, accentColor: hex }
-    }),
-
-  removeCustomAccent: (id) =>
-    set((state) => {
-      const list = state.customAccents.filter((s) => s.id !== id)
-      writeSavedAccents(list)
-      // If the removed swatch was active, fall back to the default accent.
-      if (state.accent === id) {
-        localStorage.setItem('minipit:accent', 'blue')
-        applyAccent('blue')
-        return { customAccents: list, accent: 'blue' }
-      }
-      return { customAccents: list }
     }),
 
   setTermTheme: (id) =>
@@ -482,8 +437,8 @@ export const useStore = create<AppState>((set) => ({
       localStorage.setItem('minipit:themePref', pref)
       const theme = resolveTheme(pref)
       document.documentElement.setAttribute('data-theme', theme)
-      // Re-apply the accent so any GUI tint matches the new mode.
-      applyAccent(state.accent, state.accentColor)
+      // Re-apply the color theme so its palette matches the new light/dark mode.
+      applyTheme(state.accent, theme)
       return { themePref: pref, theme }
     }),
 
@@ -688,11 +643,11 @@ export const useStore = create<AppState>((set) => ({
 
 // When the theme preference is "system", follow the OS appearance live.
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  const { themePref, accent, accentColor } = useStore.getState()
+  const { themePref, accent } = useStore.getState()
   if (themePref !== 'system') return
   const theme = resolveTheme('system')
   document.documentElement.setAttribute('data-theme', theme)
-  applyAccent(accent, accentColor)
+  applyTheme(accent, theme)
   useStore.setState({ theme })
 })
 

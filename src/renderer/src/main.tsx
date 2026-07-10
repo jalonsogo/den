@@ -2,7 +2,7 @@ import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { FileEditorWindow } from './FileEditorWindow'
 import './styles/main.css'
-import { applyAccent } from './lib/accent'
+import { applyTheme, DEFAULT_THEME } from './lib/themes'
 
 // Apply the persisted theme + accent before first paint to avoid a flash.
 const themePref = localStorage.getItem('minipit:themePref') ?? 'system'
@@ -19,10 +19,8 @@ const densityCustom = Math.min(2, Math.max(0.5, Number(localStorage.getItem('min
 const densityZoom =
   densityRaw === 'custom' ? densityCustom : densityRaw === 'comfortable' ? 1.1 : 1
 window.minipit?.setZoomFactor?.(densityZoom)
-applyAccent(
-  localStorage.getItem('minipit:accent') ?? 'blue',
-  localStorage.getItem('minipit:accentColor') ?? '#3b82f6'
-)
+// Apply the persisted color theme (surfaces + accent) for the resolved mode.
+applyTheme(localStorage.getItem('minipit:accent') ?? DEFAULT_THEME, resolvedTheme)
 
 // Route: a separate editor window loads with hash #/editor?sandbox=…&path=…&name=…
 const hash = window.location.hash
