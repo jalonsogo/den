@@ -240,16 +240,21 @@ export function NewSandboxModal() {
     })()
   }
 
-  const cmdParts = [
-    'sbx create',
-    name.trim() ? `--name ${name.trim()}` : '',
-    source === 'template' && template ? `-t ${template}` : '',
-    memValue !== 'default' ? `-m ${memValue}` : '',
-    clone ? '--clone' : '',
-    ...selKits.map((dir) => `--kit ${availKits.find((k) => k.dir === dir)?.name ?? dir}`),
+  // The preview must be the *exact* command den runs so it's copy-pasteable.
+  // `--kit` takes the kit's local directory (what we pass), not its name — sbx
+  // can't resolve a bare name. Quote any token with spaces (e.g. the macOS
+  // "Application Support" path).
+  const q = (s: string): string => (/\s/.test(s) ? `"${s}"` : s)
+  const cmdTokens = [
+    'sbx', 'create',
+    ...(name.trim() ? ['--name', name.trim()] : []),
+    ...(source === 'template' && template ? ['-t', template] : []),
+    ...(memValue !== 'default' ? ['-m', memValue] : []),
+    ...(clone ? ['--clone'] : []),
+    ...selKits.flatMap((entry) => ['--kit', q(entry)]),
     agent,
-    workspace || '<workspace>'
-  ].filter(Boolean).join(' ')
+    q(workspace || '<workspace>')
+  ]
 
   return (
     <div className="overlay">{/* No close-on-outside-click: use Cancel / Run in background. */}
@@ -533,11 +538,13 @@ export function NewSandboxModal() {
             onToggle={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
           >
                 <div className="cmd-blk">
-                  {cmdParts.split(' ').map((word, i) => {
-                    if (word === 'sbx') return <span key={i} className="cm-b">{word} </span>
-                    if (word === 'create' || word === agent) return <span key={i} className="cm-a">{word} </span>
-                    if (word.startsWith('-')) return <span key={i} className="cm-f">{word} </span>
-                    return <span key={i} className="cm-v">{word} </span>
+                  {cmdTokens.map((word, i) => {
+                    const cls =
+                      word === 'sbx' ? 'cm-b'
+                        : word === 'create' || word === agent ? 'cm-a'
+                        : word.startsWith('-') ? 'cm-f'
+                        : 'cm-v'
+                    return <span key={i} className={cls}>{word} </span>
                   })}
                 </div>
           </Section>

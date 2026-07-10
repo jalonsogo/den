@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Sun, Moon, Monitor, Eye, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
-import { ACCENTS } from '../lib/accent'
+import { THEMES, type Theme } from '../lib/themes'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
@@ -24,17 +24,27 @@ const DEFAULT_SETTINGS: AppSettings = {
   keepAwake: true
 }
 
+// A tiny mini-window swatch for a theme, shown inline in the theme dropdown
+// (trigger + each option). Uses the theme's own light palette + accent so the
+// icon previews the actual colors.
+function themeIcon(t: Theme): React.ReactNode {
+  return (
+    <span className="theme-ico" style={{ background: t.light['--bg-subtle'] }}>
+      <span className="theme-ico-bar" style={{ background: t.light['--bg-muted'] }} />
+      <span className="theme-ico-dot" style={{ background: t.accent }} />
+    </span>
+  )
+}
+
 export function SettingsPage() {
   const {
-    themePref, setThemePref, accent, accentColor, customAccents,
-    setAccent, setCustomAccent, saveCustomAccent, removeCustomAccent,
+    themePref, setThemePref, accent, setAccent,
     termTheme, setTermTheme, display, setDisplay,
     fileOpenMode, setFileOpenMode, density, setDensity, densityCustom, setDensityCustom
   } = useStore()
   const [tab, setTab] = useState<'general' | 'runtime' | 'secrets'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
-  const [palette, setPalette] = useState<string[]>([])
 
   // Finalize-sound prefs (stored in localStorage via lib/sound).
   const [soundOn, setSoundOn] = useState(isSoundEnabled())
@@ -71,18 +81,6 @@ export function SettingsPage() {
     }
     reader.readAsDataURL(file)
   }
-
-  // The active custom hex: the live picker color, or a saved swatch's color.
-  const activeHex =
-    accent === 'custom'
-      ? accentColor
-      : customAccents.find((s) => s.id === accent)?.hex ?? null
-
-  // Generate the ramp for the active custom/saved color to show the strip.
-  useEffect(() => {
-    if (!activeHex) { setPalette([]); return }
-    window.minipit?.generatePalette(activeHex).then((p) => setPalette(p ?? [])).catch(() => setPalette([]))
-  }, [activeHex])
 
   // Snapshot of the last-persisted settings, so the auto-save effect can tell a
   // real edit from the initial load (and skip no-op saves).
@@ -176,7 +174,7 @@ export function SettingsPage() {
             <div className="ss-density">
               <div className="seg" role="group" aria-label="Density">
                 {([
-                  { id: 'default', label: 'Default' },
+                  { id: 'default', label: 'Compact' },
                   { id: 'comfortable', label: 'Comfortable' },
                   { id: 'custom', label: 'Custom' }
                 ] as const).map(({ id, label }) => (
@@ -230,69 +228,22 @@ export function SettingsPage() {
           </div>
           <div className="ss-row">
             <div>
-              <div className="ss-lbl">Accent color</div>
-              <div className="ss-sub">Used for primary buttons and highlights.</div>
+              <div className="ss-lbl">Theme</div>
+              <div className="ss-sub">A soft, full-interface color palette. Each color is its own coordinated theme.</div>
             </div>
-            <div className="accent-swatches">
-              {ACCENTS.map((a) => (
-                <button
-                  key={a.id}
-                  className={`accent-sw${accent === a.id ? ' on' : ''}`}
-                  title={a.label}
-                  onClick={() => setAccent(a.id)}
-                  style={{ background: a.color ?? 'var(--t1)' }}
-                />
-              ))}
-              {/* Saved custom swatches — click to apply, × to remove. */}
-              {customAccents.map((s) => (
-                <span key={s.id} className="accent-sw-saved">
-                  <button
-                    className={`accent-sw${accent === s.id ? ' on' : ''}`}
-                    title={s.hex}
-                    onClick={() => setAccent(s.id)}
-                    style={{ background: s.hex }}
-                  />
-                  <button
-                    className="accent-sw-x"
-                    title="Remove"
-                    onClick={() => removeCustomAccent(s.id)}
-                  >×</button>
-                </span>
-              ))}
-              {/* Live color picker — generates a ramp via rampa-sdk. */}
-              <label
-                className={`accent-sw accent-sw-custom${accent === 'custom' ? ' on' : ''}`}
-                title="Pick a custom color"
-                style={accent === 'custom' ? { background: accentColor } : undefined}
-              >
-                <input
-                  type="color"
-                  value={accentColor}
-                  onChange={(e) => setCustomAccent(e.target.value)}
-                />
-              </label>
+            <div style={{ width: 240 }}>
+              <FieldSelect
+                ariaLabel="Theme"
+                value={accent}
+                onChange={setAccent}
+                options={THEMES.map((t): FieldOption => ({
+                  value: t.id,
+                  label: t.label,
+                  icon: themeIcon(t)
+                }))}
+              />
             </div>
           </div>
-          {activeHex && palette.length > 0 && (
-            <div className="ss-row" style={{ paddingTop: 0 }}>
-              <div>
-                <div className="ss-lbl">Generated palette</div>
-                <div className="ss-sub">Ramp generated from your color with rampa — drives buttons & highlights.</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div className="ramp-strip">
-                  {palette.map((c, i) => (
-                    <span key={i} className="ramp-step" title={c} style={{ background: c }} />
-                  ))}
-                </div>
-                {accent === 'custom' && (
-                  <button className="btn btn-default btn-sm" onClick={() => saveCustomAccent(accentColor)}>
-                    Save swatch
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="ss">
