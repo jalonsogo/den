@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut } from 'lucide-react'
 import { useStore } from '../store'
-import { formatUptime } from '../lib/utils'
 
 const ACCOUNT_EMAIL = 'javier.alonso@docker.com'
 const ORGS = ['Docker', 'Personal']
@@ -9,8 +8,6 @@ const ORGS = ['Docker', 'Personal']
 export function Toolbar() {
   const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
-  const activity = useStore((s) => (sandbox ? s.agentActivity[sandbox.name] ?? null : null))
-  const showStatus = !!sandbox && activePage === 'sandbox' && sandbox.status === 'running' && !!activity
 
   const [acctOpen, setAcctOpen] = useState(false)
   const [org, setOrg] = useState(ORGS[0])
@@ -55,11 +52,10 @@ export function Toolbar() {
     if (activePage === 'mixins')     return { title: 'Mixin Kits', sub: 'Add-ons layered onto an agent' }
     if (activePage === 'kits')       return { title: 'Sandbox Kits', sub: 'Full agents, defined from scratch' }
     if (activePage === 'settings')   return { title: 'Settings', sub: 'den preferences' }
-    if (!sandbox) return { title: 'den', sub: 'No sandbox selected' }
-    const uptime = sandbox.uptimeSeconds ? formatUptime(sandbox.uptimeSeconds) : ''
-    if (sandbox.status !== 'running') return { title: sandbox.name, sub: 'Stopped' }
-    const verb = activity === 'working' ? 'Working…' : activity === 'waiting' ? 'Waiting for you' : 'Running'
-    return { title: sandbox.name, sub: uptime ? `${verb} · ${uptime}` : verb }
+    // On the sandbox detail page the sandbox's own header owns the name +
+    // status + uptime, so keep the window header clear of that duplicate.
+    if (sandbox) return { title: '', sub: '' }
+    return { title: 'den', sub: 'No sandbox selected' }
   }
 
   const { title, sub } = getTitle()
@@ -75,20 +71,17 @@ export function Toolbar() {
       </button>
 
       <div className="tb-center">
-        <div className="tb-title">
-          {showStatus && <span className={`tb-status-dot ${activity}`} />}
-          {title}
-        </div>
-        <div className="tb-sub">{sub}</div>
+        {title && <div className="tb-title">{title}</div>}
+        {sub && <div className="tb-sub">{sub}</div>}
       </div>
 
       <div style={{ flex: 1 }} />
 
-      <div className="tb-search">
+      <button className="tb-search" onClick={() => useStore.getState().setPaletteOpen(true)}>
         <Search size={12} style={{ color: 'var(--t3)' }} />
         <span className="tb-search-ph">Search…</span>
         <span className="tb-search-kbd">⌘K</span>
-      </div>
+      </button>
 
       <div className="tb-sep" />
 

@@ -113,8 +113,11 @@ html, body, #root {
   border-radius: var(--radius);
   padding: 5px 9px;
   width: 196px;
-  cursor: text;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
+.tb-search:hover { border-color: var(--t3); }
 .tb-search-ph { font-size: 12px; color: var(--t3); flex: 1; }
 .tb-search-kbd {
   font-size: 10px;
@@ -348,12 +351,6 @@ html, body, #root {
    the grey status dot + muted name already signal "stopped". */
 .sb-item.is-stopped .sbx-avatar { opacity: 0.7; }
 
-/* Toolbar active-sandbox status dot */
-.tb-status-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle;
-}
-.tb-status-dot.waiting { background: var(--blue); animation: activity-pulse 1.3s ease-in-out infinite; }
-.tb-status-dot.working { background: var(--yellow); animation: activity-pulse 1.3s ease-in-out infinite; }
 .sb-item.is-stopped .sb-item-name { color: var(--sb-muted); }
 .sb-item.is-deleting { pointer-events: none; opacity: 0.7; }
 /* Momentary flash on a just-created sandbox so it's easy to spot. */
@@ -1021,6 +1018,14 @@ html, body, #root {
 .ds-folder-btn:hover .ds-folder-ico-open { display: inline; }
 .ds-folder-btn:hover { color: var(--t1); }
 .ds-folder-btn:hover .ds-folder { color: var(--t1); }
+/* The folder chip as a full-width bar pinned to the bottom of the Files panel.
+   Defined after .ds-folder-btn so its background/height win over that base. */
+.files-local {
+  flex-shrink: 0; width: 100%; height: 34px; justify-content: flex-start;
+  gap: 7px; padding: 0 12px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--t2); background: var(--bg-subtle);
+}
+.files-local:hover { background: var(--bg-muted); }
 .ds-branch { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .ds-branch > svg { opacity: 0.7; }
 .ds-changes-wrap { position: relative; flex-shrink: 0; }
@@ -1071,6 +1076,9 @@ html, body, #root {
 }
 .d-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--border-hi); }
 .d-status.on::before { background: var(--green); }
+/* Agent-activity states — match the sidebar/toolbar dots so the header agrees. */
+.d-status.working::before { background: var(--yellow); animation: activity-pulse 1.3s ease-in-out infinite; }
+.d-status.waiting::before { background: var(--blue); animation: activity-pulse 1.3s ease-in-out infinite; }
 .d-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .d-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 .d-back {
@@ -2731,7 +2739,31 @@ html, body, #root {
 .lib-hdr-tpl, .lib-row-tpl {
   grid-template-columns: minmax(140px, 1.8fr) 1.2fr 1fr 76px;
 }
-.lib-hdr-kit, .lib-row-kit { grid-template-columns: minmax(140px, 1fr) 1.4fr auto; }
+/* name | capabilities | actions. Actions is a FIXED width (not `auto`) so the
+   header grid and the row grids resolve to identical track widths — otherwise
+   the empty header actions cell vs the wide button cell would push the flexible
+   capabilities column to a different width and the columns wouldn't line up. */
+.lib-hdr-kit, .lib-row-kit { grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 232px; }
+/* Five equal, flexible capability columns, shared by the header labels and the
+   KitCaps cells so they align and shrink together. */
+.kit-caps-hdr { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; }
+.kit-caps-hdr > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-row-kit .kit-caps:not(.compact) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.lib-row-kit .kit-caps:not(.compact) .kit-cap-ic { padding: 0 8px 0 0; min-width: 0; overflow: hidden; }
+.lib-row-kit .kit-cap-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Progressive shrink as the table narrows. Drop the per-cell text label *first*
+   — before it can truncate to "Comma…"/"Remote…" — since the column header
+   already names each cell; keep the icon + count. Then at the very narrow end
+   drop the icon too, leaving a count-only cell that still reads via the header.
+   (Wide tables keep the full label; the community-gallery cards, which have no
+   header row, always keep theirs.) */
+.lib-tbl { container-type: inline-size; }
+@container (max-width: 1024px) {
+  .lib-row-kit .kit-cap-lbl { display: none; }
+}
+@container (max-width: 760px) {
+  .lib-row-kit .kit-cap-ic > svg { display: none; }
+}
 .kit-unpacked {
   font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
   color: var(--t3); background: var(--bg-subtle); border: 1px solid var(--border);
@@ -2746,7 +2778,7 @@ html, body, #root {
   justify-content: start;
 }
 .kit-caps:not(.compact) .kit-cap-ic { padding: 0 12px 0 0; border-left: none; }
-.kit-cap-ic.is-empty { pointer-events: none; }
+.kit-cap-ic.is-empty { pointer-events: none; color: var(--t3); }
 .kit-cap-empty { font-size: 12px; color: var(--t3); }
 .kit-cap-ic {
   display: inline-flex; align-items: center; gap: 5px;
@@ -3084,6 +3116,25 @@ html, body, #root {
 .sec-st.ok .sec-sd { background: var(--green); }
 .sec-st.no { color: var(--t3); }
 .sec-st.no .sec-sd { background: var(--border-hi); }
+.sec-st.warn { color: #b45309; }
+.sec-st.warn .sec-sd { background: #f59e0b; }
+.sec-badge {
+  flex-shrink: 0;
+  font-family: -apple-system, system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--border-lo, rgba(127,127,127,0.14));
+  color: var(--t3);
+  border: 1px solid var(--border);
+}
+.sec-badge-warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.4);
+}
 
 /* ── Settings ── */
 /* Calm settings layout: no section boxes, no row divider lines. */
@@ -3621,3 +3672,53 @@ html, body, #root {
   min-height: 28px;
 }
 ::-webkit-scrollbar-thumb:hover { background-color: var(--t3); }
+
+/* ── Command palette (⌘K) ──────────────────────────────────────────────────── */
+.cmdk-scrim {
+  position: fixed; inset: 0; z-index: 400;
+  display: flex; justify-content: center; align-items: flex-start;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(2px);
+}
+.cmdk {
+  width: min(640px, 92vw); max-height: 62vh;
+  display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+.cmdk-input-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.cmdk-input-ic { color: var(--t3); flex-shrink: 0; }
+.cmdk-input {
+  flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+  font-size: 15px; color: var(--t1); font-family: inherit;
+}
+.cmdk-input::placeholder { color: var(--t3); }
+.cmdk-esc {
+  flex-shrink: 0; font-size: 10.5px; color: var(--t3);
+  border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;
+}
+.cmdk-list { overflow-y: auto; padding: 6px; }
+.cmdk-empty { padding: 28px 10px; text-align: center; color: var(--t3); font-size: 13px; }
+.cmdk-group { margin-bottom: 2px; }
+.cmdk-group-hd {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--t3); padding: 8px 10px 4px;
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: none; border-radius: 8px; background: none;
+  text-align: left; cursor: pointer; color: var(--t1); font-size: 13.5px; font-family: inherit;
+}
+.cmdk-item.sel { background: var(--bg-subtle); }
+.cmdk-item-ic {
+  width: 20px; height: 18px; flex-shrink: 0; color: var(--t2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cmdk-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item-hint { flex-shrink: 0; color: var(--t3); font-size: 11.5px; }
+.cmdk-item-enter { flex-shrink: 0; color: var(--t3); }

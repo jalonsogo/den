@@ -33,6 +33,16 @@ function fmtDate(iso?: string): string {
   }
 }
 
+// Pull the username out of `sbx login`'s confirmation line, e.g.
+// "You are signed in [username: javieralonso716]" (ANSI colour codes stripped
+// first, since the stream may carry them). Returns null if no name is present.
+function parseSignedInUser(output: string): string | null {
+  // eslint-disable-next-line no-control-regex
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, '')
+  const m = clean.match(/username:\s*([^\]\s,]+)/i)
+  return m ? m[1] : null
+}
+
 // `sbx diagnose` / `sbx daemon` animate their checklist with a spinner — ANSI
 // escape codes plus carriage returns and cursor moves that redraw lines in
 // place. Streaming those raw bytes into a <pre> shows every intermediate frame
@@ -197,7 +207,13 @@ export function SbxRuntimePanel({
   const [install, setInstall] = useState<import('../types').SbxInstallInfo | null>(null)
   const [account, setAccount] = useState<{ loggedIn: boolean; username?: string } | null>(null)
   const [signingIn, setSigningIn] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  // A DNS/network reachability failure during sign-in/out — surfaced under the
+  // Authentication row so a network blip doesn't read as "not signed in".
+  const [authNetErr, setAuthNetErr] = useState<string | null>(null)
+  const [loginOut, setLoginOut] = useState('')
   const outRef = useRef<HTMLDivElement>(null)
+  const loginRef = useRef<HTMLDivElement>(null)
 
   // Diagnostics (`sbx diagnose`) — its own busy/output state so it doesn't
   // collide with the update/login stream above.
@@ -215,9 +231,20 @@ export function SbxRuntimePanel({
   const diagRef = useRef<HTMLDivElement>(null)
   const daemonRef = useRef<HTMLDivElement>(null)
 
+  // Daemon health + log level (`sbx daemon status` / `log-level`).
+  const [daemonStatus, setDaemonStatus] = useState<{ running: boolean; raw?: string } | null>(null)
+  const [logLevel, setLogLevel] = useState<string>('')
+  const [logLevelBusy, setLogLevelBusy] = useState(false)
+
   // Runtime settings (`sbx settings set`) + reset (`sbx reset`).
   const [imagePaste, setImagePaste] = useState(false)
   const [settingBusy, setSettingBusy] = useState(false)
+  // den-managed runtime env overrides (proxy / virtiofs cache). Take effect on
+  // the next daemon restart.
+  const [runtimeProxy, setRuntimeProxy] = useState('')
+  const [runtimeNoProxy, setRuntimeNoProxy] = useState('')
+  const [virtiofsCache, setVirtiofsCache] = useState(true)
+  const [runtimeEnvDirty, setRuntimeEnvDirty] = useState(false)
   const [preserveSecrets, setPreserveSecrets] = useState(true)
   const [resetConfirm, setResetConfirm] = useState('')
   const [resetBusy, setResetBusy] = useState(false)
@@ -236,10 +263,45 @@ export function SbxRuntimePanel({
   const handleSignIn = async () => {
     if (signingIn) return
     setSigningIn(true)
-    setOutput('')
+    setLoginOut('')
+    setAuthNetErr(null)
     const r = await window.minipit?.dockerLogin().catch((e) => ({ ok: false, error: String(e) }))
     setSigningIn(false)
-    if (r?.ok) loadAccount()
+    if (r?.ok) {
+      // The runtime login can authenticate a different account than the Docker
+      // Hub credential store `loadAccount()` reads, so its confirmation ("You
+      // are signed in [username: …]") is the authoritative source here — reflect
+      // it directly rather than re-reading the credential store, which may not
+      // carry the runtime login and would wrongly revert the row to "Not signed
+      // in". Only fall back to the credential store when the runtime reports no
+      // username.
+      const out = 'output' in r ? r.output : undefined
+      const username = out ? parseSignedInUser(out) : null
+      if (username) {
+        setAccount({ loggedIn: true, username })
+      } else {
+        const a = await window.minipit?.dockerAccount().catch(() => null)
+        setAccount(a?.loggedIn ? a : { loggedIn: true })
+      }
+    } else if (r && 'netError' in r && r.netError) {
+      // Couldn't reach Docker Hub — say so instead of implying a bad login.
+      setAuthNetErr('Couldn’t reach Docker Hub — check your network/DNS (or a proxy/firewall in front of it) and try again.')
+    }
+  }
+
+  // `sbx logout` clears all stored Docker credentials (v0.35), so this fully
+  // resets the Authentication state.
+  const handleSignOut = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    setLoginOut('')
+    setAuthNetErr(null)
+    const r = await window.minipit?.dockerLogout().catch((e) => ({ ok: false, error: String(e) }))
+    setSigningOut(false)
+    if (r?.ok) setAccount({ loggedIn: false })
+    else if (r && 'netError' in r && r.netError) {
+      setAuthNetErr('Couldn’t reach Docker Hub to sign out — check your network/DNS and try again.')
+    }
   }
 
   const loadVersion = () => {
@@ -257,12 +319,24 @@ export function SbxRuntimePanel({
     setTimeout(() => setVerify('idle'), 2500)
   }
 
+  const loadDaemonStatus = () =>
+    window.minipit?.daemonStatus()
+      .then((s) => setDaemonStatus(s?.ok ? { running: s.running, raw: s.raw } : { running: false, raw: s?.error }))
+      .catch(() => setDaemonStatus(null))
+
   useEffect(() => {
     loadVersion()
     loadAccount()
+    loadDaemonStatus()
     window.minipit?.sbxInstallInfo().then((i) => setInstall(i ?? null)).catch(() => {})
     window.minipit?.sbxReleases().then((r) => setReleases(r ?? [])).catch(() => {}).finally(() => setLoading(false))
-    window.minipit?.getSettings().then((s) => setImagePaste(!!s?.imagePaste)).catch(() => {})
+    window.minipit?.getSettings().then((s) => {
+      setImagePaste(!!s?.imagePaste)
+      setRuntimeProxy(s?.runtimeProxy ?? '')
+      setRuntimeNoProxy(s?.runtimeNoProxy ?? '')
+      setVirtiofsCache(s?.runtimeVirtiofsCache ?? true)
+    }).catch(() => {})
+    window.minipit?.daemonLogLevel().then((r) => { if (r?.ok && r.level) setLogLevel(r.level) }).catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -279,6 +353,31 @@ export function SbxRuntimePanel({
     setSettingBusy(false)
   }
 
+  const changeLogLevel = async (level: string) => {
+    if (logLevelBusy || !level) return
+    setLogLevelBusy(true)
+    const prev = logLevel
+    setLogLevel(level)
+    const r = await window.minipit?.daemonLogLevel(level).catch(() => null)
+    if (!r?.ok) setLogLevel(prev) // revert on failure
+    else if (r.level) setLogLevel(r.level)
+    setLogLevelBusy(false)
+  }
+
+  // Persist a den-managed runtime env override. Marks the section dirty so we
+  // can prompt for the daemon restart that actually applies it.
+  const saveRuntimeEnv = async (key: 'runtimeProxy' | 'runtimeNoProxy' | 'runtimeVirtiofsCache', value: string | boolean) => {
+    await window.minipit?.setRuntimeEnv(key, value === '' ? null : value).catch(() => {})
+    window.minipit?.saveSettings({ [key]: value }).catch(() => {})
+    setRuntimeEnvDirty(true)
+  }
+
+  const toggleVirtiofsCache = () => {
+    const next = !virtiofsCache
+    setVirtiofsCache(next)
+    saveRuntimeEnv('runtimeVirtiofsCache', next)
+  }
+
   const handleReset = async () => {
     if (resetBusy || !canReset) return
     setResetBusy(true)
@@ -290,18 +389,24 @@ export function SbxRuntimePanel({
     else setResetMsg({ ok: false, text: (res && 'error' in res && res.error) || 'Reset failed.' })
   }
 
-  // Stream brew (update/redownload) and sbx login output into the same box.
+  // Stream brew (update/redownload) into the main output box, and `sbx login`
+  // into its own box under the Authentication row so the sign-in confirmation
+  // shows next to that control rather than at the bottom of the card.
   useEffect(() => {
-    const append = (chunk: string) =>
-      setOutput((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next })
-    const unsubRt = window.minipit?.onRuntimeOutput(append)
-    const unsubLogin = window.minipit?.onLoginOutput(append)
+    const unsubRt = window.minipit?.onRuntimeOutput((chunk) =>
+      setOutput((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next }))
+    const unsubLogin = window.minipit?.onLoginOutput((chunk) =>
+      setLoginOut((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next }))
     return () => { unsubRt?.(); unsubLogin?.() }
   }, [])
 
   useEffect(() => {
     if (outRef.current) outRef.current.scrollTop = outRef.current.scrollHeight
   }, [output])
+
+  useEffect(() => {
+    if (loginRef.current) loginRef.current.scrollTop = loginRef.current.scrollHeight
+  }, [loginOut])
 
   // Stream `sbx diagnose` output into its own box.
   useEffect(() => {
@@ -363,6 +468,8 @@ export function SbxRuntimePanel({
     setDaemonOut('')
     await window.minipit?.daemonRestart().catch(() => null)
     setDaemonBusy(false)
+    setRuntimeEnvDirty(false) // a restart applies any pending runtime env changes
+    loadDaemonStatus()
   }
 
   const run = async (action: 'update' | 'redownload') => {
@@ -406,10 +513,29 @@ export function SbxRuntimePanel({
                   : 'Not signed in — authenticate the runtime with sbx login.'}
             </div>
           </div>
-          <button className="btn btn-default btn-sm" onClick={handleSignIn} disabled={signingIn}>
-            {signingIn ? 'Signing in…' : account?.loggedIn ? 'Re-authenticate' : 'Sign in'}
-          </button>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <button className="btn btn-default btn-sm" onClick={handleSignIn} disabled={signingIn || signingOut}>
+              {signingIn ? 'Signing in…' : account?.loggedIn ? 'Re-authenticate' : 'Sign in'}
+            </button>
+            {account?.loggedIn && (
+              <button className="btn btn-ghost btn-sm" onClick={handleSignOut} disabled={signingIn || signingOut}>
+                {signingOut ? 'Signing out…' : 'Sign out'}
+              </button>
+            )}
+          </div>
         </div>
+        {authNetErr && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="ss-sub" style={{ color: 'var(--destruct)' }}>{authNetErr}</div>
+          </div>
+        )}
+        {loginOut && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-output" ref={loginRef}>
+              <pre className="logs-pre">{loginOut}</pre>
+            </div>
+          </div>
+        )}
         <div className="ss-row">
           <div>
             <div className="ss-lbl">sbx binary path</div>
@@ -434,7 +560,9 @@ export function SbxRuntimePanel({
             <div className="ss-lbl">Latest release</div>
             <div className="ss-sub">{loading ? 'Checking GitHub…' : latest ? `${latest} · ${fmtDate(releases[0]?.date)}` : 'Unavailable'}</div>
           </div>
-          {install && !install.canAutoUpdate ? (
+          {install?.noArm64LinuxBuild ? (
+            <span className="rt-badge rt-badge-update">No Linux/ARM64 build</span>
+          ) : install && !install.canAutoUpdate ? (
             <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(install.releasesUrl)}>
               <ExternalLink size={13} /> Download
             </button>
@@ -453,6 +581,14 @@ export function SbxRuntimePanel({
             </div>
           )}
         </div>
+        {install?.noArm64LinuxBuild && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-cmdhint">
+              v0.35.x ships no Linux/ARM64 build (stability issues); it’s planned to return in v0.36.x. Updating on
+              this platform won’t find an installable build — stay on your current version for now.
+            </div>
+          </div>
+        )}
         {install && !install.canAutoUpdate && (
           <div className="ss-row" style={{ paddingTop: 0 }}>
             <div className="rt-cmdhint">
@@ -533,20 +669,36 @@ export function SbxRuntimePanel({
         )}
         <div className="ss-row">
           <div>
-            <div className="ss-lbl">Restart daemon</div>
+            <div className="ss-lbl">
+              Daemon status
+              {daemonStatus && (
+                <span
+                  className={`rt-badge ${daemonStatus.running ? 'rt-badge-ok' : 'rt-badge-update'}`}
+                  style={{ marginLeft: 8 }}
+                  title={daemonStatus.raw || ''}
+                >
+                  {daemonStatus.running ? 'Running' : 'Stopped'}
+                </span>
+              )}
+            </div>
             <div className="ss-sub">
               Stop and restart the sbx daemon (<code>sbx daemon stop</code> then{' '}
               <code>sbx daemon start -d</code>) — try this if you hit connection errors
               (<code>ECONNREFUSED</code>/<code>ECONNRESET</code>).
             </div>
           </div>
-          <button
-            className="btn btn-default btn-sm"
-            onClick={restartDaemon}
-            disabled={diagBusy !== null || daemonBusy}
-          >
-            <RotateCw size={13} /> {daemonBusy ? 'Restarting…' : 'Restart daemon'}
-          </button>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <button className="btn btn-ghost btn-sm" onClick={loadDaemonStatus} disabled={daemonBusy} title="Refresh status">
+              <RotateCw size={13} />
+            </button>
+            <button
+              className="btn btn-default btn-sm"
+              onClick={restartDaemon}
+              disabled={diagBusy !== null || daemonBusy}
+            >
+              <RotateCw size={13} /> {daemonBusy ? 'Restarting…' : 'Restart daemon'}
+            </button>
+          </div>
         </div>
         {daemonOut && (
           <div className="ss-row" style={{ paddingTop: 0 }}>
@@ -555,6 +707,27 @@ export function SbxRuntimePanel({
             </div>
           </div>
         )}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Daemon log level</div>
+            <div className="ss-sub">
+              Verbosity of the daemon log (<code>sbx daemon log-level</code>). Raise to <code>debug</code> when
+              gathering diagnostics.
+            </div>
+          </div>
+          <select
+            className="s-input"
+            style={{ width: 130 }}
+            value={logLevel || ''}
+            onChange={(e) => changeLogLevel(e.target.value)}
+            disabled={logLevelBusy}
+          >
+            {!logLevel && <option value="">—</option>}
+            {['trace', 'debug', 'info', 'warn', 'error'].map((lv) => (
+              <option key={lv} value={lv}>{lv}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="ss">
@@ -572,6 +745,61 @@ export function SbxRuntimePanel({
             disabled={settingBusy}
           />
         </div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Filesystem cache (virtiofs)</div>
+            <div className="ss-sub">
+              Faster filesystem performance (<code>DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE</code>). On by default in
+              sbx v0.35.
+            </div>
+          </div>
+          <button
+            className={`s-toggle${virtiofsCache ? ' on' : ''}`}
+            onClick={toggleVirtiofsCache}
+          />
+        </div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Upstream egress proxy</div>
+            <div className="ss-sub">
+              Chain sandbox egress through an upstream proxy (<code>DOCKER_SANDBOXES_PROXY</code>). Supports{' '}
+              <code>http://</code>, <code>https://</code> and <code>socks5://</code> / <code>socks5h://</code>.
+            </div>
+          </div>
+          <input
+            className="s-input"
+            value={runtimeProxy}
+            placeholder="socks5://host:1080"
+            onChange={(e) => setRuntimeProxy(e.target.value)}
+            onBlur={() => saveRuntimeEnv('runtimeProxy', runtimeProxy.trim())}
+            style={{ width: 220 }}
+          />
+        </div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Proxy bypass list</div>
+            <div className="ss-sub">
+              Destinations to exclude from the upstream proxy (<code>DOCKER_SANDBOXES_NO_PROXY</code>), standard
+              <code>NO_PROXY</code> matching.
+            </div>
+          </div>
+          <input
+            className="s-input"
+            value={runtimeNoProxy}
+            placeholder="localhost,*.internal"
+            onChange={(e) => setRuntimeNoProxy(e.target.value)}
+            onBlur={() => saveRuntimeEnv('runtimeNoProxy', runtimeNoProxy.trim())}
+            style={{ width: 220 }}
+          />
+        </div>
+        {runtimeEnvDirty && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-cmdhint">
+              Runtime environment changed. <strong>Restart the daemon</strong> (Diagnostics above) for it to take
+              effect.
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="ss">

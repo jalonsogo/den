@@ -77,7 +77,31 @@ function getBrewPath(): string {
 // prefixes, so spawned tools (sbx, and the docker credential helpers ORAS
 // execs during `kit push`) can't be found. Augment PATH for every host spawn.
 function guiEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` }
+  return { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin`, ...runtimeEnvOverrides() }
+}
+
+// den-managed runtime env overrides, injected into every sbx process den
+// spawns (so a den-driven `daemon start` picks them up). Backs the optional
+// runtime toggles — upstream proxy and virtiofs cache. Empty unless the user
+// set something in Runtime settings. Takes effect on the next daemon restart.
+function runtimeEnvOverrides(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  try {
+    const proxy = store.get('runtimeProxy') as string | undefined
+    if (proxy) env.DOCKER_SANDBOXES_PROXY = proxy
+    const noProxy = store.get('runtimeNoProxy') as string | undefined
+    if (noProxy) env.DOCKER_SANDBOXES_NO_PROXY = noProxy
+    // Cache is on by default in v0.35; only set the opt-out when disabled.
+    if (store.get('runtimeVirtiofsCache') === false) env.DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE = '0'
+  } catch { /* store not ready yet */ }
+  return env
+}
+
+// Does an error message look like a DNS/network reachability failure (rather
+// than an auth or usage error)? Used to give the Authentication row a clear
+// "couldn't reach Docker Hub" state instead of a misleading "not signed in".
+function isNetworkError(msg: string): boolean {
+  return /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|getaddrinfo|network is unreachable|dial tcp|no such host|timed? ?out/i.test(msg)
 }
 
 // Run an sbx command through a pty and stream its output via `send`. sbx (like
@@ -223,13 +247,19 @@ function displayCommand(manager: InstallManager, action: 'update' | 'redownload'
   return `${bin} ${c.args.join(' ')}`
 }
 
-// Parse the column-aligned `sbx policy ls` table into structured rules.
-// Resources span multiple lines (continuation rows have a blank PROVENANCE).
+// Parse the column-aligned `sbx policy ls --wide` table into structured rules.
+// A rule's resources span multiple lines — continuation rows carry only the
+// RESOURCES column and leave the SOURCE column blank. sbx v0.35 renamed and
+// reordered the columns:
+//   SOURCE  APPLIES TO  POLICY/RULE  RULE_ID  TYPE  DECISION  RESOURCES
+// (was PROVENANCE / APPLIES_TO / POLICY/RULE / TYPE / DECISION / RESOURCES —
+// note SOURCE↔PROVENANCE, the space in "APPLIES TO", and the new RULE_ID.)
 function parsePolicyLs(out: string) {
   const lines = out.split('\n')
   let governance: string | null = null
   let sync: string | null = null
-  const headerIdx = lines.findIndex((l) => l.includes('PROVENANCE') && l.includes('RESOURCES'))
+  // Distinctive header signature that survives the column renames.
+  const headerIdx = lines.findIndex((l) => l.includes('DECISION') && l.includes('RESOURCES'))
 
   for (let i = 0; i < (headerIdx === -1 ? lines.length : headerIdx); i++) {
     const l = lines[i]
@@ -238,29 +268,34 @@ function parsePolicyLs(out: string) {
   }
 
   const rules: Array<{
-    provenance: string; appliesTo: string; rule: string; type: string; decision: string; resources: string[]
+    provenance: string; appliesTo: string; rule: string; ruleId: string; type: string; decision: string; resources: string[]
   }> = []
   if (headerIdx === -1) return { governance, sync, rules }
 
   const h = lines[headerIdx]
-  const cProv = h.indexOf('PROVENANCE')
-  const cApplies = h.indexOf('APPLIES_TO')
+  // Tolerate both the v0.35 and older header labels for the first two columns.
+  const cSource = Math.max(0, Math.max(h.indexOf('SOURCE'), h.indexOf('PROVENANCE')))
+  const cApplies = Math.max(h.indexOf('APPLIES TO'), h.indexOf('APPLIES_TO'))
   const cRule = h.indexOf('POLICY/RULE')
+  const cRuleId = h.indexOf('RULE_ID')       // -1 on older sbx (no such column)
   const cType = h.indexOf('TYPE')
   const cDec = h.indexOf('DECISION')
   const cRes = h.indexOf('RESOURCES')
+  // Where the POLICY/RULE column ends: at RULE_ID if present, else at TYPE.
+  const cRuleEnd = cRuleId === -1 ? cType : cRuleId
 
   let cur: (typeof rules)[number] | null = null
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const l = lines[i]
     if (!l.trim()) continue
-    const prov = l.slice(cProv, cApplies).trim()
+    const source = l.slice(cSource, cApplies).trim()
     const res = l.slice(cRes).trim()
-    if (prov) {
+    if (source) {
       cur = {
-        provenance: prov,
+        provenance: source,
         appliesTo: l.slice(cApplies, cRule).trim(),
-        rule: l.slice(cRule, cType).trim(),
+        rule: l.slice(cRule, cRuleEnd).trim(),
+        ruleId: cRuleId === -1 ? '' : l.slice(cRuleId, cType).trim(),
         type: l.slice(cType, cDec).trim(),
         decision: l.slice(cDec, cRes).trim(),
         resources: res ? [res] : []
@@ -580,17 +615,33 @@ function secretScopeArgs(scope?: string): string[] {
 
 // Parse the `sbx secret ls` table (columns separated by 2+ spaces). No `-g`, so
 // this lists every scope — global plus per-sandbox secrets.
+//
+// sbx v0.35 added annotations for entries that won't actually inject at runtime
+// (env-only, OAuth-shadowed). The exact column layout isn't pinned across
+// versions, so parse defensively: take the first three fields as scope/type/
+// name, treat the rest as the masked-preview-plus-flags tail, and detect the
+// annotations by keyword anywhere in the row.
 async function listSecrets(): Promise<StoredSecret[]> {
   try {
     const out = await sbx(['secret', 'ls'])
     const lines = out.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim())
     if (!lines.length || /no secrets/i.test(lines[0])) return []
-    // Drop the header row (SCOPE TYPE NAME SECRET).
     return lines
-      .slice(1)
+      .slice(1) // drop the header row (SCOPE TYPE NAME SECRET [FLAGS])
       .map((line) => {
-        const [scope, type, name, masked] = line.split(/\s{2,}/)
-        return { scope, type, name, masked: masked ?? '' }
+        const cols = line.split(/\s{2,}/)
+        const [scope, type, name] = cols
+        const tail = cols.slice(3)
+        // Detect flags only in the columns after the name (the masked preview +
+        // any annotation), so a secret's own name/value can't trip them.
+        const flagText = tail.join(' ')
+        const envOnly = /env[\s-]?only|environment[\s-]?only|\(env\)/i.test(flagText)
+        const oauthShadowed = /oauth[\s-]?shadow|shadowed\s+by\s+oauth|\bshadowed\b/i.test(flagText)
+        // The first tail column is the masked preview; anything after is a flag
+        // annotation we keep verbatim for display.
+        const masked = tail[0] ?? ''
+        const note = tail.slice(1).join(' ').trim() || undefined
+        return { scope, type, name, masked, envOnly, oauthShadowed, note }
       })
       .filter((r) => r.name)
   } catch {
@@ -892,7 +943,10 @@ function injectClaudeHooks(name: string, attempt = 0): void {
 // Tail the in-container event file and route hook events to the renderer.
 function startEventTail(name: string, attempt = 0): void {
   eventTails.get(name)?.kill()
-  const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
+  // `mkdir -p ~/.den` first: this tail can start before injectClaudeHooks has
+  // created the directory (it retries with a backoff), and without it `touch`
+  // and `tail` both fail with "No such file or directory".
+  const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'mkdir -p ~/.den && touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
   eventTails.set(name, proc)
   hookLog(`tailing events for ${name}`)
   let buf = ''
@@ -1773,7 +1827,26 @@ function setupIPC(): void {
       })
       return { ok: true, output }
     } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+      const error = (err instanceof Error ? err.message : String(err)).trim()
+      // Flag DNS/network failures so the renderer can say "couldn't reach
+      // Docker Hub" instead of leaving the row on a misleading "not signed in".
+      return { ok: false, error, netError: isNetworkError(error) }
+    }
+  })
+
+  // Sign out of the runtime via `sbx logout`. v0.35 makes logout clear all
+  // stored Docker credentials (fixing the "already exists in the keychain"
+  // re-login bug), so this fully resets the Authentication state.
+  ipcMain.handle('minipit:docker-logout', async () => {
+    const send = (chunk: string) => mainWindow?.webContents.send('minipit:login-output', chunk)
+    try {
+      send('$ sbx logout\n')
+      const output = await sbx(['logout'], { timeout: 30000 })
+      if (output) send(output + '\n')
+      return { ok: true, output }
+    } catch (err) {
+      const error = (err instanceof Error ? err.message : String(err)).trim()
+      return { ok: false, error, netError: isNetworkError(error) }
     }
   })
 
@@ -1851,6 +1924,64 @@ function setupIPC(): void {
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
+  })
+
+  // Daemon health for the Diagnostics status indicator: `sbx daemon status`
+  // (new in v0.35). Derive a running/stopped flag from the output, keep the raw
+  // text for the tooltip.
+  ipcMain.handle('minipit:daemon-status', async () => {
+    try {
+      const raw = await sbx(['daemon', 'status'], { timeout: 10000 })
+      const running = /\brunning|active|up\b|healthy|started/i.test(raw) && !/not running|stopped|inactive|down/i.test(raw)
+      return { ok: true, running, raw }
+    } catch (err) {
+      const error = (err instanceof Error ? err.message : String(err)).trim()
+      return { ok: false, running: false, error }
+    }
+  })
+
+  // Get or set the daemon log verbosity: `sbx daemon log-level [level]`. With no
+  // argument it reads the current level; with one it sets it.
+  ipcMain.handle('minipit:daemon-log-level', async (_, level?: string) => {
+    try {
+      const args = ['daemon', 'log-level']
+      if (level) args.push(level)
+      const raw = await sbx(args, { timeout: 10000 })
+      const m = raw.match(/\b(trace|debug|info|warn(?:ing)?|error)\b/i)
+      return { ok: true, level: (m ? m[1] : level ?? '').toLowerCase(), raw }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Inspect a sandbox — v0.35 `sbx inspect` lists its kits, injected secrets and
+  // sandbox info. Try JSON first (stable to parse); fall back to raw text.
+  ipcMain.handle('minipit:sbx-inspect', async (_, name: string) => {
+    try {
+      let json: unknown = null
+      let raw = ''
+      try {
+        raw = await sbx(['inspect', name, '--json'], { timeout: 15000 })
+        json = JSON.parse(raw)
+      } catch {
+        // No JSON support (or not valid JSON) — fall back to the human report.
+        raw = await sbx(['inspect', name], { timeout: 15000 })
+      }
+      return { ok: true, json, raw }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Persist a den-managed runtime env override (proxy / virtiofs cache) into
+  // den's store. Applied to spawned sbx processes via guiEnv(); takes effect on
+  // the next daemon restart.
+  ipcMain.handle('minipit:set-runtime-env', (_, key: string, value: string | boolean | null) => {
+    const allowed = ['runtimeProxy', 'runtimeNoProxy', 'runtimeVirtiofsCache']
+    if (!allowed.includes(key)) return { ok: false, error: `unknown runtime key: ${key}` }
+    if (value === null || value === '') store.delete(key)
+    else store.set(key, value)
+    return { ok: true }
   })
 
   // Publish a kit as an OCI artifact to a registry (Docker Hub, ghcr, …).
@@ -2413,6 +2544,19 @@ function setupIPC(): void {
 
   ipcMain.handle('minipit:list-secrets', () => listSecrets())
 
+  // Migrate host credential env vars (e.g. ANTHROPIC_API_KEY) into the keychain
+  // via `sbx secret import`. sbx v0.35 stopped auto-injecting host env vars, so
+  // this is the one-time move users need. Runs with the GUI env so sbx sees the
+  // same variables the user's shell would.
+  ipcMain.handle('minipit:secret-import', async () => {
+    try {
+      const output = await sbx(['secret', 'import'], { timeout: 30000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   ipcMain.handle('minipit:set-secret', async (_, service: string, value: string, scope?: string) => {
     await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
   })
@@ -2514,7 +2658,10 @@ function setupIPC(): void {
     notifyOnExit: (store.get('notifyOnExit') as boolean) ?? true,
     notifyOnError: (store.get('notifyOnError') as boolean) ?? true,
     keepAwake: (store.get('keepAwake') as boolean) ?? true,
-    imagePaste: (store.get('imagePaste') as boolean) ?? false
+    imagePaste: (store.get('imagePaste') as boolean) ?? false,
+    runtimeProxy: (store.get('runtimeProxy') as string) ?? '',
+    runtimeNoProxy: (store.get('runtimeNoProxy') as string) ?? '',
+    runtimeVirtiofsCache: (store.get('runtimeVirtiofsCache') as boolean) ?? true
   }))
 
   // Write a runtime setting via `sbx settings set <key> <value>` (e.g.
@@ -2593,6 +2740,11 @@ function setupIPC(): void {
     return {
       manager,
       real,
+      platform: process.platform,
+      arch: process.arch,
+      // v0.35.x ships no Linux/ARM64 build — flag it so the UI can warn instead
+      // of offering an update that can't install. Expected back for v0.36.x.
+      noArm64LinuxBuild: process.platform === 'linux' && process.arch === 'arm64',
       canAutoUpdate: manager === 'brew' || manager === 'winget',
       releasesUrl: SBX_RELEASES_URL,
       updateCmd: displayCommand(manager, 'update'),
@@ -2625,17 +2777,47 @@ function setupIPC(): void {
 
   ipcMain.handle('minipit:network-policy', async (_, name?: string) => {
     try {
-      const args = ['policy', 'ls']
-      if (name) args.push(name)
-      args.push('--type', 'network')
-      const out = await sbx(args, { timeout: 12000 })
-      return { ok: true, ...parsePolicyLs(out), raw: out }
+      // `--wide` keeps the full column set parsePolicyLs() depends on. We list
+      // every rule and filter in-process rather than relying on the `--type`
+      // flag or a positional sandbox filter (their availability isn't pinned
+      // across sbx versions, and a bad flag would blank the whole view).
+      const out = await sbx(['policy', 'ls', '--wide'], { timeout: 12000 })
+      const parsed = parsePolicyLs(out)
+      let rules = parsed.rules.filter((r) => !r.type || r.type === 'network')
+      // Narrow to the rules that actually apply to this sandbox: its own rules
+      // (SOURCE local or kit, APPLIES TO sandbox:<name>) plus the global ones.
+      if (name) rules = rules.filter((r) => r.appliesTo === `sandbox:${name}` || r.appliesTo === 'all' || r.appliesTo === '')
+      return { ok: true, governance: parsed.governance, sync: parsed.sync, rules, raw: out }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
   ipcMain.handle('minipit:policy-log', (_, name?: string) => fetchPolicyLog(name))
+
+  // Test whether the current policy would allow a network request, without
+  // running anything — `sbx policy check network <resource>` (new in v0.35).
+  // Returns the parsed decision (allow/deny) plus the raw output for detail.
+  ipcMain.handle('minipit:policy-check', async (_, resource: string, _name?: string) => {
+    try {
+      // Documented form: `sbx policy check network <host>`. It's read-only and
+      // evaluates the daemon-side authorizer, so no per-sandbox flag is passed
+      // (its availability isn't pinned, and a bad flag would error the check).
+      const raw = await sbx(['policy', 'check', 'network', resource], { timeout: 12000 })
+      const lc = raw.toLowerCase()
+      // Prefer an explicit deny/block signal; fall back to allow.
+      const decision: 'allow' | 'deny' | 'unknown' =
+        /\b(deny|denied|block(ed)?|reject)/.test(lc) ? 'deny'
+          : /\b(allow(ed)?|permit(ted)?|ok\b)/.test(lc) ? 'allow'
+            : 'unknown'
+      return { ok: true, decision, raw }
+    } catch (err) {
+      // A non-zero exit is how some CLIs signal "denied"; surface both.
+      const error = (err instanceof Error ? err.message : String(err)).trim()
+      const decision = /\b(deny|denied|block(ed)?|reject)/i.test(error) ? 'deny' : 'unknown'
+      return { ok: false, decision, error }
+    }
+  })
 
   ipcMain.handle('minipit:policy-allow', async (_, name: string, resources: string) => {
     try {

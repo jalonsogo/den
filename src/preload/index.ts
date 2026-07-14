@@ -56,7 +56,9 @@ const api = {
   importContribKit: (dir: string)       => ipcRenderer.invoke('minipit:import-contrib-kit', dir),
   dockerAccount: ()                     => ipcRenderer.invoke('minipit:docker-account'),
   dockerLogin:   ()                     => ipcRenderer.invoke('minipit:docker-login'),
+  dockerLogout:  ()                     => ipcRenderer.invoke('minipit:docker-logout'),
   listSecrets:   ()                     => ipcRenderer.invoke('minipit:list-secrets'),
+  secretImport:  ()                     => ipcRenderer.invoke('minipit:secret-import'),
   setSecret:     (service: string, value: string, scope?: string) => ipcRenderer.invoke('minipit:set-secret', service, value, scope),
   setSecretOp:   (service: string, ref: string, scope?: string)   => ipcRenderer.invoke('minipit:set-secret-op', service, ref, scope),
   opAvailable:   ()                     => ipcRenderer.invoke('minipit:op-available'),
@@ -84,6 +86,10 @@ const api = {
   sbxReset:      (preserveSecrets: boolean) => ipcRenderer.invoke('minipit:sbx-reset', preserveSecrets),
   diagnose:      (mode?: 'text' | 'json' | 'github-issue' | 'upload') => ipcRenderer.invoke('minipit:diagnose', mode),
   daemonRestart: ()                     => ipcRenderer.invoke('minipit:daemon-restart'),
+  daemonStatus:  ()                     => ipcRenderer.invoke('minipit:daemon-status'),
+  daemonLogLevel:(level?: string)       => ipcRenderer.invoke('minipit:daemon-log-level', level),
+  sbxInspect:    (name: string)         => ipcRenderer.invoke('minipit:sbx-inspect', name),
+  setRuntimeEnv: (key: string, value: string | boolean | null) => ipcRenderer.invoke('minipit:set-runtime-env', key, value),
   onDiagnoseOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
     ipcRenderer.on('minipit:diagnose-output', handler)
@@ -96,6 +102,7 @@ const api = {
   },
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
+  policyCheck:   (resource: string, name?: string) => ipcRenderer.invoke('minipit:policy-check', resource, name),
   policyAllow:   (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-allow', name, resources),
   policyDeny:    (name: string, resources: string) => ipcRenderer.invoke('minipit:policy-deny', name, resources),
   policyRm:      (name: string, resource: string) => ipcRenderer.invoke('minipit:policy-rm', name, resource),

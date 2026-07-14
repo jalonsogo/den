@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { MoreVertical, Play, Square, GitBranch, Folder, FolderOpen, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
@@ -14,6 +14,10 @@ type Dock = 'files' | 'info' | null
 export function SandboxDetail() {
   const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
+  // Agent activity (working / waiting) — the same signal the sidebar and toolbar
+  // use, so the header's status dot and text line up with them instead of only
+  // reflecting the container lifecycle.
+  const activity = useStore((s) => (sandbox ? s.agentActivity[sandbox.name] ?? null : null))
 
   // Clone-mode sandboxes keep their work inside a private clone; expose the
   // fetch-back / PR / merge flow as a header button (mirrors the context menu).
@@ -141,11 +145,11 @@ export function SandboxDetail() {
   return (
     <div className="detail">
       <div className="detail-header">
-        <SandboxAvatar sandbox={sandbox} size={30} editable linkToContextMenu />
+        <SandboxAvatar sandbox={sandbox} size={30} editable linkToContextMenu activity={sandbox.status === 'running' ? activity : null} />
         <div className="d-name">{sandbox.name}</div>
-        <span className={`d-status ${sandbox.status === 'running' ? 'on' : 'off'}`}>
+        <span className={`d-status ${sandbox.status === 'running' ? (activity ?? 'on') : 'off'}`}>
           {sandbox.status === 'running'
-            ? `Running${sandbox.uptimeSeconds ? ` · ${formatUptime(sandbox.uptimeSeconds)}` : ''}`
+            ? `${activity === 'working' ? 'Working…' : activity === 'waiting' ? 'Waiting for you' : 'Running'}${sandbox.uptimeSeconds ? ` · ${formatUptime(sandbox.uptimeSeconds)}` : ''}`
            : sandbox.status === 'creating' ? 'Creating…'
            : sandbox.status === 'starting' ? 'Starting…'
            : sandbox.status === 'stopping' ? 'Stopping…'
@@ -205,29 +209,23 @@ export function SandboxDetail() {
         </div>
       </div>
 
-      {/* All Git info, condensed here: folder · branch · uncommitted changes ·
-          remote link. This is the single place git context lives now. */}
+      {/* Git context: branch · uncommitted changes · remote link. (The local
+          folder link now lives in the Files panel.) Hidden when there's nothing
+          to show, so a non-git workspace doesn't get an empty bar. */}
       {(() => {
         const gi = gitInfo[sandbox.workspace]
         const changes = sandboxChanges[sandbox.name] ?? 0
         const repoShort = gi?.remoteUrl?.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '')
+        const hasChanges = sandbox.status === 'running' && changes > 0
+        if (!gi?.branch && !hasChanges && !gi?.remoteUrl) return null
         return (
           <div className="detail-subhdr">
-            <button
-              className="ds-folder-btn"
-              title={`Open in Finder — ${sandbox.workspace}`}
-              onClick={() => window.minipit?.openPath(sandbox.workspace)}
-            >
-              <Folder size={12} className="ds-folder-ico ds-folder-ico-closed" />
-              <FolderOpen size={12} className="ds-folder-ico ds-folder-ico-open" />
-              <span className="ds-folder">{sandbox.workspace.split('/').pop() || sandbox.workspace}</span>
-            </button>
             {gi?.branch && (
               <span className="ds-branch" title={`On branch ${gi.branch}`}>
                 <GitBranch size={12} />{gi.branch}
               </span>
             )}
-            {sandbox.status === 'running' && changes > 0 && (
+            {hasChanges && (
               <div className="ds-changes-wrap" ref={changesRef}>
                 <button
                   className={`ds-changes${changesOpen ? ' open' : ''}`}
