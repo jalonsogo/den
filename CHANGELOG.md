@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-14
+
+### Fixed
+- **Docker sign-in state detection with sbx v0.35+.** The session moved from the Docker credential store to the macOS keychain, so den always showed "not signed in" even after a successful login (and sign-out appeared to do nothing). den now reads the sbx keychain session, falling back to the credential store for plain `docker login`.
+- Fewer macOS keychain password prompts: the account is resolved once per app session and cached (invalidated on sign-in/out) instead of re-read by every component.
+- The toolbar account refreshes immediately after signing in or out from Settings → Runtime.
+
+### Changed
+- The account menu shows the real signed-in email, and long organization lists scroll (5 rows visible) instead of growing unbounded.
+
+## [0.7.0] - 2026-07-14
+
+### Added
+- **Command palette** for keyboard-driven navigation and actions.
+- Runtime **proxy** settings and daemon controls in Settings → Runtime.
+- **Secrets import** and info-panel mounts.
+- Account menu with Docker Hub profile (email, gravatar) and a **namespace switcher** (personal + organizations) that prefills push references on the Kits and Templates pages.
+
+## [0.6.2] - 2026-07-10
+
+### Added
+- **UI density** control, per-file commit selection, and .gitignore actions in the Changes panel.
+
+### Changed
+- Full-interface **color themes** replace the accent-color picker.
+- Removed the landing page.
+
+### Fixed
+- CI no longer splits release assets across duplicate draft releases.
+
+## [0.6.1] - 2026-07-08
+
+### Added
+- **Changes review surface and PR flow**, runtime mounts, and macOS code signing.
+- Internal **file previewer** with syntax highlighting, markdown, and diff views.
+- `sbx diagnose` in Runtime settings with coloured output, plus a **Restart daemon** button, runtime settings, and `sbx reset`.
+- **Ports panel** publish/unpublish and complete network-policy CRUD (deny / rm / set-default).
+- Kit **validate** and **export-as-zip** actions.
+- Scope-aware **Secrets** tab (global + per-sandbox).
+
+### Fixed
+- "Reveal in Finder" silently doing nothing.
+- Agent-printed URLs are clickable in the terminal.
+- Files panel listing on BusyBox sandboxes, and NaN rows in the Ports panel.
+- macOS signing identity (drop the "Developer ID Application:" prefix).
+
+## [0.6.0] - 2026-07-04
+
+### Added
+- **Named sandbox groups replace projects**: group sandboxes in the sidebar and dashboard, drag onto a group to move (or to Ungrouped to remove), drag to reorder, and an optional Group field in New Sandbox.
+- Per-sandbox **color + icon customization**.
+- Command shortcuts with hints in the context menu: ⌘N new · ⌘S stop · ⌘R restart · ⌘X delete · ⌘L logs · ⌘F files · ⌘I info.
+- **Files | Changes** tabs with a subheader changes dropdown.
+
+### Changed
+- Removed the Projects page and data layer — groups replace them; the dashboard groups sandboxes by group.
+- Filter rethink: Show/Hide groups, manual ordering, and drag-to-reorder without holding Shift.
+- Header/subheader declutter with a segmented Stop | Restart control; unified dropdown sizing.
+
+### Fixed
+- PromptModal stuck on "Working…" when reused.
+- Sandbox ⋮ menu opening the group menu (stale group id).
+
 ## [0.5.5] - 2026-07-03
 
 ### Added
@@ -120,7 +183,12 @@ Initial release — the first automated, cross-platform build (macOS + Windows).
 - Theme submenu and den branding.
 - GitHub Actions release pipeline that builds and publishes macOS (`.dmg`/`.zip`) and Windows (NSIS `.exe`) installers on each `v*` tag.
 
-[Unreleased]: https://github.com/jalonsogo/den/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/jalonsogo/den/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/jalonsogo/den/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/jalonsogo/den/compare/v0.6.2...v0.7.0
+[0.6.2]: https://github.com/jalonsogo/den/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/jalonsogo/den/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/jalonsogo/den/compare/v0.5.5...v0.6.0
 [0.5.5]: https://github.com/jalonsogo/den/compare/v0.5.0...v0.5.5
 [0.5.0]: https://github.com/jalonsogo/den/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jalonsogo/den/compare/v0.3.1...v0.4.0
