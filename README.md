@@ -53,6 +53,14 @@ Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network
 - **Add anywhere** — attach kits at sandbox creation, or inject them into a running sandbox; the kits applied to a sandbox show in its info panel.
 - **Share via any OCI registry** — push a kit to Docker Hub / ghcr (`sbx kit push`) straight from the row's menu, with the reference prefilled from your logged‑in Docker account. Pull a friend's kit by reference — import it into your library or attach it at creation, no download step.
 
+## Interactive UI demo
+
+A fully self-contained, interactive capture of the UI lives in [`docs/den-ui.html`](docs/den-ui.html) — open it in any browser or embed it in an iframe, no build needed. It covers sandbox switching with real agent-CLI output (Claude Code, Codex, OpenCode), the Files/Info docks, kits and the contrib marketplace, right-click menus, the New Sandbox and New Kit flows, and light/dark + color themes. Full-HD screenshots of every flow are in [`docs/shots-ui/`](docs/shots-ui).
+
+<div align="center">
+<img src="docs/shots-ui/01-light-sandboxes-home.png" alt="den UI demo — sandboxes overview (interactive capture)" width="820" />
+</div>
+
 ## Requirements
 
 - macOS or Windows
