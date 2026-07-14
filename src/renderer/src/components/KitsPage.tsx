@@ -265,8 +265,11 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     const res = await window.minipit?.kitAdd(sandboxName, kit.dir).catch(() => null)
     setBusy(false)
     setAddFor(null)
+    // sbx v0.35 applies the kit by recreating the sandbox container (state is
+    // preserved) and applies the kit's network rules on the running sandbox —
+    // so no manual restart is needed.
     setMsg(res?.ok
-      ? { ok: true, text: `Added "${kit.name}" to ${sandboxName}. A restart is recommended so the agent picks it up.`, restart: sandboxName }
+      ? { ok: true, text: `Added "${kit.name}" to ${sandboxName}. The sandbox was recreated with the kit applied (state preserved); its network rules are now active.` }
       : { ok: false, text: res?.error || 'Failed to add kit.' })
   }
 
@@ -413,7 +416,14 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
           <div className="lib-tbl">
             <div className="lib-hdr lib-hdr-kit">
               <span>{variant === 'mixin' ? 'MIXIN KIT' : 'SANDBOX KIT'}</span>
-              <span>CAPABILITIES</span>
+              {/* One header per capability column — aligned to the KitCaps grid. */}
+              <div className="kit-caps-hdr">
+                <span>MCP</span>
+                <span>Policies</span>
+                <span>Env</span>
+                <span>Commands</span>
+                <span>Memory</span>
+              </div>
               <span></span>
             </div>
             {shown.map((k) => (

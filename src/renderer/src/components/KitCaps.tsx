@@ -101,7 +101,9 @@ export function KitCaps({ p, compact }: { p?: ParsedKit; compact?: boolean }) {
             {count != null && <span className="kit-cap-n">{count}</span>}
           </span>
         ) : (
-          <span key={key} className="kit-cap-ic is-empty" aria-hidden="true" />
+          // Empty capability slot — render a muted "-" so the column reads as
+          // "none" rather than an ambiguous blank (full/table list only).
+          <span key={key} className="kit-cap-ic is-empty">-</span>
         )
       )}
       {hover && createPortal(

@@ -176,6 +176,13 @@ export interface StoredSecret {
   type: string    // "service" | "registry"
   name: string    // service name, e.g. "github"
   masked: string  // masked preview, e.g. "ghp-x********"
+  // sbx v0.35 `secret ls` annotates entries that won't actually inject:
+  //  envOnly       — only present as a host env var, not stored in the keychain
+  //                  (host env vars no longer auto-inject; needs `secret import`)
+  //  oauthShadowed — a stored key that an OAuth credential takes precedence over
+  envOnly?: boolean
+  oauthShadowed?: boolean
+  note?: string   // any extra flag/annotation text sbx printed for the row
 }
 
 export interface Template {
@@ -235,10 +242,11 @@ export interface SbxRelease {
 }
 
 export interface PolicyRule {
-  provenance: string
-  appliesTo: string
-  rule: string
-  type: string
+  provenance: string   // the SOURCE column: "local" | "kit" | …
+  appliesTo: string    // "sandbox:<name>" | "all"
+  rule: string         // POLICY/RULE
+  ruleId?: string      // RULE_ID (v0.35+)
+  type: string         // "network" | "filesystem:read" | …
   decision: string
   resources: string[]
 }
@@ -255,6 +263,9 @@ export interface NetworkPolicy {
 export interface SbxInstallInfo {
   manager: 'brew' | 'winget' | 'apt' | 'manual'
   real: string
+  platform?: string
+  arch?: string
+  noArm64LinuxBuild?: boolean
   canAutoUpdate: boolean
   releasesUrl: string
   updateCmd: string
@@ -271,6 +282,9 @@ export interface AppSettings {
   notifyOnError: boolean
   keepAwake: boolean
   imagePaste?: boolean
+  runtimeProxy?: string
+  runtimeNoProxy?: string
+  runtimeVirtiofsCache?: boolean
 }
 
 declare global {
@@ -326,9 +340,11 @@ declare global {
       listContribKits(): Promise<{ ok: boolean; kits?: { dir: string; spec: string }[]; error?: string }>
       importContribKit(dir: string): Promise<{ ok: boolean; name?: string; error?: string }>
       dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; gravatar?: string }>
-      dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string }>
+      dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>
+      dockerLogout(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>
       onLoginOutput(cb: (chunk: string) => void): () => void
       listSecrets(): Promise<StoredSecret[]>
+      secretImport(): Promise<{ ok: boolean; output?: string; error?: string }>
       setSecret(service: string, value: string, scope?: string): Promise<void>
       setSecretOp(service: string, ref: string, scope?: string): Promise<void>
       opAvailable(): Promise<boolean>
@@ -355,10 +371,15 @@ declare global {
       onCreateOutput(cb: (chunk: string) => void): () => void
       diagnose(mode?: 'text' | 'json' | 'github-issue' | 'upload'): Promise<{ ok: boolean; output?: string; error?: string }>
       daemonRestart(): Promise<{ ok: boolean; error?: string }>
+      daemonStatus(): Promise<{ ok: boolean; running: boolean; raw?: string; error?: string }>
+      daemonLogLevel(level?: string): Promise<{ ok: boolean; level?: string; raw?: string; error?: string }>
+      sbxInspect(name: string): Promise<{ ok: boolean; json?: unknown; raw?: string; error?: string }>
+      setRuntimeEnv(key: string, value: string | boolean | null): Promise<{ ok: boolean; error?: string }>
       onDiagnoseOutput(cb: (chunk: string) => void): () => void
       onDaemonOutput(cb: (chunk: string) => void): () => void
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
+      policyCheck(resource: string, name?: string): Promise<{ ok: boolean; decision: 'allow' | 'deny' | 'unknown'; raw?: string; error?: string }>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       policyDeny(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       policyRm(name: string, resource: string): Promise<{ ok: boolean; output?: string; error?: string }>

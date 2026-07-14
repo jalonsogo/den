@@ -34,6 +34,8 @@ interface AppState {
   activePage: PageType
   activeTab: TabType
   modal: ModalType
+  // ⌘K command palette (search across sandboxes, groups, kits, and actions).
+  paletteOpen: boolean
   // Reusable input dialog (openPrompt/closePrompt). Null = closed.
   prompt: PromptConfig | null
   // Template shown in the inspect/details modal. Null = closed.
@@ -159,6 +161,7 @@ interface AppState {
   setLogsReturn:      (id: string | null) => void
   setActiveTab:       (tab: TabType) => void
   setModal:           (modal: ModalType) => void
+  setPaletteOpen:     (open: boolean) => void
   openPrompt:         (config: PromptConfig) => void
   closePrompt:        () => void
   setInspectTemplate: (t: Template | null) => void
@@ -177,6 +180,7 @@ export const useStore = create<AppState>((set) => ({
   activePage: 'sandboxes',
   activeTab: 'terminal',
   modal: null,
+  paletteOpen: false,
   prompt: null,
   inspectTemplate: null,
   contextMenu: { visible: false, x: 0, y: 0, sandboxId: null, workspace: null },
@@ -587,6 +591,8 @@ export const useStore = create<AppState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setModal: (modal) => set({ modal }),
+
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
 
   openPrompt: (config) => set({ prompt: config }),
   closePrompt: () => set({ prompt: null }),

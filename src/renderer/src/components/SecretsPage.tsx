@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, DownloadCloud } from 'lucide-react'
 import { useStore } from '../store'
 import { SecretIcon } from './SecretIcon'
 import {
@@ -23,6 +23,8 @@ export function SecretsPage() {
   const { modal, setModal, setSecretTarget } = useStore()
   const [secrets, setSecrets] = useState<StoredSecret[]>([])
   const [loading, setLoading] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -65,6 +67,20 @@ export function SecretsPage() {
     setModal('new-secret')
   }
 
+  // Migrate host credential env vars (e.g. ANTHROPIC_API_KEY) into the keychain.
+  // sbx v0.35 no longer auto-injects host env vars, so anything you relied on
+  // there needs a one-time `sbx secret import`.
+  const handleImport = async () => {
+    if (importing) return
+    setImporting(true)
+    setImportMsg(null)
+    const r = await window.minipit?.secretImport().catch((e) => ({ ok: false, error: String(e) }))
+    setImporting(false)
+    const out = r && 'output' in r ? r.output : undefined
+    setImportMsg(r?.ok ? (out?.trim() || 'Imported credentials from environment.') : `Import failed: ${(r && 'error' in r && r.error) || 'unknown error'}`)
+    load()
+  }
+
   const handleRemove = async (service: string, scope: string) => {
     const where = isGlobalScope(scope) ? 'global' : `sandbox "${scope}"`
     if (!confirm(`Remove the stored ${service} secret (${where})?`)) return
@@ -79,15 +95,29 @@ export function SecretsPage() {
           Stored in your OS keychain by sbx. Agents receive credentials via proxy — tokens are never exposed.
           {loading && ' · Loading…'}
         </p>
-        <button
-          className="btn btn-primary btn-sm"
-          style={{ flexShrink: 0 }}
-          onClick={() => { setSecretTarget(null); setModal('new-secret') }}
-        >
-          <Plus size={13} />
-          Add Secret
-        </button>
+        <div style={{ display: 'flex', gap: 7, flexShrink: 0 }}>
+          <button
+            className="btn btn-default btn-sm"
+            onClick={handleImport}
+            disabled={importing}
+            title="Import credential env vars (e.g. ANTHROPIC_API_KEY) into the keychain — sbx no longer auto-injects host env vars"
+          >
+            <DownloadCloud size={13} />
+            {importing ? 'Importing…' : 'Import from environment'}
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => { setSecretTarget(null); setModal('new-secret') }}
+          >
+            <Plus size={13} />
+            Add Secret
+          </button>
+        </div>
       </div>
+
+      {importMsg && (
+        <p style={{ fontSize: 11.5, color: 'var(--t3)', margin: '2px 0 8px' }}>{importMsg}</p>
+      )}
 
       <div>
         <div className="sec-tbl">
@@ -107,9 +137,19 @@ export function SecretsPage() {
                   <div className="sec-name">{serviceLabel(row.service)}</div>
                 </div>
                 <div className="sec-scope">{isGlobalScope(row.scope) ? 'Global' : row.scope}</div>
-                <div className={`sec-st ${configured ? 'ok' : 'no'}`}>
+                <div className={`sec-st ${configured ? (row.stored?.envOnly ? 'warn' : 'ok') : 'no'}`}>
                   <div className="sec-sd" />
                   <span className="sec-mask">{configured ? (row.stored?.masked || 'Configured') : 'Not set'}</span>
+                  {row.stored?.envOnly && (
+                    <span className="sec-badge sec-badge-warn" title="Only present as a host environment variable — sbx no longer auto-injects these. Use “Import from environment”.">
+                      env only
+                    </span>
+                  )}
+                  {row.stored?.oauthShadowed && (
+                    <span className="sec-badge" title="An OAuth credential takes precedence over this stored key, so the stored value won’t be used.">
+                      OAuth-shadowed
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => openModal(row.service, row.scope)}>

@@ -9,6 +9,29 @@ import { AGENTS, type Sandbox, type NetworkPolicy, type PolicyBlock, type Policy
 
 const NO_BLOCKS: PolicyBlock[] = []
 
+interface InjectedSecret { name: string; source?: string }
+
+// Read an `sbx inspect --json` object. The v0.35 schema carries `secrets` as
+// [{ name, source }] and an `auth_mode` string; we stay tolerant of shape drift
+// (string entries, alternate key names).
+function extractInspect(json: unknown): { secrets: InjectedSecret[]; authMode?: string } {
+  if (!json || typeof json !== 'object') return { secrets: [] }
+  const obj = json as Record<string, unknown>
+  const rawSecrets = obj.secrets ?? obj.injected_secrets ?? obj.injectedSecrets
+  const secrets: InjectedSecret[] = Array.isArray(rawSecrets)
+    ? rawSecrets.map((s) => {
+        if (typeof s === 'string') return { name: s }
+        if (s && typeof s === 'object') {
+          const o = s as Record<string, unknown>
+          return { name: String(o.name ?? o.service ?? o.id ?? ''), source: o.source ? String(o.source) : undefined }
+        }
+        return { name: '' }
+      }).filter((s) => s.name)
+    : []
+  const authMode = typeof obj.auth_mode === 'string' ? obj.auth_mode : undefined
+  return { secrets, authMode }
+}
+
 // Infer which preset is currently in force from the policy's rules, so the
 // picker highlights the *active* preset (not just whatever the user last clicked).
 function detectPreset(rules: PolicyRule[]): 'allow-all' | 'balanced' | 'deny-all' {
@@ -60,9 +83,14 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
   const [policy, setPolicy] = useState<NetworkPolicy | null>(null)
   const [polLoading, setPolLoading] = useState(true)
   const [kits, setKits] = useState<string[]>([])
+  // `sbx inspect --json` detail — injected secrets + auth mode.
+  const [inspect, setInspect] = useState<{ secrets: InjectedSecret[]; authMode?: string } | null>(null)
 
   useEffect(() => {
     window.minipit?.appliedKits(sandbox.name).then((k) => setKits(k ?? [])).catch(() => setKits([]))
+    window.minipit?.sbxInspect(sandbox.name)
+      .then((r) => setInspect(r?.ok ? extractInspect(r.json) : null))
+      .catch(() => setInspect(null))
   }, [sandbox.name])
   const [allowBusy, setAllowBusy] = useState(false)   // one-click allow from a recent block
   const [allowMsg, setAllowMsg] = useState<{ ok: boolean; text: string; offerRestart?: boolean } | null>(null)
@@ -76,6 +104,12 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
   const [addInput, setAddInput] = useState('')
   const [pending, setPending] = useState<{ decision: 'allow' | 'block'; resources: string }[]>([])
   const [applyBusy, setApplyBusy] = useState(false)
+  // "Test access" — preview whether the current policy would allow a host,
+  // without running anything (`sbx policy check network`).
+  const [checkOpen, setCheckOpen] = useState(false)
+  const [checkInput, setCheckInput] = useState('')
+  const [checkBusy, setCheckBusy] = useState(false)
+  const [checkResult, setCheckResult] = useState<{ decision: 'allow' | 'deny' | 'unknown'; text: string } | null>(null)
 
   const loadPolicy = () => {
     setPolLoading(true)
@@ -117,6 +151,20 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
     setApplyBusy(false)
     if (failed) setAllowMsg({ ok: false, text: failed })
     else { setAllowMsg({ ok: true, text: 'Rules applied.', offerRestart: true }); loadPolicy() }
+  }
+
+  const runCheck = async () => {
+    const resource = checkInput.trim()
+    if (!resource || checkBusy) return
+    setCheckBusy(true)
+    setCheckResult(null)
+    const r = await window.minipit?.policyCheck(resource, sandbox.name).catch(() => null)
+    setCheckBusy(false)
+    if (!r) { setCheckResult({ decision: 'unknown', text: 'Check failed.' }); return }
+    const text = r.decision === 'allow' ? `Allowed — ${resource} would be reachable.`
+      : r.decision === 'deny' ? `Blocked — ${resource} would be denied by policy.`
+        : (r.raw?.trim() || r.error || 'Could not determine a decision.')
+    setCheckResult({ decision: r.decision, text })
   }
 
   // One-click allow straight from a recent block.
@@ -260,6 +308,26 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
         <AccordionSection id="kits" title="Kits" badge={kits.length}>
           <div className="info-kits">
             {kits.map((k) => <span className="info-kit" key={k}><Layers size={12} />{k}</span>)}
+          </div>
+        </AccordionSection>
+      )}
+
+      {inspect && (inspect.secrets.length > 0 || inspect.authMode) && (
+        <AccordionSection id="secrets" title="Injected secrets" badge={inspect.secrets.length || undefined}>
+          {inspect.authMode && (
+            <div className="ss-sub" style={{ marginBottom: 6 }}>Auth mode: <strong>{inspect.authMode}</strong></div>
+          )}
+          {inspect.secrets.length > 0 && (
+            <div className="info-kits">
+              {inspect.secrets.map((s) => (
+                <span className="info-kit" key={s.name}>
+                  <Lock size={12} />{s.name}{s.source ? <span style={{ opacity: 0.6 }}> · {s.source}</span> : null}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="ss-sub" style={{ marginTop: 6 }}>
+            Credentials this sandbox receives via the proxy (from <code>sbx inspect</code>). Values are never exposed.
           </div>
         </AccordionSection>
       )}
@@ -440,12 +508,38 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
               </div>
             )}
 
+            {checkOpen && (
+              <div className="np-add-form np-rule np-rule-draft">
+                <input
+                  className="np-add-input"
+                  value={checkInput}
+                  placeholder="example.com  or  example.com:443"
+                  autoFocus
+                  onChange={(e) => { setCheckInput(e.target.value); setCheckResult(null) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') runCheck() }}
+                />
+                <div className="np-add-form-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setCheckOpen(false); setCheckInput(''); setCheckResult(null) }}>Cancel</button>
+                  <button className="btn btn-default btn-sm" onClick={runCheck} disabled={!checkInput.trim() || checkBusy}>
+                    {checkBusy ? 'Checking…' : 'Check'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {checkResult && (
+              <div className={`np-banner ${checkResult.decision === 'allow' ? 'ok' : checkResult.decision === 'deny' ? 'err' : ''}`}>
+                <span className="np-banner-txt">{checkResult.text}</span>
+              </div>
+            )}
+
             <div className="np-add-cta">
               {pending.length > 0 && (
                 <button className="btn btn-default btn-sm" onClick={applyPending} disabled={applyBusy}>
                   {applyBusy ? 'Applying…' : `Apply${pending.length > 1 ? ` (${pending.length})` : ''}`}
                 </button>
               )}
+              <button className="btn btn-default btn-sm" onClick={() => { setCheckOpen((o) => !o); setCheckResult(null) }}>Test access</button>
               <button className="btn btn-default btn-sm" onClick={() => { setAddOpen((o) => !o); setAllowMsg(null) }}>+ Add rule</button>
             </div>
 

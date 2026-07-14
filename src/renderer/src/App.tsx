@@ -15,6 +15,7 @@ import { playFinalizeSound, playAskSound } from './lib/sound'
 import { NewSandboxModal } from './components/modals/NewSandboxModal'
 import { NewSecretModal } from './components/modals/NewSecretModal'
 import { NewKitModal } from './components/modals/NewKitModal'
+import { CommandPalette } from './components/CommandPalette'
 import { PromptModal } from './components/modals/PromptModal'
 import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
 import type { Sandbox, LogLine, PolicyBlock } from './types'
@@ -114,6 +115,7 @@ export function App() {
       const k = e.key.toLowerCase()
       const s = useStore.getState()
 
+      if (k === 'k') { e.preventDefault(); s.setPaletteOpen(!s.paletteOpen); return }
       if (k === 'n') { e.preventDefault(); s.setModal('new-sandbox'); return }
       if (typing || s.activePage !== 'sandbox') return
 
@@ -177,6 +179,7 @@ export function App() {
       <PromptModal />
       <TemplateInspectModal />
       <PolicyBlockToaster />
+      <CommandPalette />
     </div>
   )
 }
