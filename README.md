@@ -6,7 +6,7 @@
 
 **Spin up ephemeral coding environments where AI builds your apps.**
 
-[den.studio](https://den.studio)
+[useden.ai](https://useden.ai)
 
 den is a beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (the `sbx` CLI). Launch disposable, isolated environments, point an AI agent (Claude Code, Codex, Cursor, Gemini, …) at a workspace, and let it build, run, and iterate on apps — then throw the sandbox away when you're done. All without living in the terminal.
 
