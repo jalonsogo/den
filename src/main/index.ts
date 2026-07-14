@@ -104,6 +104,63 @@ function isNetworkError(msg: string): boolean {
   return /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|getaddrinfo|network is unreachable|dial tcp|no such host|timed? ?out/i.test(msg)
 }
 
+// ── Docker Hub account enrichment ─────────────────────────────────────────────
+// The credential store holds only usernames; the real email + org list live in
+// the Docker Hub API, which needs a bearer token. These helpers read the stored
+// token via the credential helper and query hub.docker.com. All are best-effort:
+// on any failure (offline, token scope, older CLI) callers fall back to the
+// username alone. The stored token only ever leaves the machine over HTTPS to
+// hub.docker.com — the same host `docker login` already authenticates against.
+
+const HUB_API = 'https://hub.docker.com'
+
+// Read a secret from a Docker credential helper: write the registry URL to
+// stdin and parse the {ServerURL, Username, Secret} JSON it prints.
+function getCredSecret(store: string, registry: string): Promise<{ Username?: string; Secret?: string } | null> {
+  return new Promise((resolve) => {
+    const proc = spawn(`docker-credential-${store}`, ['get'], { env: guiEnv() })
+    let buf = ''
+    proc.stdout?.on('data', (d) => { buf += d.toString() })
+    proc.on('error', () => resolve(null))
+    proc.on('close', () => { try { resolve(JSON.parse(buf)) } catch { resolve(null) } })
+    proc.stdin?.write(registry + '\n')
+    proc.stdin?.end()
+  })
+}
+
+// GET a Docker Hub API endpoint with a bearer token, returning parsed JSON or null.
+async function hubGet<T>(path: string, bearer: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${HUB_API}${path}`, {
+      headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json', 'User-Agent': 'den' }
+    })
+    if (!res.ok) return null
+    return (await res.json()) as T
+  } catch { return null }
+}
+
+// Obtain a Docker Hub bearer from a stored registry secret. The newer OAuth
+// login stores a JWT that works directly; an older PAT/password must be
+// exchanged via POST /v2/auth/token. Try direct first, then exchange.
+async function hubBearer(username: string, secret: string): Promise<string | null> {
+  try {
+    const probe = await fetch(`${HUB_API}/v2/user/`, {
+      headers: { Authorization: `Bearer ${secret}`, Accept: 'application/json', 'User-Agent': 'den' }
+    })
+    if (probe.ok) return secret
+  } catch { /* fall through to exchange */ }
+  try {
+    const res = await fetch(`${HUB_API}/v2/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'den' },
+      body: JSON.stringify({ identifier: username, secret })
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { access_token?: string }
+    return data.access_token ?? null
+  } catch { return null }
+}
+
 // Run an sbx command through a pty and stream its output via `send`. sbx (like
 // most CLIs) only emits ANSI *colour* when it detects a real terminal, so
 // piping via spawn() gives colourless output. A pty makes it believe it's on a
@@ -1773,10 +1830,14 @@ function setupIPC(): void {
     setAppMenu().catch(() => {})
   })
 
-  // The logged-in Docker Hub account, read from the Docker credential helper
-  // (config.json `credsStore` → `docker-credential-<store> list`). Used to
-  // prefill the push reference with the user's namespace.
+  // The logged-in Docker Hub account. The username comes from the credential
+  // helper (config.json `credsStore` → `docker-credential-<store> list`), which
+  // is fast and offline. The email, full name, and org list are then enriched
+  // from the Docker Hub API (best-effort) — used to prefill the push namespace
+  // and populate the account dropdown. On any API failure the username still
+  // returns, so callers degrade to username-only.
   ipcMain.handle('minipit:docker-account', async () => {
+    const registry = 'https://index.docker.io/v1/'
     try {
       const fs = require('fs')
       const cfg = JSON.parse(fs.readFileSync(join(app.getPath('home'), '.docker/config.json'), 'utf8'))
@@ -1790,16 +1851,33 @@ function setupIPC(): void {
         proc.on('close', () => resolve(buf))
       })
       const map = JSON.parse(out || '{}') as Record<string, string>
-      const registry = 'https://index.docker.io/v1/'
       const username = map[registry] || Object.values(map)[0]
       if (!username) return { loggedIn: false }
-      // Best-effort email for a Gravatar: the legacy `email` field is the only
-      // place the Docker config carries one (creds stores hold usernames only).
-      const email: string | undefined = cfg.auths?.[registry]?.email || cfg.auths?.[username]?.email
+
+      // Legacy config `email` (usually absent on modern creds stores) is the
+      // offline fallback; the Hub API is the authoritative source when reachable.
+      let email: string | undefined = cfg.auths?.[registry]?.email || cfg.auths?.[username]?.email
+      let fullName: string | undefined
+      let orgs: string[] = []
+      try {
+        const cred = await getCredSecret(store, registry)
+        const secret = cred?.Secret
+        const bearer = secret ? await hubBearer(username, secret) : null
+        if (bearer) {
+          const profile = await hubGet<{ email?: string; gravatar_email?: string; full_name?: string }>('/v2/user/', bearer)
+          if (profile) {
+            email = profile.email || profile.gravatar_email || email
+            fullName = profile.full_name || undefined
+          }
+          const orgsRes = await hubGet<{ results?: { orgname?: string }[] }>('/v2/user/orgs/?page_size=100', bearer)
+          if (orgsRes?.results) orgs = orgsRes.results.map((o) => o.orgname).filter((n): n is string => !!n)
+        }
+      } catch { /* offline / token scope — username-only is fine */ }
+
       const gravatar = email
         ? require('crypto').createHash('md5').update(email.trim().toLowerCase()).digest('hex')
         : undefined
-      return { loggedIn: true, username, email, gravatar }
+      return { loggedIn: true, username, email, fullName, gravatar, orgs }
     } catch {
       return { loggedIn: false }
     }

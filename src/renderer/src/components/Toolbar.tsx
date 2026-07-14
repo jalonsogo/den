@@ -2,29 +2,28 @@ import { useState, useRef, useEffect } from 'react'
 import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut } from 'lucide-react'
 import { useStore } from '../store'
 
-const ACCOUNT_EMAIL = 'javier.alonso@docker.com'
-const ORGS = ['Docker', 'Personal']
-
 export function Toolbar() {
-  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar } = useStore()
+  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar, dockerAccount, activeOrg, setActiveOrg } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
 
   const [acctOpen, setAcctOpen] = useState(false)
-  const [org, setOrg] = useState(ORGS[0])
-  const [account, setAccount] = useState<{ loggedIn: boolean; username?: string; email?: string; gravatar?: string }>({ loggedIn: false })
   const [avatarFailed, setAvatarFailed] = useState(false)
   const acctRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    window.minipit?.dockerAccount()
-      .then((a) => { setAccount(a ?? { loggedIn: false }); setAvatarFailed(false) })
-      .catch(() => {})
-  }, [])
+  const account = dockerAccount ?? { loggedIn: false }
+  // Selectable namespaces: the user's own username (personal) + their orgs.
+  const namespaces = [account.username, ...(account.orgs ?? [])].filter((n): n is string => !!n)
+  // The active namespace shown under the name; falls back to the username.
+  const org = activeOrg ?? account.username ?? ''
 
-  // Name shown in the account button: the Docker username if signed in, else
-  // the local part of the fallback email.
-  const name = account.username || ACCOUNT_EMAIL.split('@')[0]
-  const email = account.email || ACCOUNT_EMAIL
+  useEffect(() => { setAvatarFailed(false) }, [account.gravatar])
+
+  // Name shown in the account button: the Docker username if signed in, else a
+  // neutral placeholder (never a hardcoded personal identity).
+  const name = account.username || 'Docker account'
+  // Real email from the Docker Hub API; absent when offline or the token can't
+  // read it, so the header hides the sub-line when we don't have one.
+  const email = account.email
   const initials = name.slice(0, 2).toUpperCase()
   const gravatarUrl = account.gravatar
     ? `https://www.gravatar.com/avatar/${account.gravatar}?d=404&s=64`
@@ -103,16 +102,21 @@ export function Toolbar() {
           <div className="tb-acct-menu">
             <div className="tb-acct-hd">
               <div className="tb-acct-hd-name">{name}</div>
-              <div className="tb-acct-hd-sub">{email}</div>
+              {email && <div className="tb-acct-hd-sub">{email}</div>}
             </div>
-            <div className="tb-acct-divider" />
-            <div className="tb-acct-label">Organizations</div>
-            {ORGS.map((o) => (
-              <div key={o} className="tb-acct-item" onClick={() => { setOrg(o); setAcctOpen(false) }}>
-                {o}
-                {org === o && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent, var(--primary))' }} />}
-              </div>
-            ))}
+            {namespaces.length > 0 && (
+              <>
+                <div className="tb-acct-divider" />
+                <div className="tb-acct-label">Namespaces</div>
+                {namespaces.map((o) => (
+                  <div key={o} className="tb-acct-item" onClick={() => { setActiveOrg(o); setAcctOpen(false) }}>
+                    {o}
+                    {o === account.username && <span className="tb-acct-item-tag">personal</span>}
+                    {org === o && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent, var(--primary))' }} />}
+                  </div>
+                ))}
+              </>
+            )}
             <div className="tb-acct-divider" />
             <button className="tb-acct-signout" onClick={handleSignOut}>
               <LogOut size={13} />

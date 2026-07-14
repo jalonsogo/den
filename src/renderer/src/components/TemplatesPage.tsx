@@ -23,13 +23,14 @@ function agentFromFlavor(flavor: string): string {
 }
 
 export function TemplatesPage() {
-  const { setModal, setNewSandboxTemplate, openPrompt, setInspectTemplate } = useStore()
+  const { setModal, setNewSandboxTemplate, openPrompt, setInspectTemplate, dockerAccount, activeOrg } = useStore()
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(false)
   // Row "⋮" menu.
   const [moreFor, setMoreFor] = useState<string | null>(null)
   const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
-  const [docker, setDocker] = useState<{ loggedIn: boolean; username?: string }>({ loggedIn: false })
+  // Shared signed-in account (loaded once at app boot in the store).
+  const docker = dockerAccount ?? { loggedIn: false }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,11 +44,6 @@ export function TemplatesPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
-
-  // Logged-in Docker Hub account, to prefill the push namespace.
-  useEffect(() => {
-    window.minipit?.dockerAccount().then((d) => setDocker(d ?? { loggedIn: false })).catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (!moreFor) return
@@ -79,7 +75,7 @@ export function TemplatesPage() {
 
   const push = (t: Template) => {
     setMoreFor(null)
-    const ns = docker.username ?? 'your-namespace'
+    const ns = activeOrg ?? docker.username ?? 'your-namespace'
     // Default to the template's own ref if it's already namespaced, else suggest one.
     const suggested = t.repository.includes('/') ? `${t.repository}:${t.tag}` : `docker.io/${ns}/${t.repository}:${t.tag}`
     openPrompt({

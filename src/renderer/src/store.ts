@@ -28,6 +28,17 @@ interface ContextMenuState {
   groupId?: string | null
 }
 
+export interface DockerAccount {
+  loggedIn: boolean
+  username?: string
+  email?: string
+  fullName?: string
+  gravatar?: string
+  // Organizations the user belongs to (from the Docker Hub API). Empty when
+  // offline or the token can't read them.
+  orgs?: string[]
+}
+
 interface AppState {
   sandboxes: Sandbox[]
   activeSandboxId: string | null
@@ -52,6 +63,11 @@ interface AppState {
   // Scope the secret modal targets when editing: '(global)' or a sandbox name.
   // Null when adding a new secret (the modal then lets the user pick the scope).
   secretScopeTarget: string | null
+  // The signed-in Docker Hub account (username/email/orgs). Null until loaded.
+  dockerAccount: DockerAccount | null
+  // The active namespace for push/publish (the user's own username or a selected
+  // org). Persisted across launches. Null falls back to the account username.
+  activeOrg: string | null
   newSandboxWorkspace: string | null
   newSandboxTemplate: string | null
   // When set, the New Sandbox modal pre-selects this group (used by the group
@@ -138,6 +154,8 @@ interface AppState {
   setSandboxColor:    (name: string, hex: string | null) => void
   setCustomizeSandbox:(name: string | null) => void
   syncProjectConfig:  () => void
+  loadDockerAccount:  () => void
+  setActiveOrg:       (org: string | null) => void
   loadSandboxIsolation: () => void
   loadAutoSync:       () => void
   setAutoSync:        (name: string, on: boolean) => void
@@ -189,6 +207,8 @@ export const useStore = create<AppState>((set) => ({
   stopHolds: {},
   secretTarget: null,
   secretScopeTarget: null,
+  dockerAccount: null,
+  activeOrg: localStorage.getItem('minipit:activeOrg'),
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
   newSandboxGroup: null,
@@ -361,6 +381,30 @@ export const useStore = create<AppState>((set) => ({
       window.minipit?.projectConfigSet('sandboxColors', name, hex ?? null)
       return { sandboxColors: next }
     }),
+
+  // ── Docker account ──────────────────────────────────────────────────────────
+  loadDockerAccount: () => {
+    window.minipit?.dockerAccount().then((a) => {
+      const account = (a as DockerAccount) ?? { loggedIn: false }
+      set({ dockerAccount: account })
+      // Default/repair the active namespace: keep a still-valid selection,
+      // otherwise fall back to the user's own username (personal namespace).
+      const valid = [account.username, ...(account.orgs ?? [])].filter(Boolean) as string[]
+      const current = useStore.getState().activeOrg
+      if (!current || !valid.includes(current)) {
+        const next = account.username ?? null
+        set({ activeOrg: next })
+        if (next) localStorage.setItem('minipit:activeOrg', next)
+        else localStorage.removeItem('minipit:activeOrg')
+      }
+    }).catch(() => {})
+  },
+
+  setActiveOrg: (org) => {
+    set({ activeOrg: org })
+    if (org) localStorage.setItem('minipit:activeOrg', org)
+    else localStorage.removeItem('minipit:activeOrg')
+  },
 
   // ── Groups ────────────────────────────────────────────────────────────────
   loadGroups: () => {

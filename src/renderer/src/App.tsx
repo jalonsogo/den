@@ -35,6 +35,8 @@ export function App() {
     loadAutoSync()
     // Named sandbox groups.
     useStore.getState().loadGroups()
+    // Signed-in Docker Hub account (username/email/orgs) for the account menu.
+    useStore.getState().loadDockerAccount()
 
     // Live updates from main process
     const unsub1 = window.minipit?.onSandboxesUpdated((s) => {

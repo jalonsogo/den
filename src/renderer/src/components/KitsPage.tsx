@@ -62,7 +62,7 @@ function hubRepoUrl(ref: string): string | null {
 }
 
 export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
-  const { modal, setModal, sandboxes, defaultKits, toggleDefaultKit, setEditKit } = useStore()
+  const { modal, setModal, sandboxes, defaultKits, toggleDefaultKit, setEditKit, dockerAccount, activeOrg } = useStore()
   const [kits, setKits] = useState<Kit[]>([])
   const [specs, setSpecs] = useState<Record<string, ReturnType<typeof parseKitSpec>>>({})
   const [addFor, setAddFor] = useState<string | null>(null)
@@ -110,7 +110,8 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const [pushFor, setPushFor] = useState<string | null>(null)
   const [pushRef, setPushRef] = useState('')
   const [pushing, setPushing] = useState(false)
-  const [docker, setDocker] = useState<{ loggedIn: boolean; username?: string }>({ loggedIn: false })
+  // Shared signed-in account (loaded once at app boot in the store).
+  const docker = dockerAccount ?? { loggedIn: false }
   // Import a remote kit by OCI reference.
   const [importOpen, setImportOpen] = useState(false)
   const [importRef, setImportRef] = useState('')
@@ -173,11 +174,6 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     }
   }
 
-  // Read the logged-in Docker Hub account once, to prefill the push namespace.
-  useEffect(() => {
-    window.minipit?.dockerAccount().then((d) => setDocker(d ?? { loggedIn: false })).catch(() => {})
-  }, [])
-
   const toggleMore = (dir: string, e: React.MouseEvent) => {
     if (moreFor === dir) { setMoreFor(null); return }
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -197,7 +193,8 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
 
   const openPush = (k: Kit) => {
     setMoreFor(null)
-    const ns = docker.username ?? 'your-namespace'
+    // Prefill with the active namespace (selected org) or the user's own name.
+    const ns = activeOrg ?? docker.username ?? 'your-namespace'
     setPushRef(`docker.io/${ns}/${k.name}:latest`)
     setPushFor(k.dir)
   }

@@ -209,6 +209,11 @@ html, body, #root {
   padding: 7px 8px; border-radius: 5px; cursor: pointer;
 }
 .tb-acct-item:hover { background: var(--bg-subtle); }
+.tb-acct-item-tag {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
+  color: var(--t3); background: var(--bg-subtle);
+  padding: 1px 5px; border-radius: 4px;
+}
 .tb-acct-divider { height: 1px; background: var(--border); margin: 5px 0; }
 /* Segmented control (e.g. Light / Dark / Computer) */
 .seg {

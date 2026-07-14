@@ -339,7 +339,7 @@ declare global {
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
       listContribKits(): Promise<{ ok: boolean; kits?: { dir: string; spec: string }[]; error?: string }>
       importContribKit(dir: string): Promise<{ ok: boolean; name?: string; error?: string }>
-      dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; gravatar?: string }>
+      dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; fullName?: string; gravatar?: string; orgs?: string[] }>
       dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>
       dockerLogout(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>
       onLoginOutput(cb: (chunk: string) => void): () => void
