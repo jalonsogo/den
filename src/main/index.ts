@@ -139,6 +139,58 @@ async function hubGet<T>(path: string, bearer: string): Promise<T | null> {
   } catch { return null }
 }
 
+// Cached result of `minipit:docker-account`. Every keychain read via
+// `security` can pop a macOS password prompt (one per entry, and again
+// whenever sbx rewrites the entries on token refresh), and several components
+// ask for the account — so resolve it once, share concurrent callers on one
+// in-flight promise, and only re-read after login/logout (cache invalidated
+// there) or when the TTL lapses.
+type DockerAccountInfo = {
+  loggedIn: boolean
+  username?: string
+  email?: string
+  fullName?: string
+  gravatar?: string
+  orgs?: string[]
+}
+let dockerAccountCache: { value: DockerAccountInfo; at: number } | null = null
+let dockerAccountInflight: Promise<DockerAccountInfo> | null = null
+const DOCKER_ACCOUNT_TTL = 30 * 60_000
+
+// Read one sbx keychain entry (macOS `security` CLI), or null if absent.
+// The first read triggers a one-time macOS "den wants to access…" prompt,
+// since the entries are owned by the sbx binary.
+function readSbxKeychain(account: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const proc = spawn('security', ['find-generic-password', '-s', 'sandboxes-auth', '-a', account, '-w'], { env: guiEnv() })
+    let buf = ''
+    proc.stdout?.on('data', (d) => { buf += d.toString() })
+    proc.on('error', () => resolve(null))
+    proc.on('close', (code) => resolve(code === 0 && buf.trim() ? buf.trim() : null))
+  })
+}
+
+// The sbx (v0.35+) Docker Hub session. `sbx login` no longer writes to the
+// Docker credential store — the session lives in the macOS keychain under the
+// `sandboxes-auth` service: `docker/auth/metadata/hub/default` holds
+// {username, email}, and `docker/auth/hub/<username>` holds the OAuth tokens.
+// Returns null when signed out (sbx logout removes the entries) or off-macOS.
+async function sbxSession(): Promise<{ username: string; email?: string; accessToken?: string } | null> {
+  if (process.platform !== 'darwin') return null
+  const metaRaw = await readSbxKeychain('docker/auth/metadata/hub/default')
+  if (!metaRaw) return null
+  try {
+    const meta = JSON.parse(metaRaw) as { username?: string; email?: string }
+    if (!meta.username) return null
+    const tokRaw = await readSbxKeychain(`docker/auth/hub/${meta.username}`)
+    let accessToken: string | undefined
+    if (tokRaw) {
+      try { accessToken = (JSON.parse(tokRaw) as { access_token?: string }).access_token } catch { /* tokens absent → metadata-only */ }
+    }
+    return { username: meta.username, email: meta.email || undefined, accessToken }
+  } catch { return null }
+}
+
 // Obtain a Docker Hub bearer from a stored registry secret. The newer OAuth
 // login stores a JWT that works directly; an older PAT/password must be
 // exchanged via POST /v2/auth/token. Try direct first, then exchange.
@@ -1718,8 +1770,17 @@ function setupIPC(): void {
   })
 
   ipcMain.handle('minipit:sign-out', async () => {
-    // `sbx logout` stops all running sandboxes and signs out of Docker.
-    await sbx(['logout'], { timeout: 30000 })
+    // `sbx logout` stops all running sandboxes and signs out of Docker. `-y`
+    // skips its interactive confirmation prompt — without it the piped (no-TTY)
+    // process hangs at the prompt until timeout and never logs out.
+    try {
+      const output = await sbx(['logout', '-y'], { timeout: 30000 })
+      dockerAccountCache = null
+      return { ok: true, output }
+    } catch (err) {
+      const error = (err instanceof Error ? err.message : String(err)).trim()
+      return { ok: false, error, netError: isNetworkError(error) }
+    }
   })
 
   ipcMain.handle('minipit:list-templates', () => listTemplates())
@@ -1830,58 +1891,87 @@ function setupIPC(): void {
     setAppMenu().catch(() => {})
   })
 
-  // The logged-in Docker Hub account. The username comes from the credential
-  // helper (config.json `credsStore` → `docker-credential-<store> list`), which
-  // is fast and offline. The email, full name, and org list are then enriched
+  // The logged-in Docker Hub account. The sbx keychain session (v0.35+) is the
+  // authoritative source — `sbx login` no longer writes to the Docker
+  // credential store — with the credential store as fallback for plain
+  // `docker login` / older sbx. The full name and org list are then enriched
   // from the Docker Hub API (best-effort) — used to prefill the push namespace
   // and populate the account dropdown. On any API failure the username still
   // returns, so callers degrade to username-only.
   ipcMain.handle('minipit:docker-account', async () => {
-    const registry = 'https://index.docker.io/v1/'
-    try {
-      const fs = require('fs')
-      const cfg = JSON.parse(fs.readFileSync(join(app.getPath('home'), '.docker/config.json'), 'utf8'))
-      const store = cfg.credsStore || cfg.credStore
-      if (!store) return { loggedIn: false }
-      const out = await new Promise<string>((resolve, reject) => {
-        const proc = spawn(`docker-credential-${store}`, ['list'], { env: guiEnv() })
-        let buf = ''
-        proc.stdout?.on('data', (d) => { buf += d.toString() })
-        proc.on('error', reject)
-        proc.on('close', () => resolve(buf))
-      })
-      const map = JSON.parse(out || '{}') as Record<string, string>
-      const username = map[registry] || Object.values(map)[0]
-      if (!username) return { loggedIn: false }
-
-      // Legacy config `email` (usually absent on modern creds stores) is the
-      // offline fallback; the Hub API is the authoritative source when reachable.
-      let email: string | undefined = cfg.auths?.[registry]?.email || cfg.auths?.[username]?.email
-      let fullName: string | undefined
-      let orgs: string[] = []
-      try {
-        const cred = await getCredSecret(store, registry)
-        const secret = cred?.Secret
-        const bearer = secret ? await hubBearer(username, secret) : null
-        if (bearer) {
-          const profile = await hubGet<{ email?: string; gravatar_email?: string; full_name?: string }>('/v2/user/', bearer)
-          if (profile) {
-            email = profile.email || profile.gravatar_email || email
-            fullName = profile.full_name || undefined
-          }
-          const orgsRes = await hubGet<{ results?: { orgname?: string }[] }>('/v2/user/orgs/?page_size=100', bearer)
-          if (orgsRes?.results) orgs = orgsRes.results.map((o) => o.orgname).filter((n): n is string => !!n)
-        }
-      } catch { /* offline / token scope — username-only is fine */ }
-
-      const gravatar = email
-        ? require('crypto').createHash('md5').update(email.trim().toLowerCase()).digest('hex')
-        : undefined
-      return { loggedIn: true, username, email, fullName, gravatar, orgs }
-    } catch {
-      return { loggedIn: false }
+    if (dockerAccountCache && Date.now() - dockerAccountCache.at < DOCKER_ACCOUNT_TTL) {
+      return dockerAccountCache.value
     }
+    if (dockerAccountInflight) return dockerAccountInflight
+    dockerAccountInflight = resolveDockerAccount()
+      .then((value) => { dockerAccountCache = { value, at: Date.now() }; return value })
+      .finally(() => { dockerAccountInflight = null })
+    return dockerAccountInflight
   })
+
+  async function resolveDockerAccount(): Promise<DockerAccountInfo> {
+    const registry = 'https://index.docker.io/v1/'
+    let username: string | undefined
+    let email: string | undefined
+    // Bearer candidate for the Hub API: the sbx access token or the
+    // credential-store secret (hubBearer() copes with either).
+    let secret: string | undefined
+
+    const session = await sbxSession()
+    if (session) {
+      username = session.username
+      email = session.email
+      // The sbx access token is an auth0 session token that the Hub API
+      // currently rejects (401 both direct and via /v2/auth/token exchange),
+      // so enrichment usually degrades to the keychain username+email here.
+      // Still worth trying: it lights up automatically if Docker ever issues
+      // Hub-compatible tokens.
+      secret = session.accessToken
+    } else {
+      try {
+        const fs = require('fs')
+        const cfg = JSON.parse(fs.readFileSync(join(app.getPath('home'), '.docker/config.json'), 'utf8'))
+        const store = cfg.credsStore || cfg.credStore
+        if (store) {
+          const out = await new Promise<string>((resolve, reject) => {
+            const proc = spawn(`docker-credential-${store}`, ['list'], { env: guiEnv() })
+            let buf = ''
+            proc.stdout?.on('data', (d) => { buf += d.toString() })
+            proc.on('error', reject)
+            proc.on('close', () => resolve(buf))
+          })
+          const map = JSON.parse(out || '{}') as Record<string, string>
+          username = map[registry] || Object.values(map)[0]
+          // Legacy config `email` (usually absent on modern creds stores) is
+          // the offline fallback; the Hub API overrides it when reachable.
+          email = cfg.auths?.[registry]?.email || cfg.auths?.[username ?? '']?.email
+          if (username) secret = (await getCredSecret(store, registry))?.Secret
+        }
+      } catch { /* no config / helper — treat as signed out */ }
+    }
+
+    if (!username) return { loggedIn: false }
+
+    let fullName: string | undefined
+    let orgs: string[] = []
+    try {
+      const bearer = secret ? await hubBearer(username, secret) : null
+      if (bearer) {
+        const profile = await hubGet<{ email?: string; gravatar_email?: string; full_name?: string }>('/v2/user/', bearer)
+        if (profile) {
+          email = profile.email || profile.gravatar_email || email
+          fullName = profile.full_name || undefined
+        }
+        const orgsRes = await hubGet<{ results?: { orgname?: string }[] }>('/v2/user/orgs/?page_size=100', bearer)
+        if (orgsRes?.results) orgs = orgsRes.results.map((o) => o.orgname).filter((n): n is string => !!n)
+      }
+    } catch { /* offline / token scope — username-only is fine */ }
+
+    const gravatar = email
+      ? require('crypto').createHash('md5').update(email.trim().toLowerCase()).digest('hex')
+      : undefined
+    return { loggedIn: true, username, email, fullName, gravatar, orgs }
+  }
 
   // Sign in to Docker via `sbx login`. It's an interactive browser/device flow,
   // so stream its output to the renderer and allow a long timeout while the user
@@ -1903,6 +1993,7 @@ function setupIPC(): void {
           else reject(new Error(err.trim() || buf.trim() || `sbx login exited ${code}`))
         })
       })
+      dockerAccountCache = null
       return { ok: true, output }
     } catch (err) {
       const error = (err instanceof Error ? err.message : String(err)).trim()
@@ -1918,9 +2009,12 @@ function setupIPC(): void {
   ipcMain.handle('minipit:docker-logout', async () => {
     const send = (chunk: string) => mainWindow?.webContents.send('minipit:login-output', chunk)
     try {
-      send('$ sbx logout\n')
-      const output = await sbx(['logout'], { timeout: 30000 })
+      send('$ sbx logout -y\n')
+      // `-y` skips the interactive confirmation; without it the piped (no-TTY)
+      // process hangs at the prompt until timeout and never logs out.
+      const output = await sbx(['logout', '-y'], { timeout: 30000 })
       if (output) send(output + '\n')
+      dockerAccountCache = null
       return { ok: true, output }
     } catch (err) {
       const error = (err instanceof Error ? err.message : String(err)).trim()

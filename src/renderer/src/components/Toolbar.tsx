@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut } from 'lucide-react'
 import { useStore } from '../store'
+import type { Sandbox } from '../types'
 
 export function Toolbar() {
-  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar, dockerAccount, activeOrg, setActiveOrg } = useStore()
+  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar, dockerAccount, activeOrg, setActiveOrg, loadDockerAccount, setSandboxes } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
 
   const [acctOpen, setAcctOpen] = useState(false)
@@ -41,7 +42,17 @@ export function Toolbar() {
   const handleSignOut = async () => {
     setAcctOpen(false)
     if (!confirm('Sign out of Docker? This stops all running sandboxes.')) return
-    await window.minipit?.signOut().catch((e) => console.error(e))
+    const r = await window.minipit?.signOut().catch((e) => ({ ok: false, error: String(e), netError: false }))
+    if (r && !r.ok) {
+      alert(r.netError
+        ? 'Couldn’t reach Docker Hub to sign out — check your network/DNS and try again.'
+        : `Sign out failed: ${r.error ?? 'unknown error'}`)
+      return
+    }
+    // Reflect the signed-out state immediately: refresh the account (now logged
+    // out) and the sandbox list (logout stopped them all).
+    loadDockerAccount()
+    window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[])).catch(() => {})
   }
 
   const getTitle = () => {
@@ -108,13 +119,15 @@ export function Toolbar() {
               <>
                 <div className="tb-acct-divider" />
                 <div className="tb-acct-label">Namespaces</div>
-                {namespaces.map((o) => (
-                  <div key={o} className="tb-acct-item" onClick={() => { setActiveOrg(o); setAcctOpen(false) }}>
-                    {o}
-                    {o === account.username && <span className="tb-acct-item-tag">personal</span>}
-                    {org === o && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent, var(--primary))' }} />}
-                  </div>
-                ))}
+                <div className="tb-acct-scroll">
+                  {namespaces.map((o) => (
+                    <div key={o} className="tb-acct-item" onClick={() => { setActiveOrg(o); setAcctOpen(false) }}>
+                      {o}
+                      {o === account.username && <span className="tb-acct-item-tag">personal</span>}
+                      {org === o && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent, var(--primary))' }} />}
+                    </div>
+                  ))}
+                </div>
               </>
             )}
             <div className="tb-acct-divider" />

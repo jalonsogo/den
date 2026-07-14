@@ -319,7 +319,7 @@ declare global {
       deletePath(name: string, path: string): Promise<void>
       copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
       downloadFrom(name: string, path: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>
-      signOut(): Promise<void>
+      signOut(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>
       generatePalette(hex: string, size?: number): Promise<string[]>
       listTemplates(): Promise<Template[]>
       removeTemplate(ref: string): Promise<void>

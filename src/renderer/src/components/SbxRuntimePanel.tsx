@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
 import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
+import { useStore } from '../store'
 import type { SbxRelease } from '../types'
 
 type DiagMode = 'text' | 'json' | 'github-issue' | 'upload'
@@ -283,6 +284,8 @@ export function SbxRuntimePanel({
         const a = await window.minipit?.dockerAccount().catch(() => null)
         setAccount(a?.loggedIn ? a : { loggedIn: true })
       }
+      // Refresh the shared account (toolbar menu, push-namespace prefills).
+      useStore.getState().loadDockerAccount()
     } else if (r && 'netError' in r && r.netError) {
       // Couldn't reach Docker Hub — say so instead of implying a bad login.
       setAuthNetErr('Couldn’t reach Docker Hub — check your network/DNS (or a proxy/firewall in front of it) and try again.')
@@ -298,8 +301,11 @@ export function SbxRuntimePanel({
     setAuthNetErr(null)
     const r = await window.minipit?.dockerLogout().catch((e) => ({ ok: false, error: String(e) }))
     setSigningOut(false)
-    if (r?.ok) setAccount({ loggedIn: false })
-    else if (r && 'netError' in r && r.netError) {
+    if (r?.ok) {
+      setAccount({ loggedIn: false })
+      // Refresh the shared account (toolbar menu, push-namespace prefills).
+      useStore.getState().loadDockerAccount()
+    } else if (r && 'netError' in r && r.netError) {
       setAuthNetErr('Couldn’t reach Docker Hub to sign out — check your network/DNS and try again.')
     }
   }
