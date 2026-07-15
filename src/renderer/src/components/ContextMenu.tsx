@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Github } from 'lucide-react'
+import { GitFork as Github } from 'lucide-react'
 import { useStore } from '../store'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { bringSandboxToHost } from '../lib/featureChanges'

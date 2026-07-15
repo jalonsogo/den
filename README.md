@@ -71,6 +71,8 @@ race) and their fixes.
 
 ## Development
 
+Use Node.js 26.5.0 (see `.nvmrc`) and npm 12.0.1. Node Current is required for reproducible development and CI.
+
 ```bash
 npm install
 npm run dev        # launch the app with hot reload (electron-vite)

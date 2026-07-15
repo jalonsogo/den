@@ -36,7 +36,7 @@ function SandboxItem({ sandbox, active, collapsed, onReorder, nextName, groupKey
   const [hoverPos, setHoverPos] = useState({ top: 0, left: 0 })
   // Same-group reorder shows an insertion line above/below this row.
   const [dropPos, setDropPos] = useState<'before' | 'after' | null>(null)
-  const hoverTimer = useRef<ReturnType<typeof setTimeout>>()
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const showHover = (e: React.MouseEvent) => {
     if (!collapsed) return
     if (hoverTimer.current) clearTimeout(hoverTimer.current)

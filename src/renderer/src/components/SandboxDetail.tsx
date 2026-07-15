@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { MoreVertical, Play, Square, GitBranch, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, RotateCcw, GitFork as Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
