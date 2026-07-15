@@ -289,6 +289,14 @@ export interface AppSettings {
 
 declare global {
   interface Window {
+    windowControls: {
+      isCustomChrome: boolean
+      getState(): Promise<boolean>
+      minimize(): Promise<void>
+      toggleMaximize(): Promise<void>
+      close(): Promise<void>
+      onMaximizedChanged(cb: (maximized: boolean) => void): () => void
+    }
     minipit: {
       listSandboxes(): Promise<Sandbox[]>
       createSandbox(config: unknown): Promise<string>

@@ -90,8 +90,38 @@ html, body, #root {
 
 .toolbar button,
 .toolbar input,
-.toolbar a {
+.toolbar a,
+.window-controls {
   -webkit-app-region: no-drag;
+}
+
+/* Linux main-window chrome only. macOS keeps the 80px traffic-light inset and
+   Windows/editor windows retain their native frame. */
+.toolbar-custom-chrome { padding-left: 10px; }
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.window-control {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+}
+.window-control:hover { background: var(--bg-subtle); color: var(--t1); }
+.window-control-close:hover { background: var(--destruct); color: white; }
+.window-control:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 .tb-center {

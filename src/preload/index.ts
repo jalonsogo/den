@@ -1,6 +1,19 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+const windowControls = {
+  isCustomChrome: process.platform === 'linux',
+  getState: () => ipcRenderer.invoke('minipit:window-get-state') as Promise<boolean>,
+  minimize: () => ipcRenderer.invoke('minipit:window-minimize') as Promise<void>,
+  toggleMaximize: () => ipcRenderer.invoke('minipit:window-toggle-maximize') as Promise<void>,
+  close: () => ipcRenderer.invoke('minipit:window-close') as Promise<void>,
+  onMaximizedChanged: (cb: (maximized: boolean) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, maximized: boolean) => cb(maximized)
+    ipcRenderer.on('minipit:window-maximized-changed', handler)
+    return () => ipcRenderer.removeListener('minipit:window-maximized-changed', handler)
+  }
+}
+
 const api = {
   // UI density = a browser zoom factor applied to the whole window (scales every
   // element uniformly). Renderer-side webFrame call, so no IPC round-trip.
@@ -231,6 +244,7 @@ if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('minipit', api)
+    contextBridge.exposeInMainWorld('windowControls', windowControls)
   } catch (e) {
     console.error(e)
   }
@@ -239,4 +253,6 @@ if (process.contextIsolated) {
   window.electron = electronAPI
   // @ts-ignore
   window.minipit = api
+  // @ts-ignore
+  window.windowControls = windowControls
 }

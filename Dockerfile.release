@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1.7
+
+# Ubuntu 26.04 is pinned by manifest-list digest so BuildKit selects the matching
+# image for TARGETPLATFORM while both architecture builds use the same base tag.
+ARG UBUNTU_IMAGE=ubuntu:26.04@sha256:b7f48194d4d8b763a478a621cdc81c27be222ba2206ca3ca6bc42b49685f3d9e
+FROM ${UBUNTU_IMAGE} AS build
+
+ARG TARGETARCH
+ARG NODE_VERSION=26.5.0
+ARG NODE_SHA256_AMD64=9f619528f1db5ddc41dccf54211066fb42228d69a156733c69cb9d6cc92e358c
+ARG NODE_SHA256_ARM64=036df0b49662ebb350eb56f1cac603699b1e9ed1e2603ee129fefda473479030
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    npm_config_update_notifier=false \
+    npm_config_fund=false \
+    npm_config_audit=false
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+      binutils ca-certificates curl desktop-file-utils file g++ imagemagick libasound2t64 make python3 xauth xz-utils xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN case "${TARGETARCH}" in \
+      amd64) node_arch=x64; node_sha="${NODE_SHA256_AMD64}" ;; \
+      arm64) node_arch=arm64; node_sha="${NODE_SHA256_ARM64}" ;; \
+      *) echo "Unsupported Docker target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl --fail --location --silent --show-error \
+      "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+      --output /tmp/node.tar.xz \
+    && echo "${node_sha}  /tmp/node.tar.xz" | sha256sum --check --strict \
+    && tar --extract --xz --file /tmp/node.tar.xz --directory /usr/local --strip-components=1 \
+    && rm /tmp/node.tar.xz \
+    && node --version \
+    && npm --version
+
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm install --global npm@12.0.1
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
+
+COPY . .
+RUN chmod 0644 resources/icon/linux/*.png
+RUN node scripts/sync-icons.mjs --check \
+    && npm run typecheck \
+    && npm run build \
+    && case "${TARGETARCH}" in \
+      amd64) electron_arch=x64; deb_arch=amd64; elf_machine='Advanced Micro Devices X86-64' ;; \
+      arm64) electron_arch=arm64; deb_arch=arm64; elf_machine='AArch64' ;; \
+    esac \
+    && npx electron-builder --linux deb --"${electron_arch}" --publish never \
+    && test "$(find dist -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 1 \
+    && deb="$(find dist -maxdepth 1 -type f -name '*.deb')" \
+    && test "$(dpkg-deb --field "${deb}" Architecture)" = "${deb_arch}" \
+    && test "$(dpkg-deb --field "${deb}" Section)" = "devel" \
+    && rm -rf /tmp/package && dpkg-deb --extract "${deb}" /tmp/package \
+    && desktop=/tmp/package/usr/share/applications/den.desktop \
+    && test -f "${desktop}" \
+    && desktop-file-validate "${desktop}" \
+    && grep --line-regexp --fixed-strings 'Name=den' "${desktop}" \
+    && grep --line-regexp --fixed-strings 'Exec=/opt/den/den %U' "${desktop}" \
+    && grep --line-regexp --fixed-strings 'Icon=den' "${desktop}" \
+    && grep --line-regexp --fixed-strings 'StartupWMClass=den' "${desktop}" \
+    && grep --line-regexp --fixed-strings 'Categories=Development;' "${desktop}" \
+    && test -x /tmp/package/opt/den/den \
+    && for size in 16 24 32 48 64 128 256 512; do \
+      icon="/tmp/package/usr/share/icons/hicolor/${size}x${size}/apps/den.png"; \
+      test -f "${icon}" \
+        && test "$(stat --format='%a' "${icon}")" = 644 \
+        && file "${icon}" | grep --extended-regexp "PNG image data, ${size} x ${size}," \
+        || exit 1; \
+    done \
+    && node scripts/validate-linux-package.mjs /tmp/package \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends "${PWD}/${deb}" \
+    && rm -rf /var/lib/apt/lists/* \
+    && xvfb-run --auto-servernum node scripts/smoke-linux-startup.mjs /opt/den/den --no-sandbox \
+    && native=/tmp/package/opt/den/resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node \
+    && test -f "${native}" \
+    && readelf --file-header "${native}" | grep --fixed-strings "Machine:                           ${elf_machine}" \
+    && dpkg-deb --info "${deb}" \
+    && file "${native}" "${deb}"
+
+FROM scratch AS artifact
+COPY --from=build /src/dist/*.deb /
