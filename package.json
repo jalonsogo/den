@@ -3,9 +3,15 @@
   "version": "0.7.1",
   "description": "A beautiful GUI for Docker Sandboxes",
   "main": "./out/main/index.js",
+  "desktopName": "den",
   "homepage": "https://den.studio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krissetto/den.git"
+  },
   "author": {
     "name": "den",
+    "email": "javier.alonso@docker.com",
     "url": "https://den.studio"
   },
   "license": "MIT",
@@ -24,6 +30,14 @@
     },
     "win": {
       "icon": "resources/icon/dock.png"
+    },
+    "linux": {
+      "target": "deb",
+      "icon": "resources/icon/linux",
+      "category": "Development",
+      "packageCategory": "devel",
+      "synopsis": "Desktop GUI for Docker Sandboxes",
+      "syncDesktopName": true
     }
   },
   "scripts": {
@@ -33,6 +47,8 @@
     "sync:icons": "node scripts/sync-icons.mjs",
     "build:mac": "npm run build && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
+    "build:linux:x64": "npm run build && electron-builder --linux deb --x64",
+    "build:linux:arm64": "npm run build && electron-builder --linux deb --arm64",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",

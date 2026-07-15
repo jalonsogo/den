@@ -35,8 +35,16 @@ jobs:
         include:
           - os: macos-latest
             target: mac
+            builder-args: --mac
           - os: windows-2022
             target: win
+            builder-args: --win
+          - os: ubuntu-26.04
+            target: linux-x64
+            builder-args: --linux deb --x64
+          - os: ubuntu-26.04-arm
+            target: linux-arm64
+            builder-args: --linux deb --arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -60,6 +68,10 @@ jobs:
       - name: Install build tooling
         run: python -m pip install setuptools
 
+      - name: Install Linux compiler prerequisites
+        if: startsWith(matrix.target, 'linux-')
+        run: sudo apt-get update && sudo apt-get install --yes build-essential
+
       - name: Install dependencies
         run: npm ci
         env:
@@ -81,8 +93,35 @@ jobs:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-      - name: Build and publish ${{ matrix.target }}
-        run: npm run build && npx electron-builder --${{ matrix.target }} --publish always
+      - name: Build ${{ matrix.target }}
+        run: npm run build && npx electron-builder ${{ matrix.builder-args }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Validate packaged Linux startup
+        if: startsWith(matrix.target, 'linux-')
+        shell: bash
+        run: |
+          deb="$(find dist -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          test -n "$deb"
+          rm -rf /tmp/den-package
+          dpkg-deb --extract "$deb" /tmp/den-package
+          node scripts/validate-linux-package.mjs /tmp/den-package
+          sudo apt-get update
+          sudo apt-get install --yes xvfb xauth libasound2t64 "$PWD/$deb"
+          # CI may not preserve setuid ownership for chrome-sandbox. The flag is
+          # confined to this isolated runner smoke; installed desktop use keeps
+          # Electron's normal sandbox enabled.
+          xvfb-run --auto-servernum node scripts/smoke-linux-startup.mjs /opt/den/den --no-sandbox
+        env:
+          DEN_SMOKE_LIFETIME_MS: '8000'
+
+      - name: Publish ${{ matrix.target }}
+        if: startsWith(github.ref, 'refs/tags/')
+        run: npx electron-builder ${{ matrix.builder-args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}

@@ -20,7 +20,7 @@ den is a beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai
 
 ## What it does
 
-den wraps the `sbx` CLI in a native macOS/Windows app:
+den wraps the `sbx` CLI in a native macOS, Windows, and Linux app:
 
 - **Sandboxes** — create, run, stop, and delete agent sandboxes. Pick any agent (Claude, Codex, Cursor, Gemini, Copilot, Droid, …), a workspace, optional memory and Git‑clone isolation, and a random cosmic name. Watch live progress while a sandbox is created.
 - **Agent & Shell terminals** — full‑screen agent TUIs (e.g. Claude Code) and an interactive shell, rendered with **xterm.js** over a real PTY.
@@ -55,13 +55,33 @@ Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network
 
 ## Requirements
 
-- macOS or Windows
+- macOS, Windows, or Debian/Ubuntu Linux (x64 or arm64 package)
 - [Docker](https://www.docker.com/) running
 - The **`sbx`** CLI installed and signed in:
   ```bash
   brew install docker/tap/sbx   # macOS
   sbx login
   ```
+
+> **Linux status:** `.deb` packaging targets are configured for x64 (`amd64`
+> in Debian package metadata) and arm64. The amd64 path has been build-validated;
+> arm64 must be validated on a builder that actually supports `linux/arm64`
+> before an arm64 artifact is claimed. Packaging is build-validated separately
+> from end-to-end runtime behavior; Linux is initial support rather than a
+> fully runtime-certified platform. Install Docker and a native `sbx` binary
+> yourself before launching den. In particular, confirm that an `sbx` build is
+> available for Linux arm64—the den package does not bundle it. Some login,
+> update, and log-path flows retain macOS-oriented behavior and may need manual
+> CLI use on Linux.
+>
+> The Linux **main window** uses an Electron frameless toolbar with accessible
+> Close, Minimize, and Maximize/Restore buttons; file-editor windows keep their
+> native desktop frame. This is application chrome, not native GNOME client-side
+> decoration (CSD). The compositor and X11/Wayland session control drag-region
+> double-click behavior, resize borders, corners, and any window shadow. den does
+> not draw a synthetic shadow. Validate those interactions on each supported
+> desktop/session; the current automated package check verifies wiring rather
+> than pixel-level appearance.
 
 ## Troubleshooting
 
@@ -82,10 +102,63 @@ npm run dev        # launch the app with hot reload (electron-vite)
 
 ## Build
 
+The local Debian release builder needs only a running Docker installation with
+the Buildx plugin. Node, npm, the compiler toolchain, and Debian packaging tools
+all run inside a pinned Ubuntu 26.04 image:
+
 ```bash
-npm run build      # type-check + bundle
-npm run build:mac  # package a macOS app
-npm run build:win  # package a Windows app
+# Build both architectures (requires a builder that supports amd64 and arm64)
+docker buildx bake
+
+# Or build one architecture
+docker buildx bake deb-amd64
+docker buildx bake deb-arm64
+```
+
+The first command writes one package per architecture without filename
+collisions:
+
+```text
+dist/docker/amd64/den_<version>_amd64.deb
+dist/docker/arm64/den_<version>_arm64.deb
+```
+
+`linux/amd64` maps to Electron `x64` and Debian `amd64`; `linux/arm64` maps to
+Electron and Debian `arm64`. Each target runs `npm ci` from `package-lock.json`,
+type-checks and bundles the app, builds `node-pty` inside the target-platform
+container, and invokes `electron-builder` with publishing disabled. The image
+pins Ubuntu 26.04 by digest and downloads the Node version declared by `.nvmrc`
+(Node 26.5.0) using architecture-specific checksums. It installs the exact npm
+version from `packageManager` (npm 12.0.1); Electron 43.1.1 and all npm
+dependencies are reproducibly resolved by `package-lock.json`.
+
+On an amd64 host, the arm64 command needs either a native arm64 Buildx node or
+QEMU/binfmt registered with Docker. Docker Desktop normally provides emulation;
+on Docker Engine, configure a multi-platform builder separately. Check the
+selected builder before building:
+
+```bash
+docker buildx ls
+docker buildx inspect --bootstrap
+```
+
+Only claim an arm64 package as validated after that target has completed and
+its package/native ELF metadata has been inspected. BuildKit retains image,
+`apt`, and npm cache layers between runs; source changes reuse dependency
+layers while `package.json` or `package-lock.json` changes invalidate `npm ci`.
+Use `docker buildx prune` when you intentionally want to remove the builder's
+cache. Existing host `node_modules/`, `out/`, and `dist/` directories are
+excluded by `.dockerignore`.
+
+The existing npm commands remain available for development hosts that already
+have Node and native build prerequisites:
+
+```bash
+npm run build              # bundle the application
+npm run build:mac          # package a macOS app
+npm run build:win          # package a Windows app
+npm run build:linux:x64    # package a Debian amd64 .deb on native x64 Linux
+npm run build:linux:arm64  # package a Debian arm64 .deb on native arm64 Linux
 ```
 
 ## Tech stack

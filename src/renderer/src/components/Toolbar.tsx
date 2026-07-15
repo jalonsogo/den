@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut } from 'lucide-react'
+import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut, X, Minus, Square, Copy } from 'lucide-react'
 import { useStore } from '../store'
 import type { Sandbox } from '../types'
 
@@ -9,6 +9,7 @@ export function Toolbar() {
 
   const [acctOpen, setAcctOpen] = useState(false)
   const [avatarFailed, setAvatarFailed] = useState(false)
+  const [maximized, setMaximized] = useState(false)
   const acctRef = useRef<HTMLDivElement>(null)
 
   const account = dockerAccount ?? { loggedIn: false }
@@ -18,6 +19,25 @@ export function Toolbar() {
   const org = activeOrg ?? account.username ?? ''
 
   useEffect(() => { setAvatarFailed(false) }, [account.gravatar])
+
+  useEffect(() => {
+    if (!window.windowControls.isCustomChrome) return
+    let mounted = true
+    let receivedEvent = false
+    const unsubscribe = window.windowControls.onMaximizedChanged((next) => {
+      receivedEvent = true
+      if (mounted) setMaximized(next)
+    })
+    window.windowControls.getState()
+      .then((initial) => {
+        if (mounted && !receivedEvent) setMaximized(initial)
+      })
+      .catch(() => {})
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
+  }, [])
 
   // Name shown in the account button: the Docker username if signed in, else a
   // neutral placeholder (never a hardcoded personal identity).
@@ -71,10 +91,43 @@ export function Toolbar() {
   const { title, sub } = getTitle()
 
   return (
-    <div className="toolbar">
+    <div className={`toolbar${window.windowControls.isCustomChrome ? ' toolbar-custom-chrome' : ''}`}>
+      {window.windowControls.isCustomChrome && (
+        <div className="window-controls" role="group" aria-label="Window controls">
+          <button
+            type="button"
+            className="window-control window-control-close"
+            onClick={() => { window.windowControls.close().catch(() => {}) }}
+            title="Close"
+            aria-label="Close"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="window-control"
+            onClick={() => { window.windowControls.minimize().catch(() => {}) }}
+            title="Minimize"
+            aria-label="Minimize"
+          >
+            <Minus size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="window-control"
+            onClick={() => { window.windowControls.toggleMaximize().catch(() => {}) }}
+            title={maximized ? 'Restore' : 'Maximize'}
+            aria-label={maximized ? 'Restore' : 'Maximize'}
+          >
+            {maximized ? <Copy size={13} aria-hidden="true" /> : <Square size={13} aria-hidden="true" />}
+          </button>
+        </div>
+      )}
       <button
+        type="button"
         className="tb-icon-btn"
         onClick={toggleSidebar}
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}

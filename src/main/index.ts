@@ -5,8 +5,6 @@ import {
   Menu,
   ipcMain,
   shell,
-  nativeImage,
-  nativeTheme,
   dialog,
   session,
   powerSaveBlocker
@@ -17,6 +15,7 @@ import { randomBytes, createHash } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { execFile, spawn } from 'child_process'
 import Store from 'electron-store'
+import { createTrayIcon, createWindowIcon, setupThemedAppIcons } from './app-icons'
 // node-pty 1.x compiles to CJS with `__esModule: true` but no `default` export,
 // so a default import resolves to `undefined` under esbuild's interop (crashing
 // `pty.spawn`). Import the namespace instead.
@@ -1401,18 +1400,20 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { contin
 }
 
 function createWindow(): void {
-  const logoPath = join(__dirname, '../../resources/icon/dock.png')
-  const logoImg = nativeImage.createFromPath(logoPath)
+  const platformWindowOptions = process.platform === 'linux'
+    ? { frame: false }
+    : process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 18 } }
+      : {}
 
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1160,
     height: 716,
     minWidth: 860,
     minHeight: 560,
     show: false,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 14, y: 18 },
-    icon: logoImg,
+    ...platformWindowOptions,
+    icon: createWindowIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -1424,20 +1425,32 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
-  // Menu-bar app: closing the window doesn't quit. Drop the destroyed reference
-  // so the tray can recreate it instead of touching a dead object.
-  mainWindow.on('closed', () => { mainWindow = null })
+  mainWindow = win
+  win.on('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show()
+  })
+  // Menu-bar app: closing the window doesn't quit. Drop only this window's
+  // reference so a later window cannot be cleared by a stale close callback.
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
+  const sendMaximizedState = (): void => {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send('minipit:window-maximized-changed', win.isMaximized())
+    }
+  }
+  win.on('maximize', sendMaximizedState)
+  win.on('unmaximize', sendMaximizedState)
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalSafe(url)
     return { action: 'deny' }
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
 
@@ -1462,10 +1475,7 @@ function navigateFromTray(channel: string, payload: string): void {
 
 function createTray(): void {
   // Dedicated menu-bar glyph; template image auto-adapts to light/dark menubar.
-  const iconPath = join(__dirname, '../../resources/icon/icon-dark.png')
-  const img = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
-  img.setTemplateImage(true)
-  tray = new Tray(img)
+  tray = new Tray(createTrayIcon())
   tray.setToolTip('den')
   updateTrayMenu([])
 }
@@ -1507,6 +1517,13 @@ let lastMenuSig = ''
 let lastMenuSandboxSig = ''
 
 async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSandboxes>>): Promise<void> {
+  // Linux must have no Electron menu at all: autoHideMenuBar still allows Alt
+  // to reveal it. Keep the existing native menu unchanged on macOS/Windows.
+  if (process.platform === 'linux') {
+    Menu.setApplicationMenu(null)
+    return
+  }
+
   // Route clicks through navigateFromTray so they work even when the window is
   // hidden (menu-bar-only mode): it shows/recreates the window, then delivers.
   const go = (channel: string, payload = '') => navigateFromTray(channel, payload)
@@ -1641,6 +1658,28 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
 }
 
 function setupIPC(): void {
+  const customChromeWindow = (event: Electron.IpcMainInvokeEvent, args: unknown[]): BrowserWindow => {
+    if (args.length !== 0) throw new Error('window control channels take no arguments')
+    if (process.platform !== 'linux') throw new Error('custom window controls are Linux-only')
+    if (event.senderFrame !== event.sender.mainFrame) throw new Error('window controls require the top frame')
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win !== mainWindow || win.isDestroyed() || event.sender.isDestroyed()) {
+      throw new Error('window controls require the current main window')
+    }
+    return win
+  }
+  ipcMain.handle('minipit:window-get-state', (event, ...args: unknown[]) =>
+    customChromeWindow(event, args).isMaximized())
+  ipcMain.handle('minipit:window-minimize', (event, ...args: unknown[]) =>
+    customChromeWindow(event, args).minimize())
+  ipcMain.handle('minipit:window-toggle-maximize', (event, ...args: unknown[]) => {
+    const win = customChromeWindow(event, args)
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.handle('minipit:window-close', (event, ...args: unknown[]) =>
+    customChromeWindow(event, args).close())
+
   ipcMain.handle('minipit:list-sandboxes', () => listSandboxes())
 
   ipcMain.handle('minipit:run-sandbox', async (_, name: string) => {
@@ -2646,6 +2685,7 @@ function setupIPC(): void {
       width: 820,
       height: 640,
       title: fileName,
+      icon: createWindowIcon(),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         sandbox: false,
@@ -3293,26 +3333,8 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('studio.den.app')
   app.on('browser-window-created', (_, window) => { optimizer.watchWindowShortcuts(window) })
 
-  // Brand the running app: dock icon (dev shows the default Electron icon
-  // otherwise) and the native "About den" panel (which pulls its icon/name from
-  // the running app, so it'd be blank/Electron without this).
-  // Swap between the light ("Default") and dark 1024px renders following the
-  // system appearance, re-applying whenever the user toggles light/dark.
-  const applyBrandIcon = (): void => {
-    const iconName = nativeTheme.shouldUseDarkColors ? 'dock-dark.png' : 'dock.png'
-    const dockIconPath = join(__dirname, '../../resources/icon', iconName)
-    const brandLogo = nativeImage.createFromPath(dockIconPath)
-    if (process.platform === 'darwin' && !brandLogo.isEmpty()) app.dock?.setIcon(brandLogo)
-    app.setAboutPanelOptions({
-      applicationName: 'den',
-      applicationVersion: `Version ${app.getVersion()}`,
-      version: '',
-      copyright: '© Docker · den.studio',
-      iconPath: dockIconPath
-    })
-  }
-  applyBrandIcon()
-  nativeTheme.on('updated', applyBrandIcon)
+  // Brand the running app: themed macOS dock icon and native About panel.
+  setupThemedAppIcons()
 
   // Content-Security-Policy for the renderer. Production loads only bundled
   // local assets (script-src 'self'); the sole remote resource is the Gravatar
