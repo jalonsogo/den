@@ -87,6 +87,10 @@ interface AppState {
   density: Density
   densityCustom: number
   sidebarCollapsed: boolean
+  // Whether the sandbox-detail right dock (Info / Network / Files / Changes) is
+  // open. Mirrored here so the toolbar can show a collapse toggle for it, the
+  // way it does for the left sidebar. SandboxDetail owns the actual dock.
+  rightDockOpen: boolean
   // Selected color theme id (drives the full palette: surfaces + accent).
   accent: string
   termTheme: string
@@ -148,6 +152,7 @@ interface AppState {
   setDensity:         (density: Density) => void
   setDensityCustom:   (factor: number) => void
   toggleSidebar:      () => void
+  setRightDockOpen:   (open: boolean) => void
   setAccent:          (id: string) => void
   setTermTheme:       (id: string) => void
   setSandboxIcon:     (name: string, iconKey: string | null) => void
@@ -220,6 +225,7 @@ export const useStore = create<AppState>((set) => ({
   density: initialDensity,
   densityCustom: initialDensityCustom,
   sidebarCollapsed: localStorage.getItem('minipit:sidebarCollapsed') === '1',
+  rightDockOpen: false,
   accent: localStorage.getItem('minipit:accent') ?? DEFAULT_THEME,
   termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
   sandboxIcons: (() => {
@@ -516,6 +522,8 @@ export const useStore = create<AppState>((set) => ({
       localStorage.setItem('minipit:sidebarCollapsed', sidebarCollapsed ? '1' : '0')
       return { sidebarCollapsed }
     }),
+
+  setRightDockOpen: (open) => set({ rightDockOpen: open }),
 
   // Merge incoming list with existing logs so real-time lines aren't wiped
   setSandboxes: (incoming) =>

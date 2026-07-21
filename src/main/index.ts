@@ -39,6 +39,11 @@ const sbxProcesses = new Map<string, ReturnType<typeof pty.spawn>>()
 const ptyMap = new Map<string, ReturnType<typeof pty.spawn>>()
 // Track uptime start times
 const uptimeMap = new Map<string, number>()
+// Sandboxes created in this app instance that have not yet had an agent session
+// started. A brand-new sandbox has no conversation to resume, so its first
+// `agent-ensure` must start fresh rather than pass `--continue` (which would
+// error with "No conversation found to continue"). Consumed on first ensure.
+const freshSandboxes = new Set<string>()
 
 function getSbxPath(): string {
   const stored = store.get('sbxPath') as string | undefined
@@ -1358,8 +1363,9 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { contin
   // Reconnecting to an already-running sandbox: resume the agent's prior
   // conversation rather than starting fresh. `--continue` is a claude agent
   // flag (gated by the caller), passed through after the `--` separator.
+  const useContinue = !!opts?.continueSession
   const args = ['run', '--name', name]
-  if (opts?.continueSession) args.push('--', '--continue')
+  if (useContinue) args.push('--', '--continue')
 
   const proc = pty.spawn(getSbxPath(), args, {
     name: 'xterm-256color',
@@ -1380,13 +1386,27 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { contin
   // Claude Code hooks drive activity + file-change events (see startEventTail).
   injectClaudeHooks(name)
   startEventTail(name)
+  // When we reconnect with `--continue` but there's no saved conversation to
+  // resume, claude prints "No conversation found to continue" and exits 1. Watch
+  // for that so onExit can fall back to a fresh session instead of stranding the
+  // user (who would otherwise have to restart the sandbox).
+  let noConversation = false
   proc.onData((data) => {
+    if (useContinue && !noConversation && data.includes('No conversation found to continue')) {
+      noConversation = true
+    }
     mainWindow?.webContents.send('minipit:agent-output', name, data)
     scanOutputForBlocks(name, data)
   })
 
   proc.onExit(() => {
     sbxProcesses.delete(name)
+    // The `--continue` reconnect failed because there was no prior conversation.
+    // Retry once as a fresh session rather than surfacing the error and dying.
+    if (noConversation) {
+      spawnSandboxProcess(name, cols, rows, { continueSession: false })
+      return
+    }
     uptimeMap.delete(name)
     clearAgentActivity(name)
     mainWindow?.webContents.send('minipit:agent-exit', name)
@@ -1722,6 +1742,9 @@ function setupIPC(): void {
       config.name ?? match?.[1] ?? `${config.agent}-${config.workspace.split('/').pop()}`
     recordKits(sandboxName, config.kits ?? [])
     recordIsolation(sandboxName, !!config.branch)
+    // Brand-new sandbox: its first agent session must start fresh, never
+    // `--continue` (there is no conversation yet). See freshSandboxes.
+    freshSandboxes.add(sandboxName)
     // The agent session is started by the Agent terminal (agent-ensure) at the
     // terminal's real size — avoids a default-size session that renders garbled.
     return sandboxName
@@ -3250,8 +3273,12 @@ function setupIPC(): void {
       // running, this is a reconnect — resume the claude agent's prior
       // conversation with --continue. (A stopped sandbox started here is a
       // fresh run; other agents don't take the claude --continue flag.)
+      // A sandbox created in this app instance has no conversation yet, so its
+      // first ensure must start fresh even though it is already 'running'.
+      const isFresh = freshSandboxes.delete(name)
       const sb = (lastGoodSandboxes ?? []).find((s) => s.name === name)
-      const continueSession = sb?.status === 'running' && (sb.agent ?? '').startsWith('claude')
+      const continueSession =
+        !isFresh && sb?.status === 'running' && (sb.agent ?? '').startsWith('claude')
       spawnSandboxProcess(name, cols, rows, { continueSession })
     } else {
       // Session exists — nudge the size so the TUI repaints cleanly at this size.

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Search, Layers, Users, Settings, Plus, Play, Square, RotateCcw, Trash2,
-  ScrollText, Boxes, Home, CornerDownLeft, PanelLeft, Info
+  ScrollText, Boxes, Home, CornerDownLeft, PanelLeft, Info, Network
 } from 'lucide-react'
 import { useStore } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
@@ -98,7 +98,8 @@ export function CommandPalette() {
       }
       out.push({ id: 'act:logs', section: 'Actions', label: `Logs — “${active.name}”`, hint: '⌘L', icon: <ScrollText size={15} />, keywords: 'sandbox output', run: () => { close(); act.logs() } })
       out.push({ id: 'act:files', section: 'Actions', label: `Toggle Files — “${active.name}”`, hint: '⌘F', icon: <PanelLeft size={15} />, keywords: 'sandbox browser', run: () => { close(); window.dispatchEvent(new CustomEvent('den:toggle-dock', { detail: 'files' })) } })
-      out.push({ id: 'act:info', section: 'Actions', label: `Toggle Info — “${active.name}”`, hint: '⌘I', icon: <Info size={15} />, keywords: 'sandbox details policy', run: () => { close(); window.dispatchEvent(new CustomEvent('den:toggle-dock', { detail: 'info' })) } })
+      out.push({ id: 'act:info', section: 'Actions', label: `Toggle Info — “${active.name}”`, hint: '⌘I', icon: <Info size={15} />, keywords: 'sandbox details', run: () => { close(); window.dispatchEvent(new CustomEvent('den:toggle-dock', { detail: 'info' })) } })
+      out.push({ id: 'act:network', section: 'Actions', label: `Toggle Network — “${active.name}”`, icon: <Network size={15} />, keywords: 'sandbox ports policy firewall', run: () => { close(); window.dispatchEvent(new CustomEvent('den:toggle-dock', { detail: 'network' })) } })
       out.push({ id: 'act:delete', section: 'Actions', label: `Delete “${active.name}”`, hint: '⌘X', icon: <Trash2 size={15} />, keywords: 'sandbox remove', run: () => { close(); act.del() } })
     }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { GitPullRequest, GitMerge, GitCommitHorizontal, RefreshCw, ExternalLink } from 'lucide-react'
+import { GitPullRequest, GitMerge, GitCommitHorizontal, GitBranch, RefreshCw, ExternalLink } from 'lucide-react'
 import type { Sandbox, ReviewSummary, PullRequest } from '../types'
 import { ChangesList } from './ChangesList'
 import { FieldSelect } from './FieldSelect'
@@ -127,14 +127,26 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
     <div className="changes-review">
       {review?.ok && (
         <div className="changes-actions">
-          {/* Single toolbar: stat + branch on the left, actions on the right. */}
-          <div className="ca-bar">
-            <span className="changes-add">+{review.added ?? 0}</span>
-            <span className="changes-del">−{review.deleted ?? 0}</span>
-            {review.branch && <span className="ca-branch" title={review.branch}>{review.branch}</span>}
+          {/* Summary line: branch + net stat, with refresh pinned right. */}
+          <div className="ca-summary">
+            {review.branch && (
+              <span className="ca-branch" title={review.branch}>
+                <GitBranch size={11} />{review.branch}
+              </span>
+            )}
+            <span className="ca-stat">
+              <span className="changes-add">+{review.added ?? 0}</span>
+              <span className="changes-del">−{review.deleted ?? 0}</span>
+            </span>
             <div className="ca-bar-spacer" />
-            {!pr && !prOpen && !commitOpen && (
-              review.mode === 'worktree' ? (
+            <button className="btn btn-ghost btn-sm" style={{ padding: '3px 5px' }} onClick={load} title="Refresh">
+              <RefreshCw size={12} />
+            </button>
+          </div>
+          {/* Action row: sits on its own line so the buttons can breathe. */}
+          {!pr && !prOpen && !commitOpen && (
+            <div className="ca-actions">
+              {review.mode === 'worktree' ? (
                 <>
                   <button className="btn btn-default btn-sm" onClick={() => { setCommitOpen(true); setCommitMsg(''); setMsg(null) }} disabled={busy !== null}>
                     <GitCommitHorizontal size={13} /> Commit…
@@ -148,6 +160,7 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
               ) : (
                 <>
                   <label className="ca-delete"><input type="checkbox" checked={deleteAfter} onChange={(e) => setDeleteAfter(e.target.checked)} /> Delete after</label>
+                  <div className="ca-bar-spacer" />
                   {review.hasRemote && (
                     <button className="btn btn-default btn-sm" onClick={startPr} disabled={busy !== null}>
                       <GitPullRequest size={13} /> Open PR…
@@ -157,12 +170,9 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
                     <GitMerge size={13} /> {busy === 'merge' ? 'Merging…' : 'Merge…'}
                   </button>
                 </>
-              )
-            )}
-            <button className="btn btn-ghost btn-sm" style={{ padding: '3px 5px' }} onClick={load} title="Refresh">
-              <RefreshCw size={12} />
-            </button>
-          </div>
+              )}
+            </div>
+          )}
 
           {pr && (
             <div className="ca-pr">
@@ -230,7 +240,9 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
             allowDeleted={branchMode}
             onOpen={openFile}
             onContext={onContext}
-            selection={worktreeMode ? { selected, onToggle: toggle } : undefined}
+            // Only surface the per-file tick boxes while a commit is being
+            // composed — otherwise the list is just a clean set of changed files.
+            selection={worktreeMode && commitOpen ? { selected, onToggle: toggle } : undefined}
           />
         )}
       </div>

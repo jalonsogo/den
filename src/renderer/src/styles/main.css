@@ -579,6 +579,19 @@ html, body, #root {
 }
 .sb-tip-arrow { fill: var(--t1); }
 
+/* Rail hover preview: title + one-line description (the rail hides labels). */
+.term-tip {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--t1);
+  padding: 6px 10px;
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
+  user-select: none; z-index: 300;
+  max-width: 240px;
+}
+.term-tip-title { color: var(--bg); font-size: 12px; font-weight: 600; }
+.term-tip-sub { color: color-mix(in srgb, var(--bg) 62%, var(--t1)); font-size: 11px; }
+
 /* Collapsed project hover popover */
 .sb-proj-pop {
   position: fixed; z-index: 300;
@@ -1035,6 +1048,14 @@ html, body, #root {
   font-size: 12px; color: var(--t2); background: var(--bg-subtle);
 }
 .files-local:hover { background: var(--bg-muted); }
+/* Trailing "Reveal in Finder" affordance, pinned right; brightens with the bar. */
+.files-local-action {
+  margin-left: auto; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; color: var(--t3);
+}
+.files-local-action svg { opacity: 0.8; }
+.files-local:hover .files-local-action { color: var(--t1); }
 .ds-branch { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .ds-branch > svg { opacity: 0.7; }
 .ds-changes-wrap { position: relative; flex-shrink: 0; }
@@ -1158,10 +1179,54 @@ html, body, #root {
 /* --tbg / --tfg are set inline from the active terminal theme so the chrome
    (bar, padding, segments) matches the picked theme instead of staying black. */
 .term {
-  flex: 1; display: flex; flex-direction: column;
+  flex: 1; display: flex; flex-direction: row;
   background: var(--tbg, #0a0a0a);
   --tline: color-mix(in srgb, var(--tfg, #fff) 10%, transparent);
   overflow: hidden; position: relative;
+}
+
+/* Terminal content column (holds the always-mounted Agent + Shell terminals),
+   left of the activity rail. */
+.term-main {
+  flex: 1; min-width: 0; position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* Vertical activity rail docked to the right edge: reload, the docked panels
+   (Info / Network / Files / Changes), and the terminal content switch
+   (Agent / Shell). Icon-only, grouped by thin separators. */
+.term-rail {
+  width: 46px; flex-shrink: 0;
+  background: var(--tbg, #111);
+  border-left: 1px solid var(--tline);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0; gap: 3px;
+}
+.term-rail-btn {
+  position: relative;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: none; cursor: pointer;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--tfg, #fff) 52%, transparent);
+  transition: color 0.12s, background 0.12s;
+}
+.term-rail-btn:hover { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 8%, transparent); }
+.term-rail-btn.active { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 13%, transparent); }
+/* Full-opacity red so the block warning reads clearly (not faded). */
+.term-rail-btn.warn { color: var(--destruct); }
+.term-rail-btn.warn:hover { background: color-mix(in srgb, var(--destruct) 14%, transparent); }
+.term-rail-sep {
+  width: 22px; height: 1px; flex-shrink: 0;
+  background: var(--tline); margin: 5px 0;
+}
+.term-rail-badge {
+  position: absolute; top: 1px; right: 1px;
+  min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; line-height: 1;
+  border-radius: 8px;
+  color: #fff; background: var(--primary);
 }
 
 /* Drag-and-drop overlay shown while dragging a file over the agent terminal */
@@ -1180,55 +1245,6 @@ html, body, #root {
   color: var(--primary);
   background: color-mix(in srgb, var(--primary) 16%, var(--tbg, #111));
 }
-
-.term-bar {
-  height: 40px;
-  background: var(--tbg, #111);
-  border-bottom: 1px solid var(--tline);
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.term-seg {
-  display: flex;
-  gap: 1px;
-  background: color-mix(in srgb, var(--tfg, #fff) 7%, transparent);
-  border-radius: 5px;
-  padding: 2px;
-}
-.term-seg-item {
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--tfg, #fff) 42%, transparent);
-  cursor: pointer;
-  transition: all 0.12s;
-  user-select: none;
-}
-.term-seg-item.active {
-  background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
-  color: var(--tfg, #fff);
-}
-
-.term-actions { margin-left: auto; display: flex; align-items: center; gap: 5px; }
-
-.term-right { margin-left: auto; display: flex; align-items: center; gap: 3px; }
-.term-files {
-  display: flex; align-items: center; gap: 5px;
-  padding: 4px 9px; border-radius: 5px;
-  font-size: 11.5px; font-weight: 500;
-  color: color-mix(in srgb, var(--tfg, #fff) 55%, transparent);
-  background: none; border: none; cursor: pointer;
-}
-.term-files:hover { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 8%, transparent); }
-.term-files.active { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent); }
-/* Full-opacity red so the warning reads clearly (not faded like the others). */
-.term-warn { color: var(--destruct); padding: 4px 6px; }
-.term-warn:hover { color: var(--destruct); background: color-mix(in srgb, var(--destruct) 14%, transparent); }
 
 .term-theme-select {
   appearance: none;
@@ -1427,7 +1443,7 @@ html, body, #root {
 .np-add-input:focus { border-color: var(--border-hi); }
 /* Default-preset control — sits above the rules, shown as a segmented picker.
    A bottom border separates it from the rule cards below. */
-.np-preset { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.np-preset { margin-bottom: 16px; }
 .np-preset-lbl {
   display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.4px; color: var(--t3); margin-bottom: 7px;
@@ -1515,10 +1531,8 @@ html, body, #root {
 }
 .ports-list { display: flex; flex-direction: column; }
 .port-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 0; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
 }
-.port-row:last-of-type { border-bottom: none; }
 .p-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--t4); flex-shrink: 0; }
 .p-dot.on { background: var(--green); }
 .port-map { font-size: 12.5px; color: var(--t1); font-family: 'SF Mono','Menlo',monospace; }
@@ -1687,19 +1701,6 @@ html, body, #root {
 .files-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 32px 16px; }
 
 /* Files | Changes tab bar */
-.files-tabs { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.files-tab {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 500; font-family: inherit;
-  padding: 4px 10px; border: none; border-radius: 6px; background: none; color: var(--t3); cursor: pointer;
-}
-.files-tab:hover { color: var(--t1); background: var(--bg-subtle); }
-.files-tab.on { color: var(--t1); background: var(--bg-subtle); }
-.files-tab-badge {
-  font-size: 10px; font-weight: 600; color: var(--t2);
-  background: var(--bg-muted); border-radius: 100px; padding: 0 6px; min-width: 16px; text-align: center;
-}
-
 /* Changes list (Files-panel tab + subheader dropdown) */
 .files-changes { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .changes-list { display: flex; flex-direction: column; }
@@ -1736,17 +1737,25 @@ html, body, #root {
   border-bottom: 1px solid var(--border); background: var(--bg);
   display: flex; flex-direction: column;
 }
-/* Single toolbar row — same height as the Files-tab bar (.files-bar). */
-.ca-bar {
-  height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 8px;
-  padding: 0 10px; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px;
+/* Two-row header: a summary line (branch · stat · refresh) above an action row,
+   so nothing is crammed onto a single line in the narrow dock. */
+.ca-summary {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px 0; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px;
+}
+.ca-stat { display: inline-flex; align-items: center; gap: 6px; }
+.ca-actions {
+  flex-shrink: 0; display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px 10px;
 }
 .ca-bar-spacer { flex: 1; }
 .ca-branch {
+  display: inline-flex; align-items: center; gap: 4px;
   font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; color: var(--t2);
   background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px;
-  padding: 1px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;
+  padding: 2px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;
 }
+.ca-branch svg { flex-shrink: 0; opacity: 0.7; }
 .ca-delete { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--t2); cursor: pointer; white-space: nowrap; }
 .ca-prform { display: flex; flex-direction: column; gap: 5px; padding: 4px 10px 10px; }
 .ca-prform .flabel { margin-bottom: 0; }
@@ -2216,11 +2225,80 @@ html, body, #root {
 .home-stat-n { font-size: 26px; font-weight: 600; color: var(--t1); line-height: 1; }
 .sbx-row-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .home-stat-l { font-size: 12px; color: var(--t3); margin-top: 6px; }
-.home-row { display: flex; align-items: center; gap: 9px; padding: 9px 2px; cursor: pointer; border-radius: 6px; }
+/* Always-visible filter bar (home list) — mirrors the sidebar filter popover
+   but laid out horizontally and inline. Wraps on narrow windows. */
+.home-filter {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 10px 0 4px;
+}
+.home-filter-search {
+  display: flex; align-items: center; gap: 6px; flex: 1 1 200px; min-width: 160px; max-width: 340px;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 7px; padding: 0 8px;
+}
+.home-filter-search-ic { color: var(--t3); flex-shrink: 0; }
+.home-filter-search input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none;
+  font: inherit; font-size: 12.5px; color: var(--t1); padding: 7px 0;
+}
+.home-filter-search input::placeholder { color: var(--t3); }
+.home-filter-search-x {
+  display: flex; align-items: center; background: none; border: none; cursor: pointer;
+  color: var(--t3); flex-shrink: 0; padding: 0;
+}
+.home-filter-search-x:hover { color: var(--t1); }
+/* Reuse the sidebar segmented-button look, but size to content (not stretched). */
+.home-filter-seg { display: flex; gap: 3px; padding: 2px; background: var(--bg-subtle); border-radius: 7px; }
+.home-filter-seg .sb-filter-seg-btn { flex: 0 0 auto; padding: 4px 10px; }
+.home-filter-seg .sb-filter-seg-btn:not(.active) { background: none; }
+.home-filter-agent { flex: 0 0 auto; min-width: 130px; }
+/* Overlay the agent dropdown instead of pushing the bar taller. */
+.home-filter-agent .sb-filter-menu {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.home-filter-clear {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  font-size: 12px; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  background: none; border: 1px solid transparent; color: var(--t2);
+}
+.home-filter-clear:hover { color: var(--t1); background: var(--bg-subtle); }
+.home-filter-empty { font-size: 12.5px; color: var(--t3); padding: 18px 4px; }
+
+.home-row { display: flex; align-items: center; gap: 9px; padding: 9px 6px 9px 2px; cursor: pointer; border-radius: 6px; }
 .home-row:hover { background: var(--bg-subtle); }
-.home-row-name { font-size: 13px; color: var(--t1); font-weight: 500; }
+.home-row-name { font-size: 13px; color: var(--t1); font-weight: 500; flex-shrink: 0; }
 .home-row-sub { font-size: 11.5px; color: var(--t3); }
-.home-row-up { margin-left: auto; font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+/* Status line: a dot + activity/lifecycle word. */
+.home-row-status {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  font-size: 11.5px; color: var(--t3);
+}
+.home-row-status.is-working { color: var(--green); }
+.home-row-status.is-waiting { color: var(--yellow); }
+.home-row-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-hi); flex-shrink: 0; }
+.home-row-dot.on { background: var(--green); }
+.home-row-status.is-waiting .home-row-dot { background: var(--yellow); }
+.home-row-agent { font-size: 11.5px; color: var(--t3); flex-shrink: 0; }
+/* Metadata chips take the middle, pushing uptime + menu to the right edge. */
+.home-row-meta { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.home-row-chip {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  font-size: 10.5px; color: var(--t3);
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 100px;
+  padding: 1px 8px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-row-chip > svg { flex-shrink: 0; opacity: 0.75; }
+.home-row-chip-chg { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 35%, var(--border)); }
+.home-row-up { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+/* Three-dot menu — revealed on row hover (and always while its menu is open). */
+.home-row-menu {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 6px;
+  background: none; border: none; color: var(--t3); cursor: pointer;
+  opacity: 0; transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.home-row:hover .home-row-menu { opacity: 1; }
+.home-row-menu:hover { background: var(--bg-muted); color: var(--t1); }
 
 /* Running-now tree: project header + indented sandbox rows under it */
 .home-tree { margin-top: 6px; }
@@ -2269,6 +2347,9 @@ html, body, #root {
 
 /* Sandbox info — collapsible sections */
 .info-acc { border-top: 1px solid var(--border); }
+/* The first section sits directly under the dock header's border — no need for
+   a second line right beneath it. */
+.info-panel > .info-acc:first-child { border-top: none; }
 .info-acc-hd {
   display: flex; align-items: center; gap: 7px; width: 100%;
   padding: 11px 2px; background: none; border: none; cursor: pointer; text-align: left;

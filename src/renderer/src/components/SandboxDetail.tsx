@@ -3,16 +3,17 @@ import { MoreVertical, Play, Square, GitBranch, RotateCcw, Github, GitCommitHori
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
+import { NetworkPanel } from './NetworkPanel'
 import { FilesPanel } from './FilesPanel'
 import { SandboxAvatar } from './SandboxAvatar'
 import { ChangesList } from './ChangesList'
 import { formatUptime } from '../lib/utils'
 import type { FileChange } from '../types'
 
-type Dock = 'files' | 'info' | null
+type Dock = 'files' | 'info' | 'network' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
   // Agent activity (working / waiting) — the same signal the sidebar and toolbar
   // use, so the header's status dot and text line up with them instead of only
@@ -34,6 +35,12 @@ export function SandboxDetail() {
   // summary that used to live in the (now-removed) sidebar Projects section.
   useEffect(() => { if (sandbox?.workspace) loadGitInfo(sandbox.workspace) }, [sandbox?.workspace, loadGitInfo])
   const [dock, setDock] = useState<Dock>(null)
+  // Remember the last-open panel so the toolbar's right-dock toggle can reopen
+  // whatever was showing rather than a fixed default.
+  const lastDock = useRef<Exclude<Dock, null>>('info')
+  // Which sub-tab the Files dock shows (Files browser vs Changes review). Owned
+  // here so the terminal's activity rail can highlight and drive both.
+  const [filesTab, setFilesTab] = useState<'files' | 'changes'>('files')
   const [dockWidth, setDockWidth] = useState(340)
   // Subheader "N changed" dropdown — the changed-file list, fetched on open.
   const [changesOpen, setChangesOpen] = useState(false)
@@ -66,16 +73,35 @@ export function SandboxDetail() {
   // ⌘F / ⌘I hotkeys toggle the Files / Info dock via a window event.
   useEffect(() => {
     const onToggle = (e: Event) => {
-      const which = (e as CustomEvent).detail as Dock
-      if (which === 'files' || which === 'info') setDock((d) => (d === which ? null : which))
+      const which = (e as CustomEvent).detail as Dock | 'changes'
+      // Opening Files (or Changes) from a shortcut/command lands on that sub-tab.
+      if (which === 'files') setFilesTab('files')
+      if (which === 'changes') { setFilesTab('changes'); setDock((d) => (d === 'files' ? null : 'files')); return }
+      if (which === 'files' || which === 'info' || which === 'network') setDock((d) => (d === which ? null : which))
     }
     window.addEventListener('den:toggle-dock', onToggle)
     return () => window.removeEventListener('den:toggle-dock', onToggle)
   }, [])
 
-  // Refresh ports when the Info dock is shown (ports live inside Info).
+  // Mirror the dock's open state into the store (so the toolbar can show a
+  // collapse toggle for it) and remember the last-open panel for reopening.
   useEffect(() => {
-    if (dock === 'info' && sandbox?.name) {
+    setRightDockOpen(dock !== null)
+    if (dock !== null) lastDock.current = dock
+  }, [dock, setRightDockOpen])
+  // Clear the flag on unmount (leaving the sandbox page hides the dock).
+  useEffect(() => () => setRightDockOpen(false), [setRightDockOpen])
+
+  // The toolbar's right-dock button: close if open, else reopen the last panel.
+  useEffect(() => {
+    const onToggleRight = () => setDock((d) => (d === null ? lastDock.current : null))
+    window.addEventListener('den:toggle-right-dock', onToggleRight)
+    return () => window.removeEventListener('den:toggle-right-dock', onToggleRight)
+  }, [])
+
+  // Refresh ports when the Network dock is shown (ports live inside Network).
+  useEffect(() => {
+    if (dock === 'network' && sandbox?.name) {
       window.minipit?.getPorts(sandbox.name).then((ports) => {
         if (ports?.length) updateSandbox(sandbox.name, { ports })
       }).catch(() => {})
@@ -90,13 +116,25 @@ export function SandboxDetail() {
     )
   }
 
-  // Open the Files dock on the Changes tab (the review & merge surface). The
-  // deferred event lets FilesPanel mount and attach its listener first.
+  // Open the Files dock on the Changes tab (the review & merge surface).
   const openChangesPanel = () => {
     setChangesOpen(false)
     setFeatureOpen(false)
+    setFilesTab('changes')
     setDock('files')
-    setTimeout(() => window.dispatchEvent(new CustomEvent('den:open-changes')), 0)
+  }
+
+  // Rail Files/Changes toggles: open the Files dock on the right sub-tab, or
+  // close it if it's already showing that tab.
+  const toggleFiles = () => {
+    if (dock === 'files' && filesTab === 'files') { setDock(null); return }
+    setFilesTab('files')
+    setDock('files')
+  }
+  const toggleChanges = () => {
+    if (dock === 'files' && filesTab === 'changes') { setDock(null); return }
+    setFilesTab('changes')
+    setDock('files')
   }
 
   const handleStop = async () => {
@@ -268,8 +306,11 @@ export function SandboxDetail() {
           <TerminalPanel
             sandbox={sandbox}
             dock={dock}
-            onToggleFiles={() => setDock((d) => (d === 'files' ? null : 'files'))}
+            filesTab={filesTab}
+            onToggleFiles={toggleFiles}
             onShowInfo={() => setDock((d) => (d === 'info' ? null : 'info'))}
+            onShowNetwork={() => setDock((d) => (d === 'network' ? null : 'network'))}
+            onShowChanges={toggleChanges}
             onStart={handleStart}
           />
         </div>
@@ -278,7 +319,9 @@ export function SandboxDetail() {
             <div className="files-resize" onMouseDown={startResize} />
             <div className="files-side" style={{ width: dockWidth }}>
               {dock === 'files'
-                ? <FilesPanel sandbox={sandbox} onClose={() => setDock(null)} />
+                ? <FilesPanel sandbox={sandbox} tab={filesTab} onTabChange={setFilesTab} />
+                : dock === 'network'
+                ? <NetworkPanel sandbox={sandbox} onClose={() => setDock(null)} />
                 : <InfoPanel sandbox={sandbox} onClose={() => setDock(null)} />}
             </div>
           </>

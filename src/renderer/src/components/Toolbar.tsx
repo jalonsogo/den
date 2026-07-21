@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, PanelLeftClose, PanelLeftOpen, ChevronDown, Check, LogOut } from 'lucide-react'
+import { Search, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, ChevronDown, Check, LogOut } from 'lucide-react'
 import { useStore } from '../store'
 import type { Sandbox } from '../types'
 
 export function Toolbar() {
-  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar, dockerAccount, activeOrg, setActiveOrg, loadDockerAccount, setSandboxes } = useStore()
+  const { sandboxes, activeSandboxId, activePage, sidebarCollapsed, toggleSidebar, rightDockOpen, dockerAccount, activeOrg, setActiveOrg, loadDockerAccount, setSandboxes } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
 
   const [acctOpen, setAcctOpen] = useState(false)
@@ -138,6 +138,21 @@ export function Toolbar() {
           </div>
         )}
       </div>
+
+      {/* Right-dock toggle — mirrors the left sidebar toggle. Only meaningful on
+          the sandbox detail page, where the Info/Network/Files dock lives. */}
+      {sandbox && activePage === 'sandbox' && (
+        <>
+          <div className="tb-sep" />
+          <button
+            className="tb-icon-btn"
+            onClick={() => window.dispatchEvent(new CustomEvent('den:toggle-right-dock'))}
+            title={rightDockOpen ? 'Close panel' : 'Open panel'}
+          >
+            {rightDockOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+          </button>
+        </>
+      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { PanelRight, Info, Play, RefreshCw, AlertTriangle } from 'lucide-react'
+import * as Tooltip from '@radix-ui/react-tooltip'
+import { Folder, Info, Play, RefreshCw, AlertTriangle, Network, SquareTerminal, GitCompare } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -7,7 +8,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useStore, unackedBlockCount } from '../store'
 import { termTheme as resolveTermTheme } from '../lib/termThemes'
-import type { Sandbox } from '../types'
+import { AgentIcon } from './AgentIcon'
+import { AGENTS, type Sandbox } from '../types'
 
 interface XTermProps {
   sandboxId: string
@@ -24,10 +26,13 @@ interface XTermProps {
   onDropFiles?: (files: File[]) => void
   // Bumping this number forces a redraw (refit + repaint the attached TUI).
   redraw?: number
+  // Send Shift+Enter as ESC+CR (a newline in Claude Code / most TUIs) instead of
+  // a bare CR, which the agent reads as "submit" — stranding half-typed messages.
+  shiftEnterNewline?: boolean
 }
 
 // A real VT100 terminal (xterm.js) that handles full-screen TUIs like Claude Code.
-function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles, redraw }: XTermProps) {
+function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles, redraw, shiftEnterNewline }: XTermProps) {
   const ref = useRef<HTMLDivElement>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -144,6 +149,14 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyV') {
         navigator.clipboard?.readText().then((t) => { if (t) onInput(t) }).catch(() => {})
+        return false
+      }
+      // Shift+Enter: insert a newline instead of submitting. xterm would send a
+      // bare CR (identical to Enter), so we emit ESC+CR ourselves — the sequence
+      // Claude Code (and most line editors) treat as a literal newline.
+      if (shiftEnterNewline && e.type === 'keydown' && e.key === 'Enter' && e.shiftKey
+          && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        onInput('\x1b\r')
         return false
       }
       return true
@@ -264,6 +277,7 @@ function AgentTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: 
       visible={visible}
       theme={theme}
       redraw={redraw}
+      shiftEnterNewline
       subscribe={(write) => window.minipit?.onAgentOutput((name, data) => { if (name === sandbox.name) write(data) })}
       onInput={(data) => window.minipit?.agentWrite(sandbox.name, data)}
       onResize={(cols, rows) => window.minipit?.agentResize(sandbox.name, cols, rows)}
@@ -310,11 +324,16 @@ function ShellTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: 
 
 // ── Panel ─────────────────────────────────────────────────────────────────
 
-export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStart }: {
+export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowInfo, onShowNetwork, onShowChanges, onStart }: {
   sandbox: Sandbox
-  dock?: 'files' | 'info' | null
+  dock?: 'files' | 'info' | 'network' | null
+  // Which sub-tab the Files dock is showing — lets the rail highlight Files vs
+  // Changes distinctly even though both open the same dock.
+  filesTab?: 'files' | 'changes'
   onToggleFiles?: () => void
   onShowInfo?: () => void
+  onShowNetwork?: () => void
+  onShowChanges?: () => void
   onStart?: () => void
 }) {
   const [segment, setSegment] = useState<'agent' | 'shell'>('agent')
@@ -326,88 +345,139 @@ export function TerminalPanel({ sandbox, dock, onToggleFiles, onShowInfo, onStar
   const theme = resolveTermTheme(termThemeId, appTheme).theme
   const bg = theme.background ?? '#0a0a0a'
   // Pending (unacknowledged) network-policy denials for this sandbox — surfaced
-  // as a red warning next to Info, which opens the panel (clearing the badge).
+  // as a red warning in the rail, which opens Network (clearing the badge).
   const hasBlocks = useStore((s) => unackedBlockCount(s.policyBlocks, s.blocksSeenAt, sandbox.name) > 0)
+  // Uncommitted-change count for the Changes rail badge.
+  const changeCount = useStore((s) => s.sandboxChanges[sandbox.name] ?? 0)
+  const filesActive = dock === 'files' && filesTab !== 'changes'
+  const changesActive = dock === 'files' && filesTab === 'changes'
+  const agentLabel = AGENTS.find((a) => a.id === sandbox.agent)?.label ?? sandbox.agent
+
+  // Styled hover preview for a rail icon (the rail hides text labels, so the
+  // tooltip carries the name + a one-line description). Left side, since the
+  // rail sits against the right edge.
+  const tip = (title: string, sub: string, node: React.ReactElement) => (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>{node}</Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="term-tip" side="left" sideOffset={9}>
+          <span className="term-tip-title">{title}</span>
+          <span className="term-tip-sub">{sub}</span>
+          <Tooltip.Arrow className="sb-tip-arrow" />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  )
 
   return (
     <div
       className="term"
       style={{ ['--tbg' as string]: bg, ['--tfg' as string]: theme.foreground ?? '#d4d4d4' }}
     >
-      <div className="term-bar">
-        <div className="term-seg">
-          <div className={`term-seg-item${segment === 'agent' ? ' active' : ''}`} onClick={() => setSegment('agent')}>
-            Agent
-          </div>
-          <div className={`term-seg-item${segment === 'shell' ? ' active' : ''}`} onClick={() => setSegment('shell')}>
-            Shell
-          </div>
+      {/* Terminal content column. Keep both terminals mounted (visibility, not
+          display:none) so each keeps its dimensions and session when switching. */}
+      <div className="term-main">
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          background: bg,
+          visibility: segment === 'agent' ? 'visible' : 'hidden',
+          pointerEvents: segment === 'agent' ? 'auto' : 'none',
+          position: segment === 'agent' ? 'relative' : 'absolute',
+          inset: segment === 'agent' ? undefined : 0
+        }}>
+          <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} onStart={onStart} redraw={redrawNonce} />
         </div>
-        <div className="term-right">
-          <button
-            className="term-files"
-            onClick={() => setRedrawNonce((n) => n + 1)}
-            title="Redraw terminal (force a repaint)"
-          >
-            <RefreshCw size={13} />
-          </button>
-          {hasBlocks && onShowInfo && (
+
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          background: bg,
+          visibility: segment === 'shell' ? 'visible' : 'hidden',
+          pointerEvents: segment === 'shell' ? 'auto' : 'none',
+          position: segment === 'shell' ? 'relative' : 'absolute',
+          inset: segment === 'shell' ? undefined : 0
+        }}>
+          <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} redraw={redrawNonce} />
+        </div>
+      </div>
+
+      {/* Vertical activity rail: Agent (top) · reload · panels (Info / Network /
+          Files / Changes) · Shell (bottom). Hover previews carry the labels the
+          rail itself hides. */}
+      <Tooltip.Provider delayDuration={300} skipDelayDuration={500}>
+        <div className="term-rail">
+          {tip(agentLabel, 'Agent terminal',
             <button
-              className="term-files term-warn"
-              onClick={onShowInfo}
-              title="Network requests blocked — view details"
+              className={`term-rail-btn${segment === 'agent' ? ' active' : ''}`}
+              onClick={() => setSegment('agent')}
             >
-              <AlertTriangle size={14} />
+              <AgentIcon agent={sandbox.agent} size={17} mono />
             </button>
           )}
-          {onShowInfo && (
+
+          {tip('Redraw', 'Force the terminal to repaint',
             <button
-              className={`term-files${dock === 'info' ? ' active' : ''}`}
-              onClick={onShowInfo}
-              title="Sandbox info"
+              className="term-rail-btn"
+              onClick={() => setRedrawNonce((n) => n + 1)}
             >
-              <Info size={14} />
-              Info
+              <RefreshCw size={16} />
             </button>
           )}
-          {onToggleFiles && (
+
+          {hasBlocks && onShowNetwork && tip('Network blocked', 'Requests were denied — view details',
             <button
-              className={`term-files${dock === 'files' ? ' active' : ''}`}
+              className="term-rail-btn warn"
+              onClick={onShowNetwork}
+            >
+              <AlertTriangle size={16} />
+            </button>
+          )}
+
+          <div className="term-rail-sep" />
+
+          {onShowInfo && tip('Info', 'Status, workspaces, kits & secrets',
+            <button
+              className={`term-rail-btn${dock === 'info' ? ' active' : ''}`}
+              onClick={onShowInfo}
+            >
+              <Info size={17} />
+            </button>
+          )}
+          {onShowNetwork && tip('Network', 'Ports & network policy',
+            <button
+              className={`term-rail-btn${dock === 'network' ? ' active' : ''}`}
+              onClick={onShowNetwork}
+            >
+              <Network size={17} />
+            </button>
+          )}
+          {onToggleFiles && tip('Files', filesActive ? 'Hide the file browser' : 'Browse the workspace',
+            <button
+              className={`term-rail-btn${filesActive ? ' active' : ''}`}
               onClick={onToggleFiles}
-              title={dock === 'files' ? 'Hide files' : 'Show files'}
             >
-              <PanelRight size={14} />
-              Files
+              <Folder size={17} />
+            </button>
+          )}
+          {onShowChanges && tip('Changes', changeCount > 0 ? `Review & merge · ${changeCount} changed` : 'Review & merge',
+            <button
+              className={`term-rail-btn${changesActive ? ' active' : ''}`}
+              onClick={onShowChanges}
+            >
+              <GitCompare size={17} />
+              {changeCount > 0 && <span className="term-rail-badge">{changeCount > 99 ? '99+' : changeCount}</span>}
+            </button>
+          )}
+
+          {tip('Shell', 'Interactive shell in the sandbox',
+            <button
+              className={`term-rail-btn${segment === 'shell' ? ' active' : ''}`}
+              onClick={() => setSegment('shell')}
+            >
+              <SquareTerminal size={17} />
             </button>
           )}
         </div>
-      </div>
-
-      {/*
-        Keep both mounted (visibility, not display:none) so each terminal keeps
-        its dimensions and session when switching segments.
-      */}
-      <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        background: bg,
-        visibility: segment === 'agent' ? 'visible' : 'hidden',
-        pointerEvents: segment === 'agent' ? 'auto' : 'none',
-        position: segment === 'agent' ? 'relative' : 'absolute',
-        inset: segment === 'agent' ? undefined : 0
-      }}>
-        <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} onStart={onStart} redraw={redrawNonce} />
-      </div>
-
-      <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        background: bg,
-        visibility: segment === 'shell' ? 'visible' : 'hidden',
-        pointerEvents: segment === 'shell' ? 'auto' : 'none',
-        position: segment === 'shell' ? 'relative' : 'absolute',
-        inset: segment === 'shell' ? undefined : 0
-      }}>
-        <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} redraw={redrawNonce} />
-      </div>
+      </Tooltip.Provider>
     </div>
   )
 }
