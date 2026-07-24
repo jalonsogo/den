@@ -356,9 +356,13 @@ html, body, #root {
   50% { opacity: 0.45; transform: scale(0.78); }
 }
 .sb-item-sub.is-working { color: var(--yellow); }
-/* Dim (but don't grayscale) stopped avatars, so the project color still reads —
-   the grey status dot + muted name already signal "stopped". */
-.sb-item.is-stopped .sbx-avatar { opacity: 0.7; }
+/* Stopped: drain the square to a faded neutral and mute its glyph — but only the
+   square. The status dot and agent badge (corner overlays) stay full-strength so
+   state + agent remain legible. Applied to the square/glyph directly rather than
+   the container, so opacity never bleeds onto those overlays. */
+.sbx-avatar-stopped { background: color-mix(in srgb, var(--sb-active) 50%, transparent); }
+.sbx-avatar-stopped > .sbx-avatar-txt,
+.sbx-avatar-stopped > svg { color: var(--t3); opacity: 0.5; }
 
 .sb-item.is-stopped .sb-item-name { color: var(--sb-muted); }
 .sb-item.is-deleting { pointer-events: none; opacity: 0.7; }
@@ -1198,7 +1202,10 @@ html, body, #root {
 .term-rail {
   width: 46px; flex-shrink: 0;
   background: var(--tbg, #111);
-  border-left: 1px solid var(--tline);
+  /* Divider as an inset shadow, not a border: a left border would shrink the
+     content box (border-box), so the flex-centered icons would sit off from the
+     rail's true visual centre. box-shadow keeps the full 46px for centering. */
+  box-shadow: inset 1px 0 0 var(--tline);
   display: flex; flex-direction: column; align-items: center;
   padding: 8px 0; gap: 3px;
 }
@@ -1212,7 +1219,9 @@ html, body, #root {
   transition: color 0.12s, background 0.12s;
 }
 .term-rail-btn:hover { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 8%, transparent); }
-.term-rail-btn.active { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 13%, transparent); }
+/* Active is signalled by full-strength icon colour only — no background box, so
+   an active dock + active terminal tab don't read as "two selected" chips. */
+.term-rail-btn.active { color: var(--tfg, #fff); }
 /* Full-opacity red so the block warning reads clearly (not faded). */
 .term-rail-btn.warn { color: var(--destruct); }
 .term-rail-btn.warn:hover { background: color-mix(in srgb, var(--destruct) 14%, transparent); }
@@ -1699,6 +1708,23 @@ html, body, #root {
   background: color-mix(in srgb, var(--primary) 16%, var(--bg));
 }
 .files-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 32px 16px; }
+/* Workspace read-failure card — shows the path + the real sbx error + a retry. */
+.files-error {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 7px;
+  margin: 16px; padding: 12px 14px;
+  background: color-mix(in srgb, var(--destruct) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destruct) 28%, var(--border));
+  border-radius: 8px;
+}
+.files-error-hd { font-size: 12.5px; font-weight: 600; color: var(--destruct); }
+.files-error-path {
+  font-size: 11px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace;
+  word-break: break-all; max-width: 100%;
+}
+.files-error-msg {
+  font-size: 11.5px; color: var(--t2); line-height: 1.4;
+  word-break: break-word; max-width: 100%;
+}
 
 /* Files | Changes tab bar */
 /* Changes list (Files-panel tab + subheader dropdown) */
@@ -2316,7 +2342,6 @@ html, body, #root {
 }
 .home-tree-row { margin-left: 9px; padding-left: 12px; border-left: 1px solid var(--border); border-radius: 0 6px 6px 0; }
 /* Dim stopped rows (keep the avatar hue, mirroring the sidebar). */
-.home-tree-row.is-stopped .sbx-avatar { opacity: 0.7; }
 .home-tree-row.is-stopped .home-row-name { color: var(--t2); }
 .home-row-stop {
   display: flex; align-items: center; justify-content: center;
@@ -2607,13 +2632,28 @@ html, body, #root {
 }
 .kit-card-hd { display: flex; align-items: center; gap: 8px; }
 .kit-card-hd > svg { color: var(--t3); flex-shrink: 0; }
-.kit-card-name { font-size: 13.5px; font-weight: 600; color: var(--t1); flex: 1; }
+.kit-card-logo { flex-shrink: 0; border-radius: 4px; object-fit: contain; }
+.kit-card-name { font-size: 13.5px; font-weight: 600; color: var(--t1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-card-verified { color: var(--blue, var(--primary)); flex-shrink: 0; }
 .kit-card-has {
-  display: inline-flex; align-items: center; gap: 3px;
+  display: inline-flex; align-items: center; gap: 3px; margin-left: auto;
   font-size: 10px; font-weight: 600; color: var(--t3);
   background: var(--bg-subtle); border-radius: 100px; padding: 2px 7px; flex-shrink: 0;
 }
+/* Publisher + pull/star counts under the title. */
+.kit-card-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--t3); margin-top: -2px; }
+.kit-card-pub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-card-pulls, .kit-card-stars { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.kit-card-pulls > svg, .kit-card-stars > svg { opacity: 0.8; }
 .kit-card-desc { font-size: 12px; color: var(--t2); line-height: 1.45; margin: 0; }
+/* Base image chip (sandbox kits). */
+.kit-card-image {
+  display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; max-width: 100%;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11px; color: var(--t2);
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kit-card-image > svg { flex-shrink: 0; opacity: 0.7; }
 .kit-card-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
 .kit-card-link {
   display: inline-flex; align-items: center; gap: 4px; margin-right: auto;
@@ -2926,6 +2966,24 @@ html, body, #root {
 .kit-more-item.danger:hover { background: rgba(239,68,68,0.10); }
 .kit-more-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 
+/* Import-kit source dropdown (OCI / Git / Zip / Folder). */
+.kit-import-menu {
+  position: fixed; z-index: 200; min-width: 236px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.kit-import-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: none; border-radius: 6px; padding: 7px 9px; cursor: pointer;
+}
+.kit-import-item > svg { color: var(--t3); flex-shrink: 0; }
+.kit-import-item span { display: flex; flex-direction: column; min-width: 0; }
+.kit-import-item b { font-size: 12.5px; font-weight: 500; color: var(--t1); }
+.kit-import-item small { font-size: 11px; color: var(--t3); }
+.kit-import-item:hover { background: var(--bg-subtle); }
+.kit-import-busy { color: var(--t3); font-size: 12.5px; }
+
 /* Generic row "⋮" dropdown (templates, and reusable elsewhere). */
 .more-menu {
   position: fixed; z-index: 200; min-width: 190px;
@@ -3233,6 +3291,30 @@ html, body, #root {
   font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
   color: var(--t3); margin-bottom: 6px; padding: 0 2px;
 }
+/* Settings — sections are collapsible accordions (info-acc) divided by thin
+   lines, no cards. The first accordion in a page-body sits under the tab bar,
+   so it needs no separator line above it. The Danger zone keeps its own tinted
+   card and is not an accordion. */
+.settings-page .page-body > .info-acc:first-child { border-top: none; }
+.settings-page .info-acc-body .ss-row:first-child { padding-top: 4px; }
+/* Danger zone — a tinted, red-bordered card so destructive actions read as set
+   apart from ordinary settings. */
+.ss-danger {
+  background: color-mix(in srgb, var(--destruct) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destruct) 32%, var(--border));
+  border-radius: 10px;
+  padding: 8px 16px 14px;
+}
+.ss-danger .ss-row:first-of-type { padding-top: 6px; }
+/* Collapsible changelog under the update controls. */
+.ss-acc { border-top: 1px solid var(--border); margin-top: 6px; }
+.ss-acc-hd {
+  display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
+  padding: 11px 2px;
+}
+.ss-acc-hd > svg { color: var(--t3); flex-shrink: 0; }
+.ss-acc-title { font-size: 13px; font-weight: 500; color: var(--t1); }
+.ss-acc-note { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .ss-row {
   display: flex;
   align-items: center;

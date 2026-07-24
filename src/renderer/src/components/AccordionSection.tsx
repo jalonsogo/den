@@ -11,7 +11,10 @@ export function AccordionSection({ id, title, badge, alert = false, defaultOpen 
   defaultOpen?: boolean
   children: React.ReactNode
 }) {
-  const key = `minipit:info-acc:${id}`
+  // Key is versioned so changing a section's default open-state (e.g. always
+  // unfolding Network policy / Kits / Injected secrets) takes effect once rather
+  // than being overridden by a previously-persisted collapsed value.
+  const key = `minipit:info-acc:v2:${id}`
   const [open, setOpen] = useState(() => {
     const v = localStorage.getItem(key)
     return v === null ? defaultOpen : v === '1'

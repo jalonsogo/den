@@ -287,6 +287,23 @@ export interface AppSettings {
   runtimeVirtiofsCache?: boolean
 }
 
+// A kit from the Docker Hub catalogue (the "Hub" browse tab). Enriched in the
+// main process from the search API + the kit's registry artifact.
+export interface HubKit {
+  slug: string
+  ref: string
+  kind: 'sandbox' | 'mixin'
+  title: string
+  description: string
+  spec: string
+  publisher: string
+  verified: boolean
+  pullCount: string
+  stars: number
+  logo: string
+  updatedAt: string
+}
+
 declare global {
   interface Window {
     minipit: {
@@ -299,6 +316,7 @@ declare global {
       portPublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       portUnpublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       listFiles(name: string, relPath: string): Promise<FileEntry[]>
+      workspaceRoot(name: string, hint: string): Promise<string>
       gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }>
       isGitRepo(dir: string): Promise<boolean>
       gitInfo(dir: string): Promise<{ isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
@@ -337,8 +355,10 @@ declare global {
       kitPack(dir: string, name: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; output?: string; error?: string }>
       saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
-      listContribKits(): Promise<{ ok: boolean; kits?: { dir: string; spec: string }[]; error?: string }>
-      importContribKit(dir: string): Promise<{ ok: boolean; name?: string; error?: string }>
+      kitImportZip(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
+      kitImportFolder(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
+      kitImportGit(url: string): Promise<{ ok: boolean; name?: string; error?: string }>
+      listHubKits(): Promise<{ ok: boolean; kits?: HubKit[]; error?: string }>
       dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; fullName?: string; gravatar?: string; orgs?: string[] }>
       dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>
       dockerLogout(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>

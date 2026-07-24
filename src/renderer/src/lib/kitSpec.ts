@@ -14,31 +14,47 @@ export interface ParsedKit {
   mcps: string[] // ids inferred from `claude mcp add <id> …` commands
 }
 
+// Strip a single pair of matching surrounding quotes (YAML scalars are often
+// quoted; without this the quotes render literally in the UI).
+function unquote(v: string): string {
+  const t = v.trim()
+  return /^"(.*)"$/.test(t) || /^'(.*)'$/.test(t) ? t.slice(1, -1) : t
+}
+
 export function parseKitSpec(text: string): ParsedKit {
   const out: ParsedKit = {
     kind: '', name: '', displayName: '', description: '', image: '', entrypoint: '',
     allowedDomains: [], deniedDomains: [], installCmds: [], envVars: [], agentContext: '', mcps: []
   }
-  let mode: '' | 'allowed' | 'denied' | 'install' | 'env' | 'context' = ''
+  let mode: '' | 'allowed' | 'denied' | 'install' | 'env' | 'context' | 'desc' = ''
   const ctx: string[] = []
+  const descLines: string[] = []
 
   for (const raw of text.split('\n')) {
     const line = raw.replace(/\r$/, '')
     const trimmed = line.trim()
 
     if (/^\S/.test(line)) { // top-level key
-      const m = line.match(/^([A-Za-z]+):\s*(.*)$/)
+      // Allow keys with digits/underscores/camelCase (e.g. schemaVersion), not
+      // just pure-letter keys.
+      const m = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/)
       mode = ''
       if (m) {
         const [, k, v] = m
-        if (k === 'kind') out.kind = v.trim()
-        else if (k === 'name') out.name = v.trim()
-        else if (k === 'displayName') out.displayName = v.trim()
-        else if (k === 'description') out.description = v.trim()
+        if (k === 'kind') out.kind = unquote(v)
+        else if (k === 'name') out.name = unquote(v)
+        else if (k === 'displayName') out.displayName = unquote(v)
+        else if (k === 'description') {
+          // A block scalar (`>` / `|`, with optional chomping) has its text on the
+          // following indented lines; capture those. An inline value we take as-is.
+          if (/^[|>][+-]?$/.test(v.trim())) mode = 'desc'
+          else out.description = unquote(v)
+        }
         else if (k === 'agentContext') mode = 'context'
       }
       continue
     }
+    if (mode === 'desc') { descLines.push(trimmed); continue }
     if (mode === 'context') { ctx.push(line.replace(/^\s{2}/, '')); continue }
     if (/^\s{2}allowedDomains:/.test(line)) { mode = 'allowed'; continue }
     if (/^\s{2}deniedDomains:/.test(line)) { mode = 'denied'; continue }
@@ -74,5 +90,7 @@ export function parseKitSpec(text: string): ParsedKit {
     }
   }
   out.agentContext = ctx.join('\n').trim()
+  // Folded/literal block descriptions join into a single line for card display.
+  if (descLines.length) out.description = descLines.join(' ').trim()
   return out
 }

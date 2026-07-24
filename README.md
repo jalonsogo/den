@@ -51,7 +51,9 @@ Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network
 - **Remote‑MCP catalog** — 50+ hosted MCP servers (GitHub, Linear, Notion, Figma, Sentry, Supabase, …) with icons, search, and category filters; or add a **Custom MCP** by URL. Each becomes a one‑click allow rule + registration.
 - **Mixin vs Sandbox kits** — stack several *mixin* kits onto an agent, or define a full agent from a base image with a *sandbox* kit.
 - **Add anywhere** — attach kits at sandbox creation, or inject them into a running sandbox; the kits applied to a sandbox show in its info panel.
-- **Share via any OCI registry** — push a kit to Docker Hub / ghcr (`sbx kit push`) straight from the row's menu, with the reference prefilled from your logged‑in Docker account. Pull a friend's kit by reference — import it into your library or attach it at creation, no download step.
+- **Browse the Hub** — discover published kits live from the Docker Hub catalogue, with publisher, verified badge, pull count, and stars. Each is enriched from its registry artifact so you see its real title, description, and capabilities before importing — one click pulls it into your library.
+- **Import from anywhere** — bring a kit in by **OCI reference**, a **Git repo** URL (with `#dir=<subfolder>` for kits in a subdirectory), a packed **.zip / .tar.gz** archive, or a **local folder** — each imported kit is packed so it behaves like any locally‑authored one.
+- **Share via any OCI registry** — push a kit to Docker Hub / ghcr (`sbx kit push`) straight from the row's menu, with the reference prefilled from your logged‑in Docker account.
 
 ## Requirements
 
