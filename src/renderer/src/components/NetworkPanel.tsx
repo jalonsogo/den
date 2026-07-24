@@ -208,7 +208,7 @@ export function NetworkPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?:
           title="Network policy"
           badge={blocks.length || undefined}
           alert={blocks.length > 0}
-          defaultOpen={blocks.length > 0}
+          defaultOpen
         >
 
           {polLoading ? (

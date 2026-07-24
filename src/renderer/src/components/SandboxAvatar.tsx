@@ -64,8 +64,12 @@ export function SandboxAvatar({
     return { items: all.slice(0, cap), total: all.length }
   }, [iconQuery, cap])
 
+  // A stopped sandbox drains its square to neutral + faded (the status dot and
+  // agent badge stay at full strength — handled in CSS), so skip the project
+  // tint when it isn't running.
+  const running = sandbox.status === 'running'
   const style: React.CSSProperties = { width: size, height: size }
-  if (projColor) {
+  if (projColor && running) {
     style.background = `color-mix(in srgb, ${projColor} 22%, transparent)`
     style.color = projColor
   }
@@ -102,7 +106,7 @@ export function SandboxAvatar({
   return (
     <div
       ref={avRef}
-      className={`sbx-avatar${editable ? ' sbx-avatar-editable' : ''}`}
+      className={`sbx-avatar${editable ? ' sbx-avatar-editable' : ''}${running ? '' : ' sbx-avatar-stopped'}`}
       style={style}
       onClick={editable ? toggle : undefined}
       title={editable ? 'Customize' : undefined}

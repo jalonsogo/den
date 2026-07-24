@@ -92,7 +92,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       </AccordionSection>
 
       {kits.length > 0 && (
-        <AccordionSection id="kits" title="Kits" badge={kits.length}>
+        <AccordionSection id="kits" title="Kits" badge={kits.length} defaultOpen>
           <div className="info-kits">
             {kits.map((k) => <span className="info-kit" key={k}><Layers size={12} />{k}</span>)}
           </div>
@@ -100,7 +100,7 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
       )}
 
       {inspect && (inspect.secrets.length > 0 || inspect.authMode) && (
-        <AccordionSection id="secrets" title="Injected secrets" badge={inspect.secrets.length || undefined}>
+        <AccordionSection id="secrets" title="Injected secrets" badge={inspect.secrets.length || undefined} defaultOpen>
           {inspect.authMode && (
             <div className="ss-sub" style={{ marginBottom: 6 }}>Auth mode: <strong>{inspect.authMode}</strong></div>
           )}

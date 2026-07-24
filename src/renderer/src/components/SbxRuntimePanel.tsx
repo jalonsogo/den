@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
-import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
+import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { useStore } from '../store'
+import { AccordionSection } from './AccordionSection'
 import type { SbxRelease } from '../types'
 
 type DiagMode = 'text' | 'json' | 'github-issue' | 'upload'
@@ -250,6 +251,8 @@ export function SbxRuntimePanel({
   const [resetConfirm, setResetConfirm] = useState('')
   const [resetBusy, setResetBusy] = useState(false)
   const [resetMsg, setResetMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  // The changelog sits (collapsed) under the update button as an accordion.
+  const [changelogOpen, setChangelogOpen] = useState(false)
   // The destructive "Reset everything" button only turns red once the user has
   // typed the confirmation word; until then it's a neutral, disabled button.
   const canReset = resetConfirm.trim().toLowerCase() === 'reset'
@@ -493,8 +496,7 @@ export function SbxRuntimePanel({
 
   return (
     <div className="page-body" style={{ padding: '8px 28px 28px' }}>
-      <div className="ss">
-        <div className="ss-hdr">Runtime</div>
+      <AccordionSection id="runtime-runtime" title="Runtime" defaultOpen>
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Installed version</div>
@@ -611,10 +613,117 @@ export function SbxRuntimePanel({
             </div>
           </div>
         )}
-      </div>
 
-      <div className="ss">
-        <div className="ss-hdr">Diagnostics</div>
+        {/* Changelog — collapsed by default, tucked under the update controls. */}
+        <div className="ss-acc">
+          <div className="ss-acc-hd" onClick={() => setChangelogOpen((o) => !o)}>
+            {changelogOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span className="ss-acc-title">Latest changes</span>
+            {latest && <span className="ss-acc-note">{latest}</span>}
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginLeft: 'auto' }}
+              onClick={(e) => { e.stopPropagation(); releases[0] && window.minipit?.openPath(releases[0].url) }}
+            >
+              View on GitHub
+            </button>
+          </div>
+          {changelogOpen && (
+            loading ? (
+              <div className="ss-row"><div className="ss-sub">Loading release notes…</div></div>
+            ) : releases.length === 0 ? (
+              <div className="ss-row"><div className="ss-sub">Could not fetch release notes (offline?).</div></div>
+            ) : (
+              releases.map((r) => (
+                <div className="rt-rel" key={r.version}>
+                  <div className="rt-rel-hdr" onClick={() => setExpanded((e) => (e === r.version ? null : r.version))}>
+                    <span className="rt-rel-ver">{r.version}</span>
+                    {r.prerelease && <span className="rt-badge rt-badge-pre">pre-release</span>}
+                    <span className="rt-rel-date">{fmtDate(r.date)}</span>
+                    <span className="rt-rel-chevron">{expanded === r.version ? '▾' : '▸'}</span>
+                  </div>
+                  {expanded === r.version && (
+                    <pre className="rt-rel-body">{r.body?.trim() || 'No release notes.'}</pre>
+                  )}
+                </div>
+              ))
+            )
+          )}
+        </div>
+      </AccordionSection>
+
+      <AccordionSection id="runtime-settings" title="Runtime settings" defaultOpen>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Paste images into agents</div>
+            <div className="ss-sub">
+              Enables <code>clipboard.imagePaste</code>. Relaxes isolation by allowing clipboard access.
+            </div>
+          </div>
+          <button
+            className={`s-toggle${imagePaste ? ' on' : ''}`}
+            onClick={toggleImagePaste}
+            disabled={settingBusy}
+          />
+        </div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Filesystem cache (virtiofs)</div>
+            <div className="ss-sub">
+              Faster filesystem performance (<code>DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE</code>). On by default in
+              sbx v0.35.
+            </div>
+          </div>
+          <button
+            className={`s-toggle${virtiofsCache ? ' on' : ''}`}
+            onClick={toggleVirtiofsCache}
+          />
+        </div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Upstream egress proxy</div>
+            <div className="ss-sub">
+              Chain sandbox egress through an upstream proxy (<code>DOCKER_SANDBOXES_PROXY</code>). Supports{' '}
+              <code>http://</code>, <code>https://</code> and <code>socks5://</code> / <code>socks5h://</code>.
+            </div>
+          </div>
+          <input
+            className="s-input"
+            value={runtimeProxy}
+            placeholder="socks5://host:1080"
+            onChange={(e) => setRuntimeProxy(e.target.value)}
+            onBlur={() => saveRuntimeEnv('runtimeProxy', runtimeProxy.trim())}
+            style={{ width: 220 }}
+          />
+        </div>
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Proxy bypass list</div>
+            <div className="ss-sub">
+              Destinations to exclude from the upstream proxy (<code>DOCKER_SANDBOXES_NO_PROXY</code>), standard
+              <code>NO_PROXY</code> matching.
+            </div>
+          </div>
+          <input
+            className="s-input"
+            value={runtimeNoProxy}
+            placeholder="localhost,*.internal"
+            onChange={(e) => setRuntimeNoProxy(e.target.value)}
+            onBlur={() => saveRuntimeEnv('runtimeNoProxy', runtimeNoProxy.trim())}
+            style={{ width: 220 }}
+          />
+        </div>
+        {runtimeEnvDirty && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-cmdhint">
+              Runtime environment changed. <strong>Restart the daemon</strong> (Diagnostics below) for it to take
+              effect.
+            </div>
+          </div>
+        )}
+      </AccordionSection>
+
+      <AccordionSection id="runtime-diagnostics" title="Diagnostics" defaultOpen>
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Run diagnostics</div>
@@ -694,8 +803,8 @@ export function SbxRuntimePanel({
             </div>
           </div>
           <div style={{ display: 'flex', gap: 7 }}>
-            <button className="btn btn-ghost btn-sm" onClick={loadDaemonStatus} disabled={daemonBusy} title="Refresh status">
-              <RotateCw size={13} />
+            <button className="btn btn-ghost btn-sm" onClick={loadDaemonStatus} disabled={daemonBusy} title="Check status">
+              <RotateCw size={13} /> Check status
             </button>
             <button
               className="btn btn-default btn-sm"
@@ -734,81 +843,9 @@ export function SbxRuntimePanel({
             ))}
           </select>
         </div>
-      </div>
+      </AccordionSection>
 
-      <div className="ss">
-        <div className="ss-hdr">Runtime settings</div>
-        <div className="ss-row">
-          <div>
-            <div className="ss-lbl">Paste images into agents</div>
-            <div className="ss-sub">
-              Enables <code>clipboard.imagePaste</code>. Relaxes isolation by allowing clipboard access.
-            </div>
-          </div>
-          <button
-            className={`s-toggle${imagePaste ? ' on' : ''}`}
-            onClick={toggleImagePaste}
-            disabled={settingBusy}
-          />
-        </div>
-        <div className="ss-row">
-          <div>
-            <div className="ss-lbl">Filesystem cache (virtiofs)</div>
-            <div className="ss-sub">
-              Faster filesystem performance (<code>DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE</code>). On by default in
-              sbx v0.35.
-            </div>
-          </div>
-          <button
-            className={`s-toggle${virtiofsCache ? ' on' : ''}`}
-            onClick={toggleVirtiofsCache}
-          />
-        </div>
-        <div className="ss-row">
-          <div>
-            <div className="ss-lbl">Upstream egress proxy</div>
-            <div className="ss-sub">
-              Chain sandbox egress through an upstream proxy (<code>DOCKER_SANDBOXES_PROXY</code>). Supports{' '}
-              <code>http://</code>, <code>https://</code> and <code>socks5://</code> / <code>socks5h://</code>.
-            </div>
-          </div>
-          <input
-            className="s-input"
-            value={runtimeProxy}
-            placeholder="socks5://host:1080"
-            onChange={(e) => setRuntimeProxy(e.target.value)}
-            onBlur={() => saveRuntimeEnv('runtimeProxy', runtimeProxy.trim())}
-            style={{ width: 220 }}
-          />
-        </div>
-        <div className="ss-row">
-          <div>
-            <div className="ss-lbl">Proxy bypass list</div>
-            <div className="ss-sub">
-              Destinations to exclude from the upstream proxy (<code>DOCKER_SANDBOXES_NO_PROXY</code>), standard
-              <code>NO_PROXY</code> matching.
-            </div>
-          </div>
-          <input
-            className="s-input"
-            value={runtimeNoProxy}
-            placeholder="localhost,*.internal"
-            onChange={(e) => setRuntimeNoProxy(e.target.value)}
-            onBlur={() => saveRuntimeEnv('runtimeNoProxy', runtimeNoProxy.trim())}
-            style={{ width: 220 }}
-          />
-        </div>
-        {runtimeEnvDirty && (
-          <div className="ss-row" style={{ paddingTop: 0 }}>
-            <div className="rt-cmdhint">
-              Runtime environment changed. <strong>Restart the daemon</strong> (Diagnostics above) for it to take
-              effect.
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="ss">
+      <div className="ss ss-danger">
         <div className="ss-hdr" style={{ color: 'var(--destruct)' }}>Danger zone</div>
         <div className="ss-row">
           <div>
@@ -853,37 +890,6 @@ export function SbxRuntimePanel({
         )}
       </div>
 
-      <div className="ss">
-        <div className="ss-hdr" style={{ display: 'flex', alignItems: 'center' }}>
-          <span>Latest changes</span>
-          <button
-            className="btn btn-ghost btn-sm"
-            style={{ marginLeft: 'auto' }}
-            onClick={() => releases[0] && window.minipit?.openPath(releases[0].url)}
-          >
-            View on GitHub
-          </button>
-        </div>
-        {loading ? (
-          <div className="ss-row"><div className="ss-sub">Loading release notes…</div></div>
-        ) : releases.length === 0 ? (
-          <div className="ss-row"><div className="ss-sub">Could not fetch release notes (offline?).</div></div>
-        ) : (
-          releases.map((r) => (
-            <div className="rt-rel" key={r.version}>
-              <div className="rt-rel-hdr" onClick={() => setExpanded((e) => (e === r.version ? null : r.version))}>
-                <span className="rt-rel-ver">{r.version}</span>
-                {r.prerelease && <span className="rt-badge rt-badge-pre">pre-release</span>}
-                <span className="rt-rel-date">{fmtDate(r.date)}</span>
-                <span className="rt-rel-chevron">{expanded === r.version ? '▾' : '▸'}</span>
-              </div>
-              {expanded === r.version && (
-                <pre className="rt-rel-body">{r.body?.trim() || 'No release notes.'}</pre>
-              )}
-            </div>
-          ))
-        )}
-      </div>
     </div>
   )
 }

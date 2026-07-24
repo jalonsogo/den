@@ -5,6 +5,7 @@ import { THEMES, type Theme } from '../lib/themes'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
+import { AccordionSection } from './AccordionSection'
 import { FieldSelect, type FieldOption } from './FieldSelect'
 import {
   SOUND_OPTIONS, type SoundId, isSoundEnabled, setSoundEnabled,
@@ -113,7 +114,7 @@ export function SettingsPage() {
     setSettings((s) => ({ ...s, [key]: !s[key as keyof AppSettings] }))
 
   return (
-    <div className="page">
+    <div className="page settings-page">
       <div className="page-hdr">
         <span className="page-title">Settings</span>
         {(tab === 'general' || tab === 'runtime') && (
@@ -140,8 +141,7 @@ export function SettingsPage() {
         </div>
       ) : (
       <div className="page-body" style={{ padding: '24px 28px 28px' }}>
-        <div className="ss">
-          <div className="ss-hdr">Appearance</div>
+        <AccordionSection id="settings-appearance" title="Appearance" defaultOpen>
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Theme</div>
@@ -244,10 +244,9 @@ export function SettingsPage() {
               />
             </div>
           </div>
-        </div>
+        </AccordionSection>
 
-        <div className="ss">
-          <div className="ss-hdr">Files</div>
+        <AccordionSection id="settings-files" title="Files" defaultOpen>
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Open files with</div>
@@ -270,10 +269,9 @@ export function SettingsPage() {
               ))}
             </div>
           </div>
-        </div>
+        </AccordionSection>
 
-        <div className="ss">
-          <div className="ss-hdr">Sidebar display</div>
+        <AccordionSection id="settings-sidebar" title="Sidebar display" defaultOpen>
           {([
             { key: 'agentBadge', lbl: 'Agent badge on avatars', sub: 'The agent glyph in each sandbox avatar’s corner.' },
             { key: 'sandboxSub', lbl: 'Sandbox status line', sub: 'The second line under each sandbox name (project · status).' },
@@ -289,10 +287,9 @@ export function SettingsPage() {
               />
             </div>
           ))}
-        </div>
+        </AccordionSection>
 
-        <div className="ss">
-          <div className="ss-hdr">Notifications</div>
+        <AccordionSection id="settings-notifications" title="Notifications" defaultOpen>
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Sound when an agent finishes</div>
@@ -371,10 +368,9 @@ export function SettingsPage() {
               )}
             </div>
           </div>
-        </div>
+        </AccordionSection>
 
-        <div className="ss">
-          <div className="ss-hdr">Polling</div>
+        <AccordionSection id="settings-polling" title="Polling" defaultOpen>
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Interval (focused)</div>
@@ -399,10 +395,9 @@ export function SettingsPage() {
               style={{ width: 52, textAlign: 'center' }}
             />
           </div>
-        </div>
+        </AccordionSection>
 
-        <div className="ss">
-          <div className="ss-hdr">App</div>
+        <AccordionSection id="settings-app" title="App" defaultOpen>
           {(
             [
               { key: 'launchAtLogin', label: 'Launch at login', sub: '' },
@@ -423,7 +418,7 @@ export function SettingsPage() {
               />
             </div>
           ))}
-        </div>
+        </AccordionSection>
       </div>
       )}
     </div>

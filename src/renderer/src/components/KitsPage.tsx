@@ -1,11 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check } from 'lucide-react'
+import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
-import { parseKitSpec, type ParsedKit } from '../lib/kitSpec'
+import { parseKitSpec } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 import { KitCaps } from './KitCaps'
-
-const CONTRIB_REPO_URL = 'https://github.com/docker/sbx-kits-contrib'
+import type { HubKit } from '../types'
 
 interface Kit { name: string; kind: string; dir: string; hasZip: boolean }
 
@@ -112,66 +111,116 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const [pushing, setPushing] = useState(false)
   // Shared signed-in account (loaded once at app boot in the store).
   const docker = dockerAccount ?? { loggedIn: false }
-  // Import a remote kit by OCI reference.
-  const [importOpen, setImportOpen] = useState(false)
+  // Import a kit from one of several sources (dropdown menu). `importMenuOpen`
+  // is the source picker; `importForm` is which ref-input is showing (OCI or
+  // Git) — zip/folder use a native dialog and need no inline form.
+  const [importMenuOpen, setImportMenuOpen] = useState(false)
+  // Fixed-position anchor so the menu escapes the subbar's overflow clipping.
+  const [importMenuPos, setImportMenuPos] = useState<{ top: number; left: number } | null>(null)
+  const [importForm, setImportForm] = useState<'oci' | 'git' | null>(null)
   const [importRef, setImportRef] = useState('')
   const [importing, setImporting] = useState(false)
-  // "Browse contrib" gallery — community kits from docker/sbx-kits-contrib,
-  // fetched live and imported into the local library on demand.
-  const [tab, setTab] = useState<'library' | 'browse'>('library')
-  const [contrib, setContrib] = useState<{ dir: string; p: ParsedKit }[] | null>(null)
-  const [contribErr, setContribErr] = useState<string | null>(null)
-  const [contribLoading, setContribLoading] = useState(false)
-  const [importingDir, setImportingDir] = useState<string | null>(null)
 
-  const loadContrib = useCallback(async () => {
-    setContribLoading(true)
-    setContribErr(null)
+  // Close the import source menu on any outside click.
+  useEffect(() => {
+    if (!importMenuOpen) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (!t?.closest('.kit-import-menu') && !t?.closest('.kit-import-btn')) setImportMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [importMenuOpen])
+  // "Hub" gallery — kits published to the Docker Hub catalogue, browsed live and
+  // imported into the local library on demand (via `sbx kit pull`).
+  const [tab, setTab] = useState<'library' | 'browse'>('library')
+  const [hubKits, setHubKits] = useState<HubKit[] | null>(null)
+  const [hubErr, setHubErr] = useState<string | null>(null)
+  const [hubLoading, setHubLoading] = useState(false)
+  const [importingRef, setImportingRef] = useState<string | null>(null)
+
+  const loadHub = useCallback(async () => {
+    setHubLoading(true)
+    setHubErr(null)
     // Surface the real rejection reason (e.g. "No handler registered …" when the
     // main process is stale) instead of masking it behind a generic message.
-    const res = await window.minipit?.listContribKits()
+    const res = await window.minipit?.listHubKits()
       .catch((e) => ({ ok: false as const, kits: undefined, error: e instanceof Error ? e.message : String(e) }))
-    setContribLoading(false)
+    setHubLoading(false)
     if (res?.ok && res.kits) {
-      setContrib(res.kits.map((k) => ({ dir: k.dir, p: parseKitSpec(k.spec) })))
+      setHubKits(res.kits)
     } else {
-      setContrib([])
-      setContribErr(res?.error || 'Could not reach GitHub — check your connection and try again.')
+      setHubKits([])
+      setHubErr(res?.error || 'Could not reach Docker Hub — check your connection and try again.')
     }
   }, [])
 
-  // Fetch the gallery the first time the Browse tab is opened.
-  useEffect(() => { if (tab === 'browse' && contrib === null && !contribLoading) loadContrib() }, [tab, contrib, contribLoading, loadContrib])
+  // Fetch the gallery the first time the Hub tab is opened.
+  useEffect(() => { if (tab === 'browse' && hubKits === null && !hubLoading) loadHub() }, [tab, hubKits, hubLoading, loadHub])
 
-  const importContrib = async (dir: string) => {
-    setImportingDir(dir)
+  const importHubKit = async (kit: HubKit) => {
+    setImportingRef(kit.ref)
     setMsg(null)
-    const res = await window.minipit?.importContribKit(dir).catch(() => null)
-    setImportingDir(null)
+    const res = await window.minipit?.kitImport(kit.ref).catch(() => null)
+    setImportingRef(null)
     if (res?.ok) {
       await load()
       setTab('library')
       setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
     } else {
-      setMsg({ ok: false, text: res?.error || 'Import failed — make sure git is installed and the repo is reachable.' })
+      setMsg({ ok: false, text: res?.error || 'Import failed — check the reference is reachable and you can pull it.' })
     }
   }
 
+  // OCI reference / Git URL — both take a text ref via the inline form.
   const doImport = async () => {
     const ref = importRef.trim()
     if (!ref || importing) return
     setImporting(true)
     setMsg(null)
-    const res = await window.minipit?.kitImport(ref).catch(() => null)
+    const res = importForm === 'git'
+      ? await window.minipit?.kitImportGit(ref).catch(() => null)
+      : await window.minipit?.kitImport(ref).catch(() => null)
     setImporting(false)
     if (res?.ok) {
-      setImportOpen(false)
+      setImportForm(null)
       setImportRef('')
       load()
-      setMsg({ ok: true, text: `Imported "${res.name}" from ${ref}.` })
+      setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
     } else {
-      setMsg({ ok: false, text: res?.error || 'Import failed — check the reference and that the repo is accessible.' })
+      setMsg({ ok: false, text: res?.error || 'Import failed — check the reference and that the source is accessible.' })
     }
+  }
+
+  // Zip / folder — the main process opens a native picker and imports in one
+  // step, so there's no inline form; just reflect busy + result.
+  const runFileImport = async (kind: 'zip' | 'folder') => {
+    setImportMenuOpen(false)
+    setImportForm(null)
+    setImporting(true)
+    setMsg(null)
+    // Surface the real rejection (e.g. "No handler registered …" when the main
+    // process is stale) instead of a generic failure.
+    const fail = (e: unknown) => ({ ok: false as const, canceled: false, name: undefined, error: e instanceof Error ? e.message : String(e) })
+    const res = kind === 'zip'
+      ? await window.minipit?.kitImportZip().catch(fail)
+      : await window.minipit?.kitImportFolder().catch(fail)
+    setImporting(false)
+    if (res?.canceled) return
+    if (res?.ok) {
+      load()
+      setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
+    } else {
+      setMsg({ ok: false, text: res?.error || 'Import failed.' })
+    }
+  }
+
+  // Pick an import source from the dropdown.
+  const pickImport = (source: 'oci' | 'git' | 'zip' | 'folder') => {
+    setImportMenuOpen(false)
+    setMsg(null)
+    if (source === 'oci' || source === 'git') { setImportForm(source); setImportRef('') }
+    else runFileImport(source)
   }
 
   const toggleMore = (dir: string, e: React.MouseEvent) => {
@@ -315,21 +364,49 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       <div className="page-subbar">
         <div className="kit-tabs">
           <button className={tab === 'library' ? 'on' : ''} onClick={() => setTab('library')}>Your kits</button>
-          <button className={tab === 'browse' ? 'on' : ''} onClick={() => setTab('browse')}>Browse contrib</button>
+          <button className={tab === 'browse' ? 'on' : ''} onClick={() => setTab('browse')}>Hub</button>
         </div>
         <div className="page-subbar-actions">
           {tab === 'library' ? (
             <>
-              <button className="btn btn-default btn-sm" onClick={() => { setImportOpen((v) => !v); setImportRef('') }}>
-                <DownloadCloud size={13} /> Add remote
-              </button>
+              <div className="kit-import-wrap">
+                <button
+                  className="btn btn-default btn-sm kit-import-btn"
+                  onClick={(e) => {
+                    if (importMenuOpen) { setImportMenuOpen(false); return }
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                    // Clamp so the 236px-wide menu keeps an 8px gap from the window edge.
+                    const left = Math.max(8, Math.min(r.left, window.innerWidth - 244))
+                    setImportMenuPos({ top: r.bottom + 4, left })
+                    setImportMenuOpen(true)
+                  }}
+                >
+                  <DownloadCloud size={13} /> Import <ChevronDown size={12} />
+                </button>
+                {importMenuOpen && importMenuPos && (
+                  <div className="kit-import-menu" style={{ top: importMenuPos.top, left: importMenuPos.left }}>
+                    <button className="kit-import-item" onClick={() => pickImport('oci')}>
+                      <Box size={14} /><span><b>OCI reference</b><small>Pull from a registry</small></span>
+                    </button>
+                    <button className="kit-import-item" onClick={() => pickImport('git')}>
+                      <Github size={14} /><span><b>Git repository</b><small>Clone a repo (or subfolder)</small></span>
+                    </button>
+                    <button className="kit-import-item" onClick={() => pickImport('zip')}>
+                      <FileArchive size={14} /><span><b>Zip archive…</b><small>A packed kit file</small></span>
+                    </button>
+                    <button className="kit-import-item" onClick={() => pickImport('folder')}>
+                      <FolderOpen size={14} /><span><b>Local folder…</b><small>A kit source directory</small></span>
+                    </button>
+                  </div>
+                )}
+              </div>
               <button className="btn btn-primary btn-sm" onClick={() => { setEditKit(null); setModal('new-kit') }}>
                 <Plus size={13} /> New {variant === 'mixin' ? 'mixin kit' : 'sandbox kit'}
               </button>
             </>
           ) : (
-            <button className="btn btn-default btn-sm" onClick={loadContrib} disabled={contribLoading}>
-              <RefreshCw size={13} className={contribLoading ? 'spin' : ''} /> Refresh
+            <button className="btn btn-default btn-sm" onClick={loadHub} disabled={hubLoading}>
+              <RefreshCw size={13} className={hubLoading ? 'spin' : ''} /> Refresh
             </button>
           )}
         </div>
@@ -339,29 +416,41 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
         <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
           {tab === 'library'
             ? <>{blurb} Managed by den and packed with <code>sbx kit pack</code>.</>
-            : <>Community {variant === 'mixin' ? 'mixin' : 'sandbox'} kits from <a className="kit-repo-link" onClick={() => window.minipit?.openPath(CONTRIB_REPO_URL)}>docker/sbx-kits-contrib</a>. Import one to add it to your library.</>}
+            : <>{variant === 'mixin' ? 'Mixin' : 'Sandbox'} kits published to <a className="kit-repo-link" onClick={() => window.minipit?.openPath('https://hub.docker.com/search?type=sbx_kit')}>Docker Hub</a>. Import one to add it to your library.</>}
         </p>
 
-        {tab === 'library' && importOpen && (
+        {tab === 'library' && importForm && (
           <div className="kit-import-box">
-            <label className="kit-push-lbl">Add a remote kit by OCI reference</label>
+            <label className="kit-push-lbl">
+              {importForm === 'git' ? 'Import a kit from a Git repository' : 'Import a kit by OCI reference'}
+            </label>
             <div className="kit-push-row">
               <input
                 className="finput kit-push-input"
                 autoFocus
                 value={importRef}
                 spellCheck={false}
-                placeholder="registry/repo:tag — e.g. docker.io/javieralonso716/my-kit:latest"
+                placeholder={importForm === 'git'
+                  ? 'https://github.com/owner/repo  ·  append #dir=subfolder if needed'
+                  : 'registry/repo:tag — e.g. docker.io/javieralonso716/my-kit:latest'}
                 onChange={(e) => setImportRef(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') doImport() }}
               />
-              <button className="btn btn-ghost btn-sm" onClick={() => setImportOpen(false)} disabled={importing}>Cancel</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setImportForm(null); setImportRef('') }} disabled={importing}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={doImport} disabled={importing || !importRef.trim()}>
-                {importing ? 'Pulling…' : 'Import'}
+                {importing ? (importForm === 'git' ? 'Cloning…' : 'Pulling…') : 'Import'}
               </button>
             </div>
-            <div className="kit-push-hint">Pulls the artifact with <code>sbx kit pull</code> into your kit library. Private repos require <code>docker login</code>.</div>
+            <div className="kit-push-hint">
+              {importForm === 'git'
+                ? <>Clones the repo and packs the kit. Add <code>#dir=&lt;subfolder&gt;</code> when the <code>spec.yaml</code> lives in a subdirectory.</>
+                : <>Pulls the artifact with <code>sbx kit pull</code> into your kit library. Private repos require <code>docker login</code>.</>}
+            </div>
           </div>
+        )}
+
+        {tab === 'library' && importing && !importForm && (
+          <div className="kit-import-box kit-import-busy">Importing kit…</div>
         )}
 
         {msg && msg.share ? (
@@ -583,44 +672,58 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
         ))}
 
         {tab === 'browse' && (
-          contribLoading && contrib === null ? (
-            <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>Loading kits from GitHub…</div>
-          ) : contribErr ? (
+          hubLoading && hubKits === null ? (
+            <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>Loading kits from Docker Hub…</div>
+          ) : hubErr ? (
             <div className="np-banner err" style={{ marginBottom: 12 }}>
-              <span className="np-banner-txt">{contribErr}</span>
-              <button className="btn btn-default btn-sm" onClick={loadContrib} disabled={contribLoading}>Retry</button>
+              <span className="np-banner-txt">{hubErr}</span>
+              <button className="btn btn-default btn-sm" onClick={loadHub} disabled={hubLoading}>Retry</button>
             </div>
           ) : (() => {
             // Sandbox Kits page shows full-agent kits; Mixin Kits page shows add-ons.
-            const wanted = variant === 'mixin' ? 'mixin' : 'agent'
-            const gallery = (contrib ?? []).filter((c) => (c.p.kind || 'mixin') === wanted)
+            const gallery = (hubKits ?? []).filter((k) => k.kind === variant)
+            // A kit imports under a name derived from its ref's last path segment,
+            // so match on that (not the slug) to flag ones already in the library.
             const installed = new Set(kits.map((k) => k.name))
+            const importName = (k: HubKit) => (k.slug.split('/').pop() ?? '').replace(/[^A-Za-z0-9._-]/g, '-')
             if (gallery.length === 0) {
-              return <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>No community {variant} kits found.</div>
+              return <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>No {variant} kits found on Docker Hub.</div>
             }
             return (
               <div className="kit-gallery">
-                {gallery.map(({ dir, p }) => {
-                  const has = installed.has(dir)
+                {gallery.map((k) => {
+                  const has = installed.has(importName(k))
+                  const parsed = k.spec ? parseKitSpec(k.spec) : null
                   return (
-                    <div className="kit-card" key={dir}>
+                    <div className="kit-card" key={k.slug}>
                       <div className="kit-card-hd">
-                        {variant === 'mixin' ? <Layers size={15} /> : <Package size={15} />}
-                        <span className="kit-card-name">{p.displayName || p.name || dir}</span>
+                        {k.logo
+                          ? <img className="kit-card-logo" src={k.logo} alt="" width={16} height={16} />
+                          : (variant === 'mixin' ? <Layers size={15} /> : <Package size={15} />)}
+                        <span className="kit-card-name">{k.title}</span>
+                        {k.verified && <BadgeCheck size={13} className="kit-card-verified" aria-label="Verified publisher" />}
                         {has && <span className="kit-card-has"><Check size={11} /> Imported</span>}
                       </div>
-                      {p.description && <p className="kit-card-desc">{p.description}</p>}
-                      <KitCaps p={p} />
+                      <div className="kit-card-meta">
+                        <span className="kit-card-pub">{k.publisher}</span>
+                        {k.pullCount && <span className="kit-card-pulls"><DownloadCloud size={11} />{k.pullCount}</span>}
+                        {k.stars > 0 && <span className="kit-card-stars"><Star size={11} />{k.stars}</span>}
+                      </div>
+                      {k.description && <p className="kit-card-desc">{k.description}</p>}
+                      {variant === 'sandbox' && parsed?.image && (
+                        <div className="kit-card-image" title="Base image"><Package size={11} />{parsed.image}</div>
+                      )}
+                      {parsed && <KitCaps p={parsed} compact />}
                       <div className="kit-card-actions">
-                        <a className="kit-card-link" onClick={() => window.minipit?.openPath(`${CONTRIB_REPO_URL}/tree/main/${dir}`)}>
-                          <Globe size={12} /> View source
+                        <a className="kit-card-link" onClick={() => window.minipit?.openPath(`https://hub.docker.com/r/${k.slug}`)}>
+                          <Globe size={12} /> View on Hub
                         </a>
                         <button
                           className="btn btn-primary btn-sm"
-                          onClick={() => importContrib(dir)}
-                          disabled={importingDir !== null}
+                          onClick={() => importHubKit(k)}
+                          disabled={importingRef !== null}
                         >
-                          {importingDir === dir ? 'Importing…' : <><DownloadCloud size={13} /> {has ? 'Re-import' : 'Import'}</>}
+                          {importingRef === k.ref ? 'Importing…' : <><DownloadCloud size={13} /> {has ? 'Re-import' : 'Import'}</>}
                         </button>
                       </div>
                     </div>

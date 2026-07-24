@@ -218,6 +218,227 @@ async function hubBearer(username: string, secret: string): Promise<string | nul
   } catch { return null }
 }
 
+// ── Docker Hub kit catalogue (the "Hub" browse tab) ─────────────────────────
+// Kits are published as OCI artifacts. The search API lists them, but carries
+// no `kind` and often an empty description — so we enrich each from its registry
+// artifact: the manifest annotations give kind/title/description, and the config
+// blob IS the kit's spec.yaml (same format the local parser reads).
+
+const REGISTRY = 'https://registry-1.docker.io'
+// Every OCI manifest media type a kit might present as, so the registry doesn't
+// hand us back a "manifest unknown" for want of an Accept.
+const MANIFEST_ACCEPT = [
+  'application/vnd.oci.image.manifest.v1+json',
+  'application/vnd.oci.image.index.v1+json',
+  'application/vnd.docker.distribution.manifest.v2+json',
+  'application/vnd.docker.distribution.manifest.list.v2+json'
+].join(', ')
+
+export interface HubKit {
+  slug: string              // "namespace/repo"
+  ref: string               // "docker.io/namespace/repo:latest" — what `sbx kit pull` takes
+  kind: 'sandbox' | 'mixin'
+  title: string
+  description: string
+  spec: string              // raw spec.yaml, or '' if it couldn't be fetched
+  publisher: string
+  verified: boolean
+  pullCount: string
+  stars: number
+  logo: string
+  updatedAt: string
+}
+
+let hubKitsCache: { value: HubKit[]; at: number } | null = null
+const HUB_KITS_TTL = 15 * 60_000
+
+// fetch with a hard timeout. `fetch` never times out on its own, so one stalled
+// registry request would pin a worker slot and hang the whole enrichment — this
+// aborts after `ms` and lets the kit fall back to its search metadata.
+async function fetchTimeout(url: string, opts: RequestInit = {}, ms = 6000): Promise<Response> {
+  const ac = new AbortController()
+  const t = setTimeout(() => ac.abort(), ms)
+  try { return await fetch(url, { ...opts, signal: ac.signal }) }
+  finally { clearTimeout(t) }
+}
+
+// Anonymous pull token for a Hub repo (kit artifacts are public).
+async function registryToken(repo: string): Promise<string | null> {
+  try {
+    const res = await fetchTimeout(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`)
+    if (!res.ok) return null
+    return ((await res.json()) as { token?: string }).token ?? null
+  } catch { return null }
+}
+
+async function fetchManifest(repo: string, ref: string, token: string): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetchTimeout(`${REGISTRY}/v2/${repo}/manifests/${ref}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: MANIFEST_ACCEPT }
+    })
+    if (!res.ok) return null
+    return (await res.json()) as Record<string, unknown>
+  } catch { return null }
+}
+
+// Pull a kit's annotations + spec.yaml from its registry artifact. Best-effort:
+// returns empty values (caller falls back to search metadata) on any failure.
+async function fetchKitArtifact(slug: string): Promise<{ annotations: Record<string, string>; spec: string }> {
+  const empty = { annotations: {}, spec: '' }
+  const token = await registryToken(slug)
+  if (!token) return empty
+  let man = await fetchManifest(slug, 'latest', token)
+  // A multi-arch index points at child manifests — follow to the kit one.
+  const children = man?.manifests as { digest?: string; artifactType?: string }[] | undefined
+  if (Array.isArray(children) && children.length) {
+    const child = children.find((m) => (m.artifactType ?? '').includes('sandbox.kit')) ?? children[0]
+    if (child?.digest) man = (await fetchManifest(slug, child.digest, token)) ?? man
+  }
+  if (!man) return empty
+  const annotations = (man.annotations as Record<string, string>) ?? {}
+  const cfg = man.config as { digest?: string; mediaType?: string } | undefined
+  let spec = ''
+  if (cfg?.digest && typeof cfg.mediaType === 'string' && cfg.mediaType.includes('yaml')) {
+    try {
+      const b = await fetchTimeout(`${REGISTRY}/v2/${slug}/blobs/${cfg.digest}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (b.ok) spec = await b.text()
+    } catch { /* leave spec empty */ }
+  }
+  return { annotations, spec }
+}
+
+// Normalise a kit's kind to the two pages we render. sbx spells sandbox kits
+// "agent" on disk; the annotation uses "sandbox". Fall back to spec shape.
+function normalizeKitKind(rawKind: string, spec: string): 'sandbox' | 'mixin' {
+  const k = rawKind.toLowerCase()
+  if (k === 'sandbox' || k === 'agent') return 'sandbox'
+  if (k === 'mixin') return 'mixin'
+  if (/(^|\n)\s*kind:\s*(sandbox|agent)\b/.test(spec)) return 'sandbox'
+  if (/(^|\n)\s*image:/.test(spec) && /run:|entrypoint:/.test(spec)) return 'sandbox'
+  return 'mixin'
+}
+
+// Run an async mapper over items with a bounded concurrency (kit enrichment is
+// several registry round-trips each — don't fire 39×3 requests at once).
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]) }
+  })
+  await Promise.all(workers)
+  return out
+}
+
+// Search the Hub kit catalogue and enrich each result into a HubKit. Cached.
+async function listHubKits(): Promise<HubKit[]> {
+  if (hubKitsCache && Date.now() - hubKitsCache.at < HUB_KITS_TTL) return hubKitsCache.value
+  // size=100 returns the whole (small) catalogue in one page today; the kind
+  // filter is ignored server-side, so we split sandbox/mixin ourselves below.
+  const res = await fetchTimeout(`${HUB_API}/api/search/v4?type=sbx_kit&size=200`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'den' }
+  }, 10000)
+  if (!res.ok) throw new Error(`Docker Hub returned ${res.status}.`)
+  const data = (await res.json()) as {
+    results?: {
+      slug?: string; name?: string; short_description?: string; badge?: string
+      pull_count?: string; star_count?: number; updated_at?: string
+      publisher?: { name?: string }; logo_url?: { small?: string; large?: string }
+    }[]
+  }
+  const rows = (data.results ?? []).filter((r) => r.slug || r.name)
+  const kits = await mapPool(rows, 12, async (r): Promise<HubKit> => {
+    const slug = (r.slug || r.name) as string
+    // Cap total enrichment per kit so a chain of slow requests can't hold a
+    // worker for the sum of its per-request timeouts — degrade to search data.
+    const { annotations, spec } = await Promise.race([
+      fetchKitArtifact(slug),
+      new Promise<{ annotations: Record<string, string>; spec: string }>((resolve) =>
+        setTimeout(() => resolve({ annotations: {}, spec: '' }), 12000))
+    ])
+    const kind = normalizeKitKind(annotations['vnd.docker.sandbox.kit.kind'] ?? '', spec)
+    // Some publishers wrap annotation values in quotes — strip a matching pair.
+    const unquote = (s: string) => (/^"(.*)"$/.test(s) || /^'(.*)'$/.test(s) ? s.slice(1, -1) : s).trim()
+    const title = unquote(annotations['org.opencontainers.image.title']
+      || annotations['vnd.docker.sandbox.kit.name']
+      || slug.split('/').pop()
+      || slug)
+    const description = unquote(annotations['org.opencontainers.image.description'] || r.short_description || '')
+    return {
+      slug,
+      // A bare "docker.io/ns/repo" is an invalid registry reference — `sbx kit
+      // pull` (ORAS) needs an explicit tag, so default to :latest.
+      ref: `docker.io/${slug}:latest`,
+      kind,
+      title,
+      description,
+      spec,
+      publisher: r.publisher?.name ?? slug.split('/')[0] ?? '',
+      verified: r.badge === 'verified_publisher',
+      pullCount: r.pull_count ?? '',
+      stars: r.star_count ?? 0,
+      logo: r.logo_url?.small || r.logo_url?.large || '',
+      updatedAt: r.updated_at ?? ''
+    }
+  })
+  hubKitsCache = { value: kits, at: Date.now() }
+  return kits
+}
+
+// ── Local / git kit import helpers (shared by the Import-kit menu) ───────────
+
+// Spawn a binary, resolving on exit 0 and rejecting with its stderr otherwise.
+function runBin(bin: string, args: string[], timeout = 60000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const p = spawn(bin, args, { env: guiEnv() })
+    let err = ''
+    p.stderr?.on('data', (d) => { err += d.toString() })
+    p.on('error', reject)
+    const timer = setTimeout(() => { p.kill(); reject(new Error(`${bin} timed out`)) }, timeout)
+    p.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(err.trim() || `${bin} exited ${code}`)) })
+  })
+}
+
+// Derive a filesystem-safe kit name from a path, archive name, or repo URL.
+function kitNameFrom(raw: string): string {
+  const base = (raw || '').split(/[\\/]/).pop() || raw || 'kit'
+  return base.replace(/\.(zip|tar\.gz|tgz|git)$/i, '').replace(/[^A-Za-z0-9._-]/g, '-') || 'kit'
+}
+
+// Validate an imported kit dir has a spec.yaml, pack it to a sibling .zip (so it
+// reads like any locally-authored kit), and refresh the app menu. Cleans up on
+// failure. Shared exit path for the folder/zip/git importers.
+async function finalizeImportedKit(name: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+  const fs = require('fs')
+  const dir = join(kitsRoot(), name)
+  if (!fs.existsSync(join(dir, 'spec.yaml'))) {
+    fs.rmSync(dir, { recursive: true, force: true })
+    return { ok: false, error: 'No spec.yaml found — not a valid kit.' }
+  }
+  try { await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 }) } catch { /* leave unpacked; still usable */ }
+  setAppMenu().catch(() => {})
+  return { ok: true, name }
+}
+
+// Extract a kit archive (.zip or .tar.gz) into <kits>/<name>, flattening a
+// single wrapper directory if the archive nests everything one level down.
+async function extractKitArchive(archive: string, name: string): Promise<void> {
+  const fs = require('fs')
+  const dir = join(kitsRoot(), name)
+  fs.rmSync(dir, { recursive: true, force: true })
+  fs.mkdirSync(dir, { recursive: true })
+  try { await runBin('unzip', ['-o', archive, '-d', dir]) }
+  catch { await runBin('tar', ['xzf', archive, '-C', dir]) }
+  if (!fs.existsSync(join(dir, 'spec.yaml'))) {
+    const entries = fs.readdirSync(dir)
+    if (entries.length === 1 && fs.statSync(join(dir, entries[0])).isDirectory()) {
+      const inner = join(dir, entries[0])
+      for (const f of fs.readdirSync(inner)) fs.renameSync(join(inner, f), join(dir, f))
+      fs.rmdirSync(inner)
+    }
+  }
+}
+
 // Run an sbx command through a pty and stream its output via `send`. sbx (like
 // most CLIs) only emits ANSI *colour* when it detects a real terminal, so
 // piping via spawn() gives colourless output. A pty makes it believe it's on a
@@ -263,11 +484,6 @@ function openExternalSafe(url: string): void {
   }
   shell.openExternal(url).catch((e) => console.error('openExternal failed for', url, e))
 }
-
-// Community kit gallery source (browsed live, imported via git). sbx consumes a
-// kit from here with `--kit "git+https://github.com/<repo>.git#dir=<name>"`.
-const CONTRIB_REPO = 'docker/sbx-kits-contrib'
-const CONTRIB_BRANCH = 'main'
 
 // Kit artifacts live in the app's own data folder (not the user's home). On
 // first use we migrate any kits authored under the legacy ~/minipit-kits path.
@@ -424,8 +640,12 @@ function parsePolicyLs(out: string) {
 
 function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(getSbxPath(), args, { timeout: opts?.timeout ?? 10000, env: guiEnv() }, (err, stdout, stderr) => {
-      if (err) reject(new Error(stderr || err.message))
+    // maxBuffer: the default is 1 MB — `sbx ls --json` / `exec … find` on a busy
+    // machine or large tree can exceed that and fail with an opaque "Command
+    // failed", so give it generous headroom. On error, prefer stderr, then any
+    // stdout captured, then the raw execFile message.
+    execFile(getSbxPath(), args, { timeout: opts?.timeout ?? 10000, maxBuffer: 32 * 1024 * 1024, env: guiEnv() }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || stdout || err.message || '').toString().trim() || err.message))
       else resolve(stdout.trim())
     })
   })
@@ -560,8 +780,15 @@ function updatePowerBlocker(runningCount: number): void {
 let lastGoodSandboxes: ReturnType<typeof normalizeSandbox>[] | null = null
 
 async function listSandboxes() {
+  // One retry after a brief pause: `sbx ls` occasionally fails transiently when
+  // the daemon is briefly busy (e.g. mid start/stop). A generous timeout avoids
+  // spurious failures on slower machines. Only fall back to the last-good list
+  // if both attempts fail, so the UI doesn't flash empty on a hiccup.
+  const attempt = () => sbx(['ls', '--json'], { timeout: 20000 })
   try {
-    const out = await sbx(['ls', '--json'])
+    let out: string
+    try { out = await attempt() }
+    catch { await new Promise((r) => setTimeout(r, 500)); out = await attempt() }
     const parsed = JSON.parse(out)
     const sandboxes: SbxSandbox[] = parsed.sandboxes ?? parsed
     const list = sandboxes.map(normalizeSandbox)
@@ -1780,6 +2007,21 @@ function setupIPC(): void {
     return listFiles(name, relPath ?? '')
   })
 
+  // Resolve the directory the Files tree should root at. The stored workspace
+  // path is a host path and doesn't always exist inside the container (moved
+  // folder, clone/isolated layout, different mount point) — so prefer it only
+  // when it exists there, else fall back to the container's working dir, then
+  // $HOME, then /. Keeps the panel working instead of erroring on a bad path.
+  ipcMain.handle('minipit:workspace-root', async (_, name: string, hint: string) => {
+    const script = 'for d in "$1" "$PWD" "$HOME" /; do [ -n "$d" ] && [ -d "$d" ] && { printf %s "$d"; exit 0; }; done; printf /'
+    try {
+      const out = await sbx(['exec', name, 'sh', '-c', script, 'sh', hint || ''])
+      return (out.trim() || hint || '/')
+    } catch {
+      return hint || '/'
+    }
+  })
+
   ipcMain.handle('minipit:generate-palette', async (_, hex: string, size = 9) => {
     try {
       // rampa-sdk is ESM-only and uses Node built-ins, so it runs here (main),
@@ -2245,8 +2487,11 @@ function setupIPC(): void {
   // into the local kit library so it shows up like any locally-authored kit.
   ipcMain.handle('minipit:kit-import', async (_, ref: string) => {
     const fs = require('fs')
-    const r = ref.trim()
+    let r = ref.trim()
     if (!r) return { ok: false, error: 'Reference is required.' }
+    // A bare "repo" (no :tag and no @digest) is an invalid registry reference —
+    // default to :latest so users can paste just the repo path.
+    if (!r.includes('@') && !(r.split('/').pop() ?? '').includes(':')) r = `${r}:latest`
     // Derive a kit name from the reference (last path segment, sans tag/digest).
     const last = r.split('@')[0].split('/').pop() ?? r
     const name = (last.split(':')[0] || 'kit').replace(/[^A-Za-z0-9._-]/g, '-')
@@ -2286,81 +2531,87 @@ function setupIPC(): void {
     }
   })
 
-  // ── Community kit gallery (github.com/docker/sbx-kits-contrib) ────────────
-  // Browse the community kit repo. Each top-level directory with a spec.yaml is
-  // a kit; sbx consumes it via `--kit "git+<repo>#dir=<name>"`. We list the kits
-  // live from GitHub (one tree call + raw spec fetches — raw.githubusercontent
-  // isn't API-rate-limited) and return the raw specs for the renderer to parse.
-  ipcMain.handle('minipit:list-contrib-kits', async () => {
+  // Import a kit from a local .zip / .tar.gz archive (a packed kit). Opens a
+  // file picker, extracts it into the library, and packs it.
+  ipcMain.handle('minipit:kit-import-zip', async () => {
+    const fs = require('fs')
+    const r = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile'],
+      filters: [{ name: 'Kit archive', extensions: ['zip', 'tgz', 'gz'] }]
+    })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    const archive = r.filePaths[0]
+    const name = kitNameFrom(archive)
     try {
-      const treeRes = await fetch(
-        `https://api.github.com/repos/${CONTRIB_REPO}/git/trees/${CONTRIB_BRANCH}?recursive=1`,
-        { headers: { 'User-Agent': 'den-app', Accept: 'application/vnd.github+json' } }
-      )
-      if (!treeRes.ok) {
-        const detail = treeRes.status === 403 ? ' (GitHub rate limit — try again in a bit)' : ''
-        return { ok: false, error: `GitHub returned ${treeRes.status}${detail}.` }
-      }
-      const tree = (await treeRes.json()) as { tree?: { path: string; type: string }[] }
-      // Top-level "<dir>/spec.yaml" blobs mark each kit (skip nested spec files).
-      const dirs = (tree.tree ?? [])
-        .filter((n) => n.type === 'blob' && /^[^/]+\/spec\.yaml$/.test(n.path))
-        .map((n) => n.path.split('/')[0])
-      const kits = await Promise.all(
-        dirs.map(async (dir) => {
-          try {
-            const r = await fetch(`https://raw.githubusercontent.com/${CONTRIB_REPO}/${CONTRIB_BRANCH}/${dir}/spec.yaml`,
-              { headers: { 'User-Agent': 'den-app' } })
-            if (!r.ok) return null
-            return { dir, spec: await r.text() }
-          } catch { return null }
-        })
-      )
-      return { ok: true, kits: kits.filter(Boolean) as { dir: string; spec: string }[] }
+      await extractKitArchive(archive, name)
+      return await finalizeImportedKit(name)
     } catch (err) {
-      console.error('list-contrib-kits failed:', err)
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() || 'Could not reach GitHub.' }
+      fs.rmSync(join(kitsRoot(), name), { recursive: true, force: true })
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
-  // Import a community kit into the local library: shallow-clone the repo, copy
-  // the kit's subdirectory into <userData>/kits/<dir>/, and pack it so it shows
-  // up (and can be edited/re-added) like any locally-authored kit.
-  ipcMain.handle('minipit:import-contrib-kit', async (_, dir: string) => {
+  // Import a kit from a local folder (a kit source directory with spec.yaml).
+  // Opens a folder picker, copies it into the library, and packs it.
+  ipcMain.handle('minipit:kit-import-folder', async () => {
+    const fs = require('fs')
+    const r = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    const src = r.filePaths[0]
+    if (!fs.existsSync(join(src, 'spec.yaml'))) return { ok: false, error: 'That folder has no spec.yaml — not a kit.' }
+    const name = kitNameFrom(src)
+    const dir = join(kitsRoot(), name)
+    try {
+      fs.rmSync(dir, { recursive: true, force: true })
+      fs.cpSync(src, dir, { recursive: true })
+      fs.rmSync(join(dir, '.git'), { recursive: true, force: true })
+      return await finalizeImportedKit(name)
+    } catch (err) {
+      fs.rmSync(dir, { recursive: true, force: true })
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Import a kit from a Git repository. Accepts a plain repo URL, or one with a
+  // `#dir=<subdir>` fragment (or `git+` prefix) to point at a kit in a subfolder.
+  ipcMain.handle('minipit:kit-import-git', async (_, url: string) => {
     const fs = require('fs')
     const os = require('os')
-    const name = (dir || '').replace(/[^A-Za-z0-9._-]/g, '-')
-    if (!name) return { ok: false, error: 'Kit name is required.' }
-    const dest = join(kitsRoot(), name)
+    const raw = (url || '').trim()
+    if (!raw) return { ok: false, error: 'Repository URL is required.' }
+    const [repoUrl, frag] = raw.replace(/^git\+/, '').split('#')
+    const subdir = /(?:^|&)dir=([^&]+)/.exec(frag || '')?.[1] || ''
+    const name = kitNameFrom(subdir || repoUrl.replace(/\.git$/, ''))
+    const dir = join(kitsRoot(), name)
     const tmp = fs.mkdtempSync(join(os.tmpdir(), 'den-kit-'))
-    const run = (bin: string, args: string[], timeout = 60000) => new Promise<void>((resolve, reject) => {
-      const p = spawn(bin, args, { env: guiEnv() })
-      let err = ''
-      p.stderr?.on('data', (d) => { err += d.toString() })
-      p.on('error', reject)
-      const timer = setTimeout(() => { p.kill(); reject(new Error(`${bin} timed out`)) }, timeout)
-      p.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(err.trim() || `${bin} exited ${code}`)) })
-    })
     try {
-      // Sparse shallow clone — fetch only this kit's subtree, not the whole repo.
-      await run('git', ['clone', '--depth', '1', '--filter=blob:none', '--sparse',
-        '--branch', CONTRIB_BRANCH, `https://github.com/${CONTRIB_REPO}.git`, tmp])
-      await run('git', ['-C', tmp, 'sparse-checkout', 'set', name])
-      const src = join(tmp, name)
+      await runBin('git', ['clone', '--depth', '1', repoUrl, tmp])
+      const src = subdir ? join(tmp, subdir) : tmp
       if (!fs.existsSync(join(src, 'spec.yaml'))) {
-        return { ok: false, error: `"${name}" has no spec.yaml in the repo.` }
+        return { ok: false, error: `No spec.yaml found${subdir ? ` in "${subdir}"` : ' at the repo root'} — pass "#dir=<subfolder>" if the kit lives in a subdirectory.` }
       }
-      fs.rmSync(dest, { recursive: true, force: true })
-      fs.cpSync(src, dest, { recursive: true })
-      fs.rmSync(join(dest, '.git'), { recursive: true, force: true })
-      await sbx(['kit', 'pack', dest, '-o', `${dest}.zip`], { timeout: 30000 })
-      setAppMenu().catch(() => {})
-      return { ok: true, name }
+      fs.rmSync(dir, { recursive: true, force: true })
+      fs.cpSync(src, dir, { recursive: true })
+      fs.rmSync(join(dir, '.git'), { recursive: true, force: true })
+      return await finalizeImportedKit(name)
     } catch (err) {
-      fs.rmSync(dest, { recursive: true, force: true })
+      fs.rmSync(dir, { recursive: true, force: true })
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     } finally {
       try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  })
+
+  // ── Docker Hub kit gallery ────────────────────────────────────────────────
+  // Browse published kits from the Docker Hub catalogue (search API + per-kit
+  // registry enrichment; see listHubKits). Importing a kit reuses the existing
+  // `minipit:kit-import` path (`sbx kit pull <ref>`) — no bespoke clone step.
+  ipcMain.handle('minipit:list-hub-kits', async () => {
+    try {
+      return { ok: true, kits: await listHubKits() }
+    } catch (err) {
+      console.error('list-hub-kits failed:', err)
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() || 'Could not reach Docker Hub.' }
     }
   })
 
