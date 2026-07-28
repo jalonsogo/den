@@ -1208,6 +1208,70 @@ function shortEditorTmpDir(): string | undefined {
   }
 }
 
+// ── Open an SSH session in a terminal ────────────────────────────────────────
+// Which terminal app to use, mirrored from the renderer's preference.
+let terminalPref = 'default'
+
+// Terminals that take a command straight off their CLI. Preferred when the
+// binary is on PATH: no temp script, and the terminal keeps its own shell setup.
+const TERMINAL_CLI: Record<string, (cmd: string) => { bin: string; args: string[] }> = {
+  Ghostty: (c) => ({ bin: 'ghostty', args: ['-e', c] }),
+  WezTerm: (c) => ({ bin: 'wezterm', args: ['start', '--', 'sh', '-lc', c] }),
+  kitty: (c) => ({ bin: 'kitty', args: ['sh', '-lc', c] }),
+  Alacritty: (c) => ({ bin: 'alacritty', args: ['-e', 'sh', '-lc', c] })
+}
+
+// Open `ssh <sandbox>.sbx` in a terminal window.
+//
+// Two strategies. If the chosen terminal has a CLI that accepts a command, use
+// it. Otherwise write a tiny executable .command script and hand it to `open`:
+// that's the only approach that works across GUI-only terminals, and with no
+// -a flag macOS routes it to whatever the user has registered for shell scripts
+// — so 'default' really is *their* terminal rather than a hardcoded Terminal.app.
+async function openSshInTerminal(name: string): Promise<{ ok: boolean; error?: string }> {
+  const host = `${name}.sbx`
+  const cmd = `ssh ${host}`
+  const pref = terminalPref
+  const cli = TERMINAL_CLI[pref]
+  if (cli) {
+    const spec = cli(cmd)
+    const spawned = await new Promise<boolean>((resolve) => {
+      try {
+        const p = spawn(spec.bin, spec.args, { env: guiEnv(), detached: true, stdio: 'ignore' })
+        p.on('error', () => resolve(false))
+        p.unref()
+        // No error by the next tick means it launched; ENOENT arrives immediately.
+        setTimeout(() => resolve(true), 150)
+      } catch { resolve(false) }
+    })
+    if (spawned) return { ok: true }
+    // Binary isn't installed — fall through to the script route, which only needs
+    // the .app to exist.
+  }
+  try {
+    const fs = require('fs')
+    // Sandbox names are limited to letters, digits, . + and -, but this string
+    // becomes a filename and a shell word, so keep it to that set regardless.
+    const safe = name.replace(/[^A-Za-z0-9._+-]/g, '_')
+    const file = join(require('os').tmpdir(), `den-ssh-${safe}.command`)
+    // `exec` so closing the ssh session closes the window's shell too, and
+    // 0700 because this is an executable dropped in a shared temp directory.
+    fs.writeFileSync(file, `#!/bin/sh\nexec ${cmd}\n`, { mode: 0o700 })
+    fs.chmodSync(file, 0o700)
+    if (pref === 'default') await shell.openPath(file)
+    else {
+      await new Promise<void>((resolve, reject) => {
+        const p = spawn('open', ['-a', pref, file], { env: guiEnv() })
+        p.on('error', reject)
+        p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`open -a ${pref} exited ${code}`))))
+      })
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
 // Is this editor already running? Decides whether the TMPDIR above can actually
 // take effect: `code --remote` on a live instance is just IPC to that process, so
 // the environment it was originally launched with is the one that counts.
@@ -2155,6 +2219,21 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       },
       { label: 'Logs', accelerator: current ? 'Cmd+L' : undefined, click: () => act(s.name, 'logs') },
       { type: 'separator' },
+      {
+        label: 'Connect in Terminal',
+        // Labelled generically rather than naming the app: the choice lives in
+        // Settings, and main would otherwise need its own copy of that list.
+        click: async () => {
+          const r = await openSshInTerminal(s.name)
+          if (!r.ok) {
+            void dialog.showMessageBox({
+              type: 'error',
+              message: `Could not open a terminal for ${s.name}`,
+              detail: r.error || 'The terminal app could not be launched.'
+            })
+          }
+        }
+      },
       { label: 'Copy SSH Command', click: () => clipboard.writeText(`ssh ${s.name}.sbx`) }
     ]
   }
@@ -4131,6 +4210,14 @@ function setupIPC(): void {
   ipcMain.handle('minipit:term-mode', (_, mode: 'light' | 'dark') => {
     if (mode === 'light' || mode === 'dark') termMode = mode
   })
+
+  // Preferred terminal app, mirrored from the renderer so the Sandboxes menu's
+  // "Connect in Terminal" honours it (menus are built in main).
+  ipcMain.handle('minipit:terminal-app', (_, id: string) => {
+    if (typeof id === 'string' && id) terminalPref = id
+  })
+
+  ipcMain.handle('minipit:open-ssh-terminal', (_, name: string) => openSshInTerminal(name))
 
   // Which sandbox the window has open. Rebuilds the Sandboxes menu so the ✓ and
   // the accelerators follow it (the signature includes this name, so the rebuild

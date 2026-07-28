@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { THEMES, type Theme } from '../lib/themes'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { REMOTE_EDITORS } from '../lib/remoteEditors'
+import { TERMINALS } from '../lib/terminals'
 import { accordionKey } from '../lib/settingsIndex'
 import { SecretsPanel } from './SecretsPage'
 import { SkillsPanel } from './SkillsPanel'
@@ -45,7 +46,7 @@ export function SettingsPage() {
     themePref, setThemePref, accent, setAccent,
     termTheme, setTermTheme, display, setDisplay,
     fileOpenMode, setFileOpenMode, density, setDensity, densityCustom, setDensityCustom,
-    remoteEditor, setRemoteEditor
+    remoteEditor, setRemoteEditor, terminalApp, setTerminalApp
   } = useStore()
   const [tab, setTab] = useState<'general' | 'runtime' | 'secrets' | 'skills'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
@@ -323,6 +324,23 @@ export function SettingsPage() {
               value={remoteEditor}
               onChange={setRemoteEditor}
               options={REMOTE_EDITORS.map((ed): FieldOption => ({ value: ed.id, label: ed.label }))}
+            />
+          </div>
+
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Terminal to connect with</div>
+              <div className="ss-sub">
+                Which terminal “Connect in Terminal” opens the <code>ssh</code> session in.{' '}
+                <strong>System default</strong> uses whatever your Mac already opens shell scripts with, rather than
+                den picking for you.
+              </div>
+            </div>
+            <FieldSelect
+              ariaLabel="Terminal to connect with"
+              value={terminalApp}
+              onChange={setTerminalApp}
+              options={TERMINALS.map((t): FieldOption => ({ value: t.id, label: t.label }))}
             />
           </div>
         </AccordionSection>

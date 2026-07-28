@@ -420,6 +420,8 @@ declare global {
       onDiagnoseOutput(cb: (chunk: string) => void): () => void
       onDaemonOutput(cb: (chunk: string) => void): () => void
       skillsImport(opts?: { dryRun?: boolean }): Promise<SkillsImport>
+      setTerminalApp(id: string): Promise<void>
+      openSshTerminal(name: string): Promise<{ ok: boolean; error?: string }>
       sshStatus(): Promise<SshStatus>
       sshSetup(): Promise<{ ok: boolean; output?: string; error?: string }>
       openRemoteEditor(name: string, workspace: string, editor?: string): Promise<{ ok: boolean; viaUri?: boolean; warmStart?: boolean; error?: string }>

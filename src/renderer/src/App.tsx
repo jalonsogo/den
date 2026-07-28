@@ -38,6 +38,11 @@ export function App() {
   // Mirror which sandbox is open so the Sandboxes menu can mark it and put the
   // keyboard accelerators on that sandbox's own items — a menu item saying
   // "Stop Sandbox" can't tell you which one it means.
+  // Same reason as the theme mirror: the Sandboxes menu is built in main, so it
+  // needs to know which terminal "Connect in Terminal" should use.
+  const terminalAppId = useStore((s) => s.terminalApp)
+  useEffect(() => { window.minipit?.setTerminalApp?.(terminalAppId) }, [terminalAppId])
+
   const activeSandboxId = useStore((s) => s.activeSandboxId)
   const activeSandboxName = useStore(
     (s) => s.sandboxes.find((x) => x.id === s.activeSandboxId)?.name ?? null

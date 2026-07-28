@@ -238,6 +238,45 @@ export function ContextMenu() {
     }
   }
 
+  // Attach the chosen editor over SSH, and SAY SO when it doesn't work. The
+  // result used to be discarded (`void …openRemoteEditor(...)`), so every failure
+  // mode — editor not installed, SSH not set up, or a dev main process that
+  // predates the handler — looked identical to a menu item that does nothing.
+  const connectEditor = async () => {
+    const r = await Promise.resolve()
+      .then(() => window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id))
+      .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+    if (r?.ok) return
+    const err = r?.error?.trim()
+    alert(
+      !err
+        ? `Could not connect ${editor.label} — no response from the runtime bridge.`
+        // An unregistered channel means this build's main process predates the
+        // handler; reloading the window won't help, only a restart. Same hint the
+        // SSH setup button gives.
+        : /no handler registered/i.test(err)
+          ? `${err} — restart den to load the updated main process.`
+          : err
+    )
+  }
+
+  // Open the ssh session in the user's terminal. Reports failures for the same
+  // reason connectEditor does — silence is indistinguishable from a dead menu item.
+  const connectTerminal = async () => {
+    const r = await Promise.resolve()
+      .then(() => window.minipit?.openSshTerminal(sandbox.name))
+      .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+    if (r?.ok) return
+    const err = r?.error?.trim()
+    alert(
+      !err
+        ? 'Could not open a terminal — no response from the runtime bridge.'
+        : /no handler registered/i.test(err)
+          ? `${err} — restart den to load the updated main process.`
+          : err
+    )
+  }
+
   // Clone-mode "feature" integrate flow lives in a shared helper (also used by
   // the sandbox header). Close the menu first, then run it.
   const bringToHost = (deleteAfter: boolean) => {
@@ -267,10 +306,22 @@ export function ContextMenu() {
       {/* Remote access over the *.sbx SSH host (sbx v0.37+). The editor opens the
           workspace at the same absolute path it has on the host — that's where
           the sandbox mounts it. One entry, for the editor picked in Settings ▸
-          Runtime, rather than a row per IDE. Not gated on SSH being set up yet:
-          the ssh command is exactly what you'd paste to try it. */}
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id) }}>
-        Open in {editor.label}
+          General ▸ Files & editors, rather than a row per IDE. Not gated on SSH
+          being set up yet: the ssh command is exactly what you'd paste to try it.
+
+          "Connect with", not "Open in": this attaches the editor to the sandbox
+          over SSH, so you're editing files inside the container. "Open in …"
+          would read as a sibling of "Open in Finder" above the separator, which
+          opens the host folder locally — a different thing entirely. It also
+          groups with "Copy SSH Command" below, the other way in. */}
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void connectEditor() }}>
+        Connect with {editor.label}
+      </div>
+      {/* Runs the ssh command for you in the terminal chosen in Settings, rather
+          than leaving you to paste it. Above Copy SSH Command, which is the
+          manual fallback for the same thing. */}
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void connectTerminal() }}>
+        Connect in Terminal
       </div>
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(`ssh ${sandbox.name}.sbx`).catch(() => {}) }}>
         Copy SSH Command

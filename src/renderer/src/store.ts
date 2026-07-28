@@ -102,6 +102,9 @@ interface AppState {
   // choice rather than an entry per IDE — the menu shouldn't list editors you
   // don't use.
   remoteEditor: string
+  // Which terminal app "Connect in Terminal" opens the ssh session in. 'default'
+  // means whatever the OS has registered for shell scripts, rather than a guess.
+  terminalApp: string
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
   // Per-sandbox custom colour (by name); absent → the default neutral avatar.
@@ -164,6 +167,7 @@ interface AppState {
   setAccent:          (id: string) => void
   setTermTheme:       (id: string) => void
   setRemoteEditor:    (id: string) => void
+  setTerminalApp:     (id: string) => void
   setSandboxIcon:     (name: string, iconKey: string | null) => void
   setSandboxColor:    (name: string, hex: string | null) => void
   setCustomizeSandbox:(name: string | null) => void
@@ -240,6 +244,7 @@ export const useStore = create<AppState>((set) => ({
   accent: localStorage.getItem('minipit:accent') ?? DEFAULT_THEME,
   termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
   remoteEditor: localStorage.getItem('minipit:remoteEditor') ?? 'code',
+  terminalApp: localStorage.getItem('minipit:terminalApp') ?? 'default',
   sandboxIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
@@ -314,6 +319,12 @@ export const useStore = create<AppState>((set) => ({
     set(() => {
       localStorage.setItem('minipit:remoteEditor', id)
       return { remoteEditor: id }
+    }),
+
+  setTerminalApp: (id) =>
+    set(() => {
+      localStorage.setItem('minipit:terminalApp', id)
+      return { terminalApp: id }
     }),
 
   // Merge this origin's localStorage cache into the durable store (store wins),

@@ -104,6 +104,8 @@ const api = {
     return () => ipcRenderer.removeListener('minipit:daemon-output', handler)
   },
   skillsImport:  (opts?: { dryRun?: boolean }) => ipcRenderer.invoke('minipit:skills-import', opts),
+  setTerminalApp: (id: string)          => ipcRenderer.invoke('minipit:terminal-app', id),
+  openSshTerminal: (name: string)       => ipcRenderer.invoke('minipit:open-ssh-terminal', name),
   sshStatus:     ()                     => ipcRenderer.invoke('minipit:ssh-status'),
   sshSetup:      ()                     => ipcRenderer.invoke('minipit:ssh-setup'),
   openRemoteEditor: (name: string, workspace: string, editor?: string) =>

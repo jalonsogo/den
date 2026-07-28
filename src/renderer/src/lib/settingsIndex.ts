@@ -27,6 +27,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: 'set:density', label: 'Density', tab: 'general', acc: 'settings-appearance', keywords: 'compact comfortable zoom scale size' },
   { id: 'set:term-theme', label: 'Terminal theme', tab: 'general', acc: 'settings-appearance', keywords: 'xterm palette colours dracula solarized github' },
   { id: 'set:editor', label: 'Open sandbox in (editor)', tab: 'general', acc: 'settings-files', keywords: 'vscode vs code cursor windsurf vscodium ide remote ssh connect' },
+  { id: 'set:terminal', label: 'Terminal to connect with', tab: 'general', acc: 'settings-files', keywords: 'terminal ssh iterm ghostty warp wezterm kitty alacritty shell connect' },
   { id: 'set:file-open', label: 'File open behaviour', tab: 'general', acc: 'settings-files', keywords: 'files editor external internal preview' },
   { id: 'set:sidebar', label: 'Sidebar display', tab: 'general', acc: 'settings-sidebar', keywords: 'list layout show hide' },
   { id: 'set:sounds', label: 'Sounds', tab: 'general', acc: 'settings-notifications', keywords: 'notification alert chime finish ask audio mute' },
