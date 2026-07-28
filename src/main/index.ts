@@ -9,7 +9,8 @@ import {
   nativeTheme,
   dialog,
   session,
-  powerSaveBlocker
+  powerSaveBlocker,
+  clipboard
 } from 'electron'
 import { join } from 'path'
 import http from 'http'
@@ -1173,6 +1174,37 @@ function sshConfigPath(): string {
   return join(require('os').homedir(), '.ssh', 'config')
 }
 
+// Run `sbx setup ssh`. Shared by the IPC handler and the Runtime menu; writes to
+// ~/.ssh/config, so both call sites are explicit user actions.
+async function sshSetup(): Promise<{ ok: boolean; output?: string; error?: string }> {
+  try {
+    const output = await sbx(['setup', 'ssh'], { timeout: 30000 })
+    return { ok: true, output }
+  } catch (err) {
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
+// State of that managed block. Only ever returns counts and flags — an ssh
+// config routinely holds unrelated hosts and credentials, and none of that
+// belongs in the renderer (or a menu label). Shared by the ssh-status IPC handler
+// and the Runtime menu.
+function readSshStatus(): { configured: boolean; duplicates: number; path: string } {
+  let cfg = ''
+  try { cfg = require('fs').readFileSync(sshConfigPath(), 'utf8') } catch { /* no config yet */ }
+  const blocks = (cfg.match(/^[ \t]*Host[ \t]+\S*\*\.sbx\b/gim) ?? []).length
+  return {
+    configured: blocks > 0,
+    // >1 means an earlier block was left behind (a hand-edited or partially-marked
+    // block defeats sbx's idempotent rewrite). ssh takes the FIRST value it sees
+    // for each keyword, so a stale block silently wins over the current one and
+    // can drop settings it relies on — e.g. `IdentityAgent none`, without which an
+    // external SSH agent intercepts the connection.
+    duplicates: Math.max(0, blocks - 1),
+    path: sshConfigPath()
+  }
+}
+
 // Read `sbx skills import` output (both --dry-run and the real run).
 //
 // Observed v0.37.0 dry-run lines:
@@ -1883,14 +1915,28 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
 // synchronously (and often); refreshed in the background on each rebuild so a
 // runtime update shows up without restarting den.
 let cachedSbxVersion = ''
+// Both menus retry the read while the version is still unknown (a down runtime
+// never fills it), so keep one probe in flight rather than stacking an exec per
+// menu rebuild.
+let sbxVersionProbe = false
 function refreshSbxVersion(): void {
+  if (sbxVersionProbe) return
+  sbxVersionProbe = true
   sbx(['version'], { timeout: 8000 })
     .then((raw) => {
       // "sbx version: v0.37.0 <sha>" — keep the version, drop the commit.
       const v = raw.match(/v?\d+\.\d+\.\d+\S*/)?.[0] ?? ''
-      if (v && v !== cachedSbxVersion) { cachedSbxVersion = v; updateTrayMenu(lastTraySandboxes) }
+      if (v && v !== cachedSbxVersion) {
+        cachedSbxVersion = v
+        updateTrayMenu(lastTraySandboxes)
+        // Both menus show the version. Clear the signature first — it's keyed on
+        // sandbox/template/kit data, so a version-only change wouldn't rebuild.
+        lastMenuSig = ''
+        void setAppMenu()
+      }
     })
     .catch(() => { /* runtime missing or daemon down — the item just says "unknown" */ })
+    .finally(() => { sbxVersionProbe = false })
 }
 
 function navigateFromTray(channel: string, payload: string): void {
@@ -2098,6 +2144,72 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       ]
     },
     {
+      // Runtime: the sbx layer under den. Kept out of Sandboxes (which lists
+      // individual sandboxes) because everything here is host-wide.
+      label: 'Runtime',
+      submenu: [
+        { label: cachedSbxVersion ? `sbx ${cachedSbxVersion}` : 'sbx version unknown', enabled: false },
+        { type: 'separator' },
+        // SSH access, read live at menu-build time so it reflects the current
+        // ~/.ssh/config rather than whatever it said at startup.
+        ...((): Electron.MenuItemConstructorOptions[] => {
+          const ssh = readSshStatus()
+          return [
+            {
+              label: ssh.configured
+                ? 'SSH access: configured — ssh <sandbox>.sbx'
+                : 'SSH access: not set up',
+              enabled: false
+            },
+            // Surfaced here too, not just in Settings: a stale duplicate block
+            // silently breaks connections, and the symptom (an SSH agent
+            // intercepting) gives no hint where to look.
+            ...(ssh.duplicates > 0
+              ? [{
+                  label: `⚠ ${ssh.duplicates + 1} "Host *.sbx" blocks — the stale one wins`,
+                  enabled: false
+                } as Electron.MenuItemConstructorOptions]
+              : []),
+            {
+              label: ssh.configured ? 'Re-run SSH Setup' : 'Set Up SSH Access…',
+              click: async () => {
+                const r = await sshSetup()
+                // Rebuild so the labels above reflect the new state, and force it
+                // past the signature guard (SSH state isn't part of that key).
+                lastMenuSig = ''
+                void setAppMenu()
+                if (!r.ok) {
+                  dialog.showMessageBox({
+                    type: 'error',
+                    message: 'Could not set up SSH access',
+                    detail: r.error || 'sbx setup ssh failed.'
+                  })
+                }
+              }
+            },
+            {
+              label: 'Copy SSH Config Path',
+              click: () => clipboard.writeText(ssh.path)
+            }
+          ]
+        })(),
+        { type: 'separator' },
+        {
+          label: 'Restart Daemon',
+          // Show Settings ▸ Runtime first: the restart streams into the
+          // Diagnostics box there, and a silent background restart looks like
+          // nothing happened.
+          click: () => {
+            navigateFromTray('minipit:navigate', 'settings')
+            void restartDaemon()
+          }
+        },
+        // No accelerator: View ▸ Logs already owns Cmd+L, and a duplicate binding
+        // in the same menu bar is ambiguous.
+        { label: 'Log Viewer', click: () => go('minipit:navigate', 'logs') }
+      ]
+    },
+    {
       label: 'Window',
       submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
     },
@@ -2110,6 +2222,9 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  // Populate the Runtime menu's version line on first build, even if the tray
+  // hasn't been created yet (menu-bar-only mode builds these independently).
+  if (!cachedSbxVersion) refreshSbxVersion()
 }
 
 function setupIPC(): void {
@@ -3825,33 +3940,10 @@ function setupIPC(): void {
   // through the daemon's Unix socket plus an active Docker login, and starts the
   // daemon/sandbox on demand). That's also what makes remote-development clients
   // like VS Code and Cursor work against a sandbox.
-  ipcMain.handle('minipit:ssh-status', () => {
-    // Only ever report counts and flags — never the file's contents. An ssh
-    // config routinely holds unrelated hosts and credentials, and none of it
-    // belongs in the renderer.
-    let cfg = ''
-    try { cfg = require('fs').readFileSync(sshConfigPath(), 'utf8') } catch { /* no config yet */ }
-    const blocks = (cfg.match(/^[ \t]*Host[ \t]+\S*\*\.sbx\b/gim) ?? []).length
-    return {
-      configured: blocks > 0,
-      // >1 means an earlier block was left behind (a hand-edited or
-      // partially-marked block defeats the idempotent rewrite). ssh takes the
-      // FIRST value it sees for each keyword, so a stale block silently wins over
-      // the current one and can drop settings the new block relies on.
-      duplicates: Math.max(0, blocks - 1),
-      path: sshConfigPath()
-    }
-  })
+  ipcMain.handle('minipit:ssh-status', () => readSshStatus())
 
   // Writes to ~/.ssh/config, so it only ever runs from an explicit user action.
-  ipcMain.handle('minipit:ssh-setup', async () => {
-    try {
-      const output = await sbx(['setup', 'ssh'], { timeout: 30000 })
-      return { ok: true, output }
-    } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
-    }
-  })
+  ipcMain.handle('minipit:ssh-setup', () => sshSetup())
 
   // Open a sandbox in a remote-development editor over the *.sbx SSH host.
   //
@@ -3982,9 +4074,13 @@ app.whenReady().then(() => {
   })
 
   setAppMenu().catch(() => {})
+  // Register IPC before the window exists, so there is no window in which the
+  // renderer can invoke a channel that isn't handled yet. setupIPC is synchronous
+  // and finishes long before renderer JS runs, but ordering it after createWindow
+  // left that guarantee resting on load timing rather than on the code.
+  setupIPC()
   createWindow()
   createTray()
-  setupIPC()
   startPolling()
 
   app.on('activate', () => {
