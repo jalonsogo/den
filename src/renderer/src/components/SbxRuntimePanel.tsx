@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 
 import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { useStore } from '../store'
 import { AccordionSection } from './AccordionSection'
+import { REMOTE_EDITORS } from '../lib/remoteEditors'
 import type { SbxRelease } from '../types'
 
 type DiagMode = 'text' | 'json' | 'github-issue' | 'upload'
@@ -247,6 +248,8 @@ export function SbxRuntimePanel({
   const [runtimeNoProxy, setRuntimeNoProxy] = useState('')
   const [virtiofsCache, setVirtiofsCache] = useState(true)
   const [runtimeEnvDirty, setRuntimeEnvDirty] = useState(false)
+  const remoteEditorId = useStore((s) => s.remoteEditor)
+  const setRemoteEditor = useStore((s) => s.setRemoteEditor)
   // SSH access (`sbx setup ssh`) — the managed *.sbx block in ~/.ssh/config.
   const [ssh, setSsh] = useState<import('../types').SshStatus | null>(null)
   const [sshBusy, setSshBusy] = useState(false)
@@ -441,11 +444,27 @@ export function SbxRuntimePanel({
     if (sshBusy) return
     setSshBusy(true)
     setSshMsg(null)
-    const r = await window.minipit?.sshSetup().catch(() => null)
+    // Report what actually failed. Swallowing the rejection here (`.catch(() =>
+    // null)`) and falling back to "could not write the SSH config" blamed the
+    // file for what is usually an IPC problem — most often a stale main process
+    // in dev, where the renderer hot-reloads but the handler doesn't exist yet.
+    const r = await Promise.resolve()
+      .then(() => window.minipit?.sshSetup())
+      .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
     setSshBusy(false)
-    setSshMsg(r?.ok
-      ? { ok: true, text: 'SSH config written — sandboxes are reachable at <name>.sbx.' }
-      : { ok: false, text: r?.error || 'Could not write the SSH config.' })
+    if (r?.ok) {
+      setSshMsg({ ok: true, text: 'SSH config written — sandboxes are reachable at <name>.sbx.' })
+    } else {
+      const err = r?.error?.trim()
+      setSshMsg({
+        ok: false,
+        text: !err ? 'Could not run sbx setup ssh — no response from the runtime bridge.'
+          // An unregistered channel means this build's main process predates the
+          // handler; a reload won't help, only a restart.
+          : /no handler registered/i.test(err) ? `${err} — restart den to load the updated main process.`
+            : err
+      })
+    }
     void loadSsh()
   }
 
@@ -725,6 +744,25 @@ export function SbxRuntimePanel({
             </div>
           </div>
         )}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Editor for “Open in…”</div>
+            <div className="ss-sub">
+              Which editor a sandbox opens in over SSH. All of these are VS Code derivatives — they share the{' '}
+              <code>--remote ssh-remote+</code> flag den drives; editors without it can't be opened this way.
+            </div>
+          </div>
+          <select
+            className="term-theme-select"
+            value={remoteEditorId}
+            onChange={(e) => setRemoteEditor(e.target.value)}
+            style={{ width: 220 }}
+          >
+            {REMOTE_EDITORS.map((ed) => (
+              <option key={ed.id} value={ed.id}>{ed.label}</option>
+            ))}
+          </select>
+        </div>
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Upstream egress proxy</div>

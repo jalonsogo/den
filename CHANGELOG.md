@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Publish ports at creation.** The New Sandbox modal takes a port list, passed as `-p` (sbx v0.37 accepts it on `create`). Later changes still go through the Network panel.
 - **`system` proxy preset.** One tap sets `DOCKER_SANDBOXES_PROXY=system`, routing sandbox egress through this Mac's own proxy settings, including a PAC auto-config URL.
 - Governance-policy denials now show the organization's configured support message, so a block says who to contact.
+- **Runtime in the menu bar.** The tray icon gains a Runtime submenu: the installed sbx version, **Restart daemon**, and a jump to the **Log viewer** — without opening den first.
+- **Editor preference** in Settings → Runtime. "Open in…" uses your chosen editor (VS Code, Cursor, Windsurf, VSCodium) instead of listing a menu entry per IDE.
+
+### Changed
+- A failed `sbx setup ssh` now reports the actual error instead of always claiming the config couldn't be written — the usual cause is an IPC failure, not the file. An unregistered handler additionally says to restart den.
 
 ### Fixed
 - **Policy log entries never appeared.** den looked for `entries`/`log`/`events` in `sbx policy log --json`, but sbx emits `blocked_hosts`/`allowed_hosts` and names the sandbox in `vm_name`, so every fetch parsed to zero rows. It also passed a `--sandbox` flag the command doesn't accept, which failed the call outright — two faults that masked each other. Only blocks scraped from terminal output were reaching the UI.

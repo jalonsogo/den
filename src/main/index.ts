@@ -1858,6 +1858,41 @@ function showMainWindow(): void {
 
 // Show the window (recreating it if it was closed) and deliver a tray-driven
 // navigation event once the renderer has finished loading.
+// Stop then start sandboxd. Shared by the Runtime IPC handler and the menu-bar
+// item, so both stream into the same Diagnostics output box.
+async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
+  const send = (chunk: string) =>
+    mainWindow?.webContents.send('minipit:daemon-output', chunk)
+  const step = async (args: string[]) => {
+    send(`$ sbx ${args.join(' ')}\r\n`)
+    const { code } = await ptyRun(args, send, 60000)
+    return code
+  }
+  try {
+    await step(['daemon', 'stop'])          // best-effort — ignore its exit code
+    const code = await step(['daemon', 'start', '-d'])
+    if (code !== 0) return { ok: false, error: `sbx daemon start exited ${code}` }
+    send('\nDaemon restarted.\n')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
+// sbx version for the menu bar. Cached because the tray menu is rebuilt
+// synchronously (and often); refreshed in the background on each rebuild so a
+// runtime update shows up without restarting den.
+let cachedSbxVersion = ''
+function refreshSbxVersion(): void {
+  sbx(['version'], { timeout: 8000 })
+    .then((raw) => {
+      // "sbx version: v0.37.0 <sha>" — keep the version, drop the commit.
+      const v = raw.match(/v?\d+\.\d+\.\d+\S*/)?.[0] ?? ''
+      if (v && v !== cachedSbxVersion) { cachedSbxVersion = v; updateTrayMenu(lastTraySandboxes) }
+    })
+    .catch(() => { /* runtime missing or daemon down — the item just says "unknown" */ })
+}
+
 function navigateFromTray(channel: string, payload: string): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
@@ -1879,9 +1914,14 @@ function createTray(): void {
   updateTrayMenu([])
 }
 
+// Last list the tray was built from, so an async refresh (e.g. the sbx version
+// landing) can rebuild without the caller having to pass it again.
+let lastTraySandboxes: Array<{ name: string; status: string; workspace: string }> = []
+
 // Build the menu-bar dropdown: quick access to running sandboxes and projects.
 function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspace: string }>): void {
   if (!tray) return
+  lastTraySandboxes = sandboxes
   const running = sandboxes.filter((s) => s.status === 'running')
 
   const projects: { workspace: string; count: number }[] = []
@@ -1902,9 +1942,32 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
     { type: 'separator' },
     { label: 'New Sandbox…', click: () => navigateFromTray('minipit:open-modal', 'new-sandbox') },
     { type: 'separator' },
+    // Runtime, without opening den first: what version is installed, a daemon
+    // restart for when sandboxes stop responding, and a jump to the log viewer.
+    {
+      label: 'Runtime',
+      submenu: [
+        { label: cachedSbxVersion ? `sbx ${cachedSbxVersion}` : 'sbx version unknown', enabled: false },
+        { type: 'separator' },
+        {
+          label: 'Restart daemon',
+          // Show the window first: the restart streams into the Diagnostics box
+          // in Settings ▸ Runtime, and a silent background restart would look
+          // like nothing happened.
+          click: () => {
+            navigateFromTray('minipit:navigate', 'settings')
+            void restartDaemon()
+          }
+        },
+        { label: 'Log viewer', click: () => navigateFromTray('minipit:navigate', 'logs') }
+      ]
+    },
+    { type: 'separator' },
     { label: 'Quit den', role: 'quit' }
   ]
   tray.setContextMenu(Menu.buildFromTemplate(items))
+  // Kick a version read on first build (and pick up runtime updates later).
+  if (!cachedSbxVersion) refreshSbxVersion()
 }
 
 // The application menu mirrors the sidebar navigation and lists live data
@@ -2520,24 +2583,7 @@ function setupIPC(): void {
   // render under the Restart daemon button, separate from the diagnostics box.
   // The first step is best-effort — if the daemon is already down, `stop` may
   // exit non-zero, which shouldn't block the restart.
-  ipcMain.handle('minipit:daemon-restart', async () => {
-    const send = (chunk: string) =>
-      mainWindow?.webContents.send('minipit:daemon-output', chunk)
-    const step = async (args: string[]) => {
-      send(`$ sbx ${args.join(' ')}\r\n`)
-      const { code } = await ptyRun(args, send, 60000)
-      return code
-    }
-    try {
-      await step(['daemon', 'stop'])          // best-effort — ignore its exit code
-      const code = await step(['daemon', 'start', '-d'])
-      if (code !== 0) return { ok: false, error: `sbx daemon start exited ${code}` }
-      send('\nDaemon restarted.\n')
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
-    }
-  })
+  ipcMain.handle('minipit:daemon-restart', () => restartDaemon())
 
   // Daemon health for the Diagnostics status indicator: `sbx daemon status`
   // (new in v0.35). Derive a running/stopped flag from the output, keep the raw
@@ -3811,7 +3857,14 @@ function setupIPC(): void {
   // workspace is bind-mounted at the same absolute path inside the sandbox as on
   // the host, so the host path doubles as the remote path.
   ipcMain.handle('minipit:open-remote-editor', async (_, name: string, workspace: string, editor?: string) => {
-    const bin = editor === 'cursor' ? 'cursor' : 'code'
+    // Allowlist the binary: it ends up in spawn(), and the renderer shouldn't be
+    // able to name an arbitrary executable. Each entry also carries the URI
+    // scheme its app registers, for the no-CLI fallback below.
+    const EDITORS: Record<string, string> = {
+      code: 'vscode', cursor: 'cursor', windsurf: 'windsurf', codium: 'vscodium'
+    }
+    const bin = editor && editor in EDITORS ? editor : 'code'
+    const scheme = EDITORS[bin]
     const host = `${name}.sbx`
     try {
       await new Promise<void>((resolve, reject) => {
@@ -3829,7 +3882,7 @@ function setupIPC(): void {
       // Install 'code' command"), so hand the URI to the OS instead — that only
       // needs the app itself.
       try {
-        await shell.openExternal(`vscode://vscode-remote/ssh-remote+${host}${workspace}`)
+        await shell.openExternal(`${scheme}://vscode-remote/ssh-remote+${host}${workspace}`)
         return { ok: true, viaUri: true }
       } catch (err) {
         return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }

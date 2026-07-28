@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Github } from 'lucide-react'
 import { useStore } from '../store'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
+import { remoteEditor } from '../lib/remoteEditors'
 import { bringSandboxToHost } from '../lib/featureChanges'
 
 // A hover-triggered flyout item for a context menu. Defaults to opening
@@ -43,6 +44,7 @@ function SubMenu({ label, children }: { label: string; children: ReactNode }) {
 
 export function ContextMenu() {
   const { contextMenu, setContextMenu, sandboxes, updateSandbox, setDeleting, setSandboxes } = useStore()
+  const editor = remoteEditor(useStore((s) => s.remoteEditor))
   const termTheme = useStore((s) => s.termTheme)
   const setTermTheme = useStore((s) => s.setTermTheme)
   const openPrompt = useStore((s) => s.openPrompt)
@@ -264,14 +266,11 @@ export function ContextMenu() {
       <div className="ctx-sep" />
       {/* Remote access over the *.sbx SSH host (sbx v0.37+). The editor opens the
           workspace at the same absolute path it has on the host — that's where
-          the sandbox mounts it. Both entries are useful before `sbx setup ssh`
-          has ever run (the ssh command is what you'd paste to try it), so they
-          aren't gated on status; Settings ▸ Runtime is where it gets enabled. */}
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace) }}>
-        Open in VS Code
-      </div>
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, 'cursor') }}>
-        Open in Cursor
+          the sandbox mounts it. One entry, for the editor picked in Settings ▸
+          Runtime, rather than a row per IDE. Not gated on SSH being set up yet:
+          the ssh command is exactly what you'd paste to try it. */}
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id) }}>
+        Open in {editor.label}
       </div>
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(`ssh ${sandbox.name}.sbx`).catch(() => {}) }}>
         Copy SSH Command
