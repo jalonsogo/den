@@ -45,6 +45,24 @@ const uptimeMap = new Map<string, number>()
 // error with "No conversation found to continue"). Consumed on first ensure.
 const freshSandboxes = new Set<string>()
 
+// Light/dark polarity of the *terminal* theme, mirrored from the renderer. This
+// is what Claude Code's own theme has to match: the agent paints into xterm, so
+// legibility is decided by the terminal background, not the app chrome (the two
+// can disagree — a dark term theme picked in a light app). Defaults to dark until
+// the renderer reports; updated via the term-mode IPC.
+let termMode: 'light' | 'dark' = 'dark'
+// Recent raw agent output per sandbox. Replayed to the renderer when a terminal
+// reattaches (sandbox switch / tab return) so the freshly-mounted, empty xterm
+// reconstructs the current screen immediately — instead of waiting (sometimes
+// >10s) for a busy agent to redraw in response to a resize nudge. A full-screen
+// TUI like Claude Code redraws the whole frame on each update, so replaying the
+// tail leaves xterm in the correct final state; the cap keeps memory bounded.
+const agentOutBuf = new Map<string, string>()
+const AGENT_BUF_MAX = 1_000_000
+// Claude Code stores its theme as a numeric themeId in ~/.claude/settings.json:
+// 0 Dark · 1 Light · 2 Dark(colorblind) · 3 Light(colorblind) · 4 Dark ANSI · 5 Light ANSI.
+const claudeThemeId = (): number => (termMode === 'light' ? 1 : 0)
+
 function getSbxPath(): string {
   const stored = store.get('sbxPath') as string | undefined
   if (stored) return stored
@@ -1255,8 +1273,17 @@ function hookLog(...args: unknown[]): void {
 const EXEC_RETRIES = 5
 const EXEC_RETRY_MS = 1000
 
-function injectClaudeHooks(name: string, attempt = 0): void {
-  const cfg = JSON.stringify(DEN_HOOKS)
+// Resolves once the config is in place (or once the retries are exhausted), so
+// callers can install it BEFORE launching the agent — claude reads
+// ~/.claude/settings.json at startup, and a write that lands afterwards doesn't
+// apply until the next session. Never rejects: a sandbox we can't write to should
+// still get an agent.
+function injectClaudeHooks(name: string, attempt = 0): Promise<void> {
+  // Merge Claude's theme (themeId) alongside the hooks so its palette matches the
+  // terminal it's painting into (light terminal → light Claude theme). Without
+  // this the agent draws e.g. near-white text and near-black diff blocks onto a
+  // white background, and most of its output is invisible.
+  const cfg = JSON.stringify({ ...DEN_HOOKS, themeId: claudeThemeId() })
   // Write den_hooks to a real file and merge two plain files with jq. Process
   // substitution (`<(…)`) is bash-only and the sandbox's /bin/sh is dash, so
   // `sh -c` would fail with "Syntax error: ( unexpected" and never install the hooks.
@@ -1268,16 +1295,19 @@ function injectClaudeHooks(name: string, attempt = 0): void {
     '  jq -s ".[0] * .[1]" ~/.claude/settings.json ~/.den/hooks.json > ~/.claude/settings.json.tmp ' +
     '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
     'else cp ~/.den/hooks.json ~/.claude/settings.json && echo wrote; fi'
-  execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
-    if (err) {
-      if (attempt < EXEC_RETRIES) {
-        hookLog(`inject retry ${attempt + 1}/${EXEC_RETRIES} for ${name}: ${err.message}`)
-        setTimeout(() => injectClaudeHooks(name, attempt + 1), EXEC_RETRY_MS)
-        return
+  return new Promise((resolve) => {
+    execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
+      if (err) {
+        if (attempt < EXEC_RETRIES) {
+          hookLog(`inject retry ${attempt + 1}/${EXEC_RETRIES} for ${name}: ${err.message}`)
+          setTimeout(() => { void injectClaudeHooks(name, attempt + 1).then(resolve) }, EXEC_RETRY_MS)
+          return
+        }
+        hookLog(`inject FAILED for ${name}:`, err.message); console.error(`hook inject failed for ${name}:`, err.message)
       }
-      hookLog(`inject FAILED for ${name}:`, err.message); console.error(`hook inject failed for ${name}:`, err.message)
-    }
-    else hookLog(`injected into ${name} (${stdout.trim() || 'ok'}) → ~/.claude/settings.json`)
+      else hookLog(`injected into ${name} (${stdout.trim() || 'ok'}) → ~/.claude/settings.json`)
+      resolve()
+    })
   })
 }
 
@@ -1577,15 +1607,43 @@ async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
   return entries
 }
 
+// Longest we hold an agent launch waiting for its Claude config to land. The
+// write keeps retrying in the background past this, so the worst case is the old
+// behaviour (config applies to the next session) rather than a stalled launch.
+const CLAUDE_CONFIG_MAX_WAIT = 2500
+
+// Bumped every time a launch is superseded — by another launch, or by a stop/
+// delete. A launch that loses its generation while awaiting the config write bails
+// instead of leaving an orphan session behind (or a second one racing it).
+const spawnGen = new Map<string, number>()
+function cancelPendingSpawn(name: string): void {
+  spawnGen.set(name, (spawnGen.get(name) ?? 0) + 1)
+}
+
 // Attach to a sandbox's agent via `sbx run NAME` in a PTY. Agents like Claude
 // Code are full-screen TUIs that need a real TTY, and their raw ANSI output is
 // streamed straight to the renderer's xterm (no line reformatting).
-function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { continueSession?: boolean }) {
+async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { continueSession?: boolean }) {
   const existing = sbxProcesses.get(name)
   if (existing) {
     existing.kill()
     sbxProcesses.delete(name)
   }
+
+  // Install the hooks + Claude's theme BEFORE claude starts, since it reads
+  // ~/.claude/settings.json once at startup. Doing this after the spawn (as it
+  // used to) meant the theme only ever applied one session late: switch den to
+  // light and the running agent kept painting its dark palette into a white
+  // terminal for the rest of the session.
+  const gen = (spawnGen.get(name) ?? 0) + 1
+  spawnGen.set(name, gen)
+  await Promise.race([
+    injectClaudeHooks(name),
+    new Promise((r) => setTimeout(r, CLAUDE_CONFIG_MAX_WAIT))
+  ])
+  // Superseded while we waited: another launch took over, or the sandbox was
+  // stopped/deleted. Spawning now would strand a session nobody is attached to.
+  if (spawnGen.get(name) !== gen) return
 
   // Reconnecting to an already-running sandbox: resume the agent's prior
   // conversation rather than starting fresh. `--continue` is a claude agent
@@ -1610,8 +1668,8 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { contin
   sbxProcesses.set(name, proc)
 
   setAgentState(name, 'working')
-  // Claude Code hooks drive activity + file-change events (see startEventTail).
-  injectClaudeHooks(name)
+  // The hooks that drive activity + file-change events went in above, before the
+  // launch; this tails the event file they write to.
   startEventTail(name)
   // When we reconnect with `--continue` but there's no saved conversation to
   // resume, claude prints "No conversation found to continue" and exits 1. Watch
@@ -1623,15 +1681,20 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { contin
       noConversation = true
     }
     mainWindow?.webContents.send('minipit:agent-output', name, data)
+    // Keep a bounded tail of raw output for replay on reattach (see agentOutBuf).
+    let b = (agentOutBuf.get(name) ?? '') + data
+    if (b.length > AGENT_BUF_MAX) b = b.slice(b.length - AGENT_BUF_MAX)
+    agentOutBuf.set(name, b)
     scanOutputForBlocks(name, data)
   })
 
   proc.onExit(() => {
     sbxProcesses.delete(name)
+    agentOutBuf.delete(name)
     // The `--continue` reconnect failed because there was no prior conversation.
     // Retry once as a fresh session rather than surfacing the error and dying.
     if (noConversation) {
-      spawnSandboxProcess(name, cols, rows, { continueSession: false })
+      void spawnSandboxProcess(name, cols, rows, { continueSession: false })
       return
     }
     uptimeMap.delete(name)
@@ -1891,11 +1954,16 @@ function setupIPC(): void {
   ipcMain.handle('minipit:list-sandboxes', () => listSandboxes())
 
   ipcMain.handle('minipit:run-sandbox', async (_, name: string) => {
-    spawnSandboxProcess(name)
+    // Not awaited: the launch first waits for the Claude config write, and the
+    // caller shouldn't sit on that.
+    void spawnSandboxProcess(name)
     return null
   })
 
   ipcMain.handle('minipit:stop-sandbox', async (_, name: string) => {
+    // A launch may be mid-flight, waiting on its Claude config write — cancel it
+    // so it doesn't spawn a session into the sandbox we're about to stop.
+    cancelPendingSpawn(name)
     // Kill the attached process first
     const proc = sbxProcesses.get(name)
     if (proc) {
@@ -1910,6 +1978,7 @@ function setupIPC(): void {
   })
 
   ipcMain.handle('minipit:delete-sandbox', async (_, name: string) => {
+    cancelPendingSpawn(name)
     const proc = sbxProcesses.get(name)
     if (proc) {
       proc.kill()
@@ -3530,9 +3599,19 @@ function setupIPC(): void {
       const sb = (lastGoodSandboxes ?? []).find((s) => s.name === name)
       const continueSession =
         !isFresh && sb?.status === 'running' && (sb.agent ?? '').startsWith('claude')
-      spawnSandboxProcess(name, cols, rows, { continueSession })
+      // Not awaited (the launch waits on the Claude config write first) — a
+      // second ensure arriving in that window bumps the spawn generation, so the
+      // first one bails and exactly one session starts.
+      void spawnSandboxProcess(name, cols, rows, { continueSession })
     } else {
-      // Session exists — nudge the size so the TUI repaints cleanly at this size.
+      // Reattaching to a live session: the renderer just mounted a fresh, empty
+      // terminal. Replay the buffered output so it shows the current screen at
+      // once — a busy agent (e.g. mid-response) can otherwise ignore the resize
+      // nudge below for many seconds, leaving the terminal blank until then.
+      // The renderer subscribed before invoking this, so it receives the replay.
+      const buf = agentOutBuf.get(name)
+      if (buf) mainWindow?.webContents.send('minipit:agent-output', name, buf)
+      // Nudge the size so the TUI repaints cleanly at this size.
       try { proc.resize(Math.max(2, cols - 1), rows) } catch { /* ignore */ }
       try { proc.resize(cols, rows) } catch { /* ignore */ }
     }
@@ -3541,6 +3620,15 @@ function setupIPC(): void {
   ipcMain.handle('minipit:pty-stop', (_, name: string) => {
     const proc = ptyMap.get(name)
     if (proc) { proc.kill(); ptyMap.delete(name) }
+  })
+
+  // The renderer mirrors the terminal theme's light/dark polarity here so Claude's
+  // themeId can be set to match. Every launch writes the config before starting
+  // claude (see spawnSandboxProcess), so this is picked up by the next agent
+  // session; an agent already running keeps the palette it started with until it
+  // restarts — the terminal's minimumContrastRatio keeps that legible meanwhile.
+  ipcMain.handle('minipit:term-mode', (_, mode: 'light' | 'dark') => {
+    if (mode === 'light' || mode === 'dark') termMode = mode
   })
 }
 

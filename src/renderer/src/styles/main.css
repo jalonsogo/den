@@ -26,6 +26,10 @@
   --sb-active:   rgba(0,0,0,0.07);
   --sb-active-fg:#09090b;
   --spinner-track: rgba(0,0,0,0.15);
+  /* Width of the terminal's right-hand icon rail. A layout constant, not a
+     colour, so it lives outside the light/dark override below — the sandbox
+     header's trailing icon button uses it to sit on the rail's icon axis. */
+  --rail-w:      46px;
 }
 
 [data-theme="dark"] {
@@ -987,6 +991,22 @@ html, body, #root {
   padding: 0 16px;
   gap: 9px;
 }
+
+/* The header's trailing "More actions" button sits directly above the terminal's
+   icon rail, so it's centred on that rail's icon axis instead of on the header's
+   own 16px inset — otherwise the kebab reads as 10px out of line with every icon
+   below it. Same 34px box and radius as .term-rail-btn; its centre would sit
+   16px (inset) + 17px (half-width) = 33px from the right edge, and the rail's
+   icon axis is half a rail in, so pull it right by the difference. Holds in the
+   default layout; with a side dock open the rail moves inward and this stays by
+   the window edge, which is where a header action belongs. */
+.btn.d-menu-btn {
+  width: 34px; height: 34px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  margin-right: calc(var(--rail-w) / 2 - 33px);
+}
+
 /* Segmented action button (e.g. Stop | Restart) — two joined segments. */
 /* Clone-mode "Changes" button + dropdown in the sandbox header. */
 .d-feature-btn {
@@ -1196,15 +1216,16 @@ html, body, #root {
   display: flex; flex-direction: column; overflow: hidden;
 }
 
-/* Vertical activity rail docked to the right edge: reload, the docked panels
-   (Info / Network / Files / Changes), and the terminal content switch
-   (Agent / Shell). Icon-only, grouped by thin separators. */
+/* Vertical activity rail docked to the right edge: the terminal content switch
+   (Agent / Shell), then the docked panels (Info / Network / Files / Changes).
+   Icon-only, grouped by a thin separator. --rail-w is shared with the sandbox
+   header's trailing icon button, which aligns to this rail's icon axis. */
 .term-rail {
-  width: 46px; flex-shrink: 0;
+  width: var(--rail-w); flex-shrink: 0;
   background: var(--tbg, #111);
   /* Divider as an inset shadow, not a border: a left border would shrink the
      content box (border-box), so the flex-centered icons would sit off from the
-     rail's true visual centre. box-shadow keeps the full 46px for centering. */
+     rail's true visual centre. box-shadow keeps the full width for centering. */
   box-shadow: inset 1px 0 0 var(--tline);
   display: flex; flex-direction: column; align-items: center;
   padding: 8px 0; gap: 3px;
@@ -1254,6 +1275,42 @@ html, body, #root {
   color: var(--primary);
   background: color-mix(in srgb, var(--primary) 16%, var(--tbg, #111));
 }
+
+/* xterm switches to the arrow cursor while a TUI has mouse tracking on. den
+   hands plain left-drags back to the emulator (see TerminalPanel), so the text
+   cursor is the honest one. */
+.term .xterm.enable-mouse-events {
+  cursor: text;
+}
+
+/* Terminal right-click Copy/Paste menu. Themed off the terminal fg/bg vars so
+   it reads on any term theme (light or dark). */
+.term-ctx {
+  z-index: 10;
+  min-width: 132px;
+  padding: 4px;
+  display: flex; flex-direction: column;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tfg, #fff) 8%, var(--tbg, #111));
+  border: 1px solid color-mix(in srgb, var(--tfg, #fff) 14%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.term-ctx-item {
+  appearance: none;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--tfg, #fff) 85%, transparent);
+  cursor: pointer;
+}
+.term-ctx-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
+}
+.term-ctx-item:disabled { opacity: 0.4; cursor: default; }
 
 .term-theme-select {
   appearance: none;

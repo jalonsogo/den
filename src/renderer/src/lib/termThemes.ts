@@ -7,20 +7,43 @@ export interface TermTheme {
   theme: ITheme
 }
 
+// Every palette sets its own selection colors. xterm's default selection is
+// rgba(255,255,255,0.3), which blended over a light background is white — the
+// selection was invisible in every light theme. The `inactive` variant is the
+// dimmer highlight shown while the terminal doesn't have focus. Both are opaque
+// and chosen to keep the theme's own foreground readable on top of them (xterm
+// draws selected text above the selection block and keeps its colors).
+//
 // The "den (default)" theme is ADAPTIVE: it follows the app's light/dark mode
 // unless the user explicitly picks another theme. These are its two palettes.
 const DEN_DARK: ITheme = {
   background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4',
-  black: '#1e1e1e', red: '#f44747', green: '#6a9955', yellow: '#d7ba7d',
+  // Deep enough that the colored palette still clears the terminal's 3:1 contrast
+  // floor when drawn on top of it (worst case 3.12:1): a mid-blue selection put
+  // every ANSI color under the floor, so selecting text visibly restyled it. Only
+  // the dim ANSI-0 grey below still gets lifted while selected — unavoidable for a
+  // grey that sits at the selection's own luminance.
+  selectionBackground: '#233c5c', selectionInactiveBackground: '#1b2d44',
+  // `black` (ANSI 0) is a visible dim grey, not near-background: at #1e1e1e it
+  // was all but invisible on the #0a0a0a background, so dim text/borders drawn
+  // in color 0 vanished. #5f5f5f is the dimmest grey that still clears the
+  // terminal's 3:1 floor here (3.10:1), so it renders exactly as written instead
+  // of being nudged at paint time.
+  black: '#5f5f5f', red: '#f44747', green: '#6a9955', yellow: '#d7ba7d',
   blue: '#569cd6', magenta: '#c586c0', cyan: '#4ec9b0', white: '#d4d4d4',
-  brightBlack: '#808080', brightRed: '#f44747', brightGreen: '#6a9955', brightYellow: '#d7ba7d',
+  brightBlack: '#8a8a8a', brightRed: '#f44747', brightGreen: '#6a9955', brightYellow: '#d7ba7d',
   brightBlue: '#569cd6', brightMagenta: '#c586c0', brightCyan: '#4ec9b0', brightWhite: '#ffffff'
 }
 const DEN_LIGHT: ITheme = {
   background: '#ffffff', foreground: '#2b2b2b', cursor: '#2b2b2b',
+  selectionBackground: '#b3d4fc', selectionInactiveBackground: '#d8e6f7',
+  // `white` (ANSI 7) must stay readable on the white background: #dcdcdc was
+  // near-invisible, so text drawn in color 7 disappeared. #949494 is a legible
+  // mid-grey that still reads as the "light" slot, and it clears the terminal's
+  // 3:1 floor (3.03:1) so it isn't darkened at paint time.
   black: '#2b2b2b', red: '#c0392b', green: '#3c7d3f', yellow: '#9a6700',
-  blue: '#2f6fbf', magenta: '#9b4bbf', cyan: '#2a8a8a', white: '#dcdcdc',
-  brightBlack: '#8a8a8a', brightRed: '#c0392b', brightGreen: '#3c7d3f', brightYellow: '#9a6700',
+  blue: '#2f6fbf', magenta: '#9b4bbf', cyan: '#2a8a8a', white: '#949494',
+  brightBlack: '#6a6a6a', brightRed: '#c0392b', brightGreen: '#3c7d3f', brightYellow: '#9a6700',
   brightBlue: '#2f6fbf', brightMagenta: '#9b4bbf', brightCyan: '#2a8a8a', brightWhite: '#000000'
 }
 
@@ -40,6 +63,7 @@ export const TERM_THEMES: TermTheme[] = [
     mode: 'dark',
     theme: {
       background: '#0D1117', foreground: '#E6EDF3', cursor: '#E6EDF3',
+      selectionBackground: '#1f3b5c', selectionInactiveBackground: '#182e47',
       black: '#484F58', red: '#FF7B72', green: '#3FB950', yellow: '#D29922',
       blue: '#58A6FF', magenta: '#BC8CFF', cyan: '#39C5CF', white: '#B1BAC4',
       brightBlack: '#6E7681', brightRed: '#FFA198', brightGreen: '#56D364', brightYellow: '#E3B341',
@@ -52,6 +76,7 @@ export const TERM_THEMES: TermTheme[] = [
     mode: 'dark',
     theme: {
       background: '#282a36', foreground: '#f8f8f2', cursor: '#f8f8f2',
+      selectionBackground: '#44475a', selectionInactiveBackground: '#363948',
       black: '#21222c', red: '#ff5555', green: '#50fa7b', yellow: '#f1fa8c',
       blue: '#bd93f9', magenta: '#ff79c6', cyan: '#8be9fd', white: '#f8f8f2',
       brightBlack: '#6272a4', brightRed: '#ff6e6e', brightGreen: '#69ff94', brightYellow: '#ffffa5',
@@ -64,6 +89,7 @@ export const TERM_THEMES: TermTheme[] = [
     mode: 'dark',
     theme: {
       background: '#002b36', foreground: '#839496', cursor: '#93a1a1',
+      selectionBackground: '#0f4b58', selectionInactiveBackground: '#083c47',
       black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
       blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
       brightBlack: '#586e75', brightRed: '#cb4b16', brightGreen: '#586e75', brightYellow: '#657b83',
@@ -76,6 +102,7 @@ export const TERM_THEMES: TermTheme[] = [
     mode: 'light',
     theme: {
       background: '#fafafa', foreground: '#383a42', cursor: '#526eff',
+      selectionBackground: '#bfd7f5', selectionInactiveBackground: '#dce6f2',
       black: '#383a42', red: '#e45649', green: '#50a14f', yellow: '#c18401',
       blue: '#4078f2', magenta: '#a626a4', cyan: '#0184bc', white: '#fafafa',
       brightBlack: '#a0a1a7', brightRed: '#e45649', brightGreen: '#50a14f', brightYellow: '#c18401',
@@ -88,6 +115,7 @@ export const TERM_THEMES: TermTheme[] = [
     mode: 'light',
     theme: {
       background: '#ffffff', foreground: '#24292f', cursor: '#24292f',
+      selectionBackground: '#b6dcfe', selectionInactiveBackground: '#dae8f8',
       black: '#24292e', red: '#cf222e', green: '#116329', yellow: '#4d2d00',
       blue: '#0969da', magenta: '#8250df', cyan: '#1b7c83', white: '#6e7781',
       brightBlack: '#57606a', brightRed: '#a40e26', brightGreen: '#1a7f37', brightYellow: '#633c01',
@@ -100,6 +128,7 @@ export const TERM_THEMES: TermTheme[] = [
     mode: 'light',
     theme: {
       background: '#fdf6e3', foreground: '#657b83', cursor: '#586e75',
+      selectionBackground: '#dcd3b4', selectionInactiveBackground: '#ece4cd',
       black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
       blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
       brightBlack: '#002b36', brightRed: '#cb4b16', brightGreen: '#586e75', brightYellow: '#657b83',

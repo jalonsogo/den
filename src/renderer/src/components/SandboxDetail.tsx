@@ -241,7 +241,7 @@ export function SandboxDetail() {
             </button>
           )}
 
-          <button className="btn btn-ghost btn-sm" onClick={handleMenu} title="More actions">
+          <button className="btn btn-ghost d-menu-btn" onClick={handleMenu} title="More actions">
             <MoreVertical size={14} />
           </button>
         </div>

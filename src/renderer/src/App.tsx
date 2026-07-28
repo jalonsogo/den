@@ -12,6 +12,7 @@ import { LogsPanel } from './components/LogsPanel'
 import { ContextMenu } from './components/ContextMenu'
 import { PolicyBlockToaster } from './components/PolicyBlockToaster'
 import { playFinalizeSound, playAskSound } from './lib/sound'
+import { termTheme as resolveTermTheme } from './lib/termThemes'
 import { NewSandboxModal } from './components/modals/NewSandboxModal'
 import { NewSecretModal } from './components/modals/NewSecretModal'
 import { NewKitModal } from './components/modals/NewKitModal'
@@ -22,6 +23,17 @@ import type { Sandbox, LogLine, PolicyBlock } from './types'
 
 export function App() {
   const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation, loadAutoSync } = useStore()
+
+  // Mirror the TERMINAL theme's light/dark polarity to main so it can set Claude
+  // Code's own theme (themeId) to match. The agent paints into xterm, so what
+  // decides whether its text is readable is the terminal background — not the app
+  // chrome. Those two can disagree (a dark term theme picked in a light app, or
+  // the reverse), and the agent has to follow the terminal. Applied at the next
+  // agent launch; a session that's already running keeps its palette.
+  const appTheme = useStore((s) => s.theme)
+  const termThemeId = useStore((s) => s.termTheme)
+  const termMode = resolveTermTheme(termThemeId, appTheme).mode
+  useEffect(() => { window.minipit?.setTermMode(termMode) }, [termMode])
 
   useEffect(() => {
     // Initial load
