@@ -3853,9 +3853,14 @@ function setupIPC(): void {
     }
   })
 
-  // Open a sandbox in a remote-development editor over the *.sbx SSH host. The
-  // workspace is bind-mounted at the same absolute path inside the sandbox as on
-  // the host, so the host path doubles as the remote path.
+  // Open a sandbox in a remote-development editor over the *.sbx SSH host.
+  //
+  // Pass the HOST path: the workspace is bind-mounted at the same absolute path
+  // inside the sandbox, so it doubles as the remote path. Don't be tempted to use
+  // the SSH login directory instead — `ssh <name>.sbx` lands in
+  // ~/workspace (/home/agent/workspace), which is an empty stub, NOT the mount.
+  // Verified against v0.37.0: the two are different inodes and only the host path
+  // holds the project, so opening the default cwd would give an empty window.
   ipcMain.handle('minipit:open-remote-editor', async (_, name: string, workspace: string, editor?: string) => {
     // Allowlist the binary: it ends up in spawn(), and the renderer shouldn't be
     // able to name an arbitrary executable. Each entry also carries the URI
