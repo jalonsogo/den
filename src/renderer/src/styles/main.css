@@ -1312,29 +1312,6 @@ html, body, #root {
 }
 .term-ctx-item:disabled { opacity: 0.4; cursor: default; }
 
-.term-theme-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-color: color-mix(in srgb, var(--tfg, #fff) 7%, transparent);
-  color: color-mix(in srgb, var(--tfg, #fff) 72%, transparent);
-  border: 1px solid color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
-  border-radius: 5px;
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 3px 22px 3px 9px;
-  cursor: pointer;
-  outline: none;
-  /* neutral-gray chevron reads on both light and dark themes */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='gray' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 7px center;
-}
-.term-theme-select:hover {
-  color: var(--tfg, #fff);
-  border-color: color-mix(in srgb, var(--tfg, #fff) 22%, transparent);
-}
-.term-theme-select option { background: var(--tbg, #1a1a1a); color: var(--tfg, #e0e0e0); }
-
 .t-btn {
   padding: 4px 10px;
   border-radius: 5px;
@@ -3974,7 +3951,19 @@ html, body, #root {
   padding: 8px 10px; border: none; border-radius: 8px; background: none;
   text-align: left; cursor: pointer; color: var(--t1); font-size: 13.5px; font-family: inherit;
 }
-.cmdk-item.sel { background: var(--bg-subtle); }
+/* Selected row. `--bg-subtle` alone was too weak to read as a selection: the
+   palette sits on `--bg`, and in the light themes those are #fff vs #f4f4f5 —
+   a ~2% step, so the only real cue was the ↵ glyph. Tint with the theme accent
+   and add an inset ring, then lift the icon, hint and label with it, so the
+   selection is unmistakable in both light and dark without shifting the row. */
+.cmdk-item.sel {
+  background: color-mix(in srgb, var(--accent, var(--primary)) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--primary)) 38%, transparent);
+}
+.cmdk-item.sel .cmdk-item-label { font-weight: 550; }
+.cmdk-item.sel .cmdk-item-ic,
+.cmdk-item.sel .cmdk-item-enter { color: var(--accent, var(--primary)); }
+.cmdk-item.sel .cmdk-item-hint { color: var(--t2); }
 .cmdk-item-ic {
   width: 20px; height: 18px; flex-shrink: 0; color: var(--t2);
   display: inline-flex; align-items: center; justify-content: center;

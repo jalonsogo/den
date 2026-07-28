@@ -3,6 +3,8 @@ import { Sun, Moon, Monitor, Eye, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import { THEMES, type Theme } from '../lib/themes'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
+import { REMOTE_EDITORS } from '../lib/remoteEditors'
+import { accordionKey } from '../lib/settingsIndex'
 import { SecretsPanel } from './SecretsPage'
 import { SkillsPanel } from './SkillsPanel'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
@@ -42,7 +44,8 @@ export function SettingsPage() {
   const {
     themePref, setThemePref, accent, setAccent,
     termTheme, setTermTheme, display, setDisplay,
-    fileOpenMode, setFileOpenMode, density, setDensity, densityCustom, setDensityCustom
+    fileOpenMode, setFileOpenMode, density, setDensity, densityCustom, setDensityCustom,
+    remoteEditor, setRemoteEditor
   } = useStore()
   const [tab, setTab] = useState<'general' | 'runtime' | 'secrets' | 'skills'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
@@ -83,6 +86,28 @@ export function SettingsPage() {
     }
     reader.readAsDataURL(file)
   }
+
+  // Deep link from the command palette: switch to the requested tab, then scroll
+  // its section into view. The accordion's open state is forced via the same
+  // localStorage key it reads on mount, so the scroll doesn't land on a collapsed
+  // header — that only takes effect on (re)mount, which the tab switch causes.
+  // Cleared once applied so it doesn't re-fire on every later render.
+  const settingsTarget = useStore((s) => s.settingsTarget)
+  const setSettingsTarget = useStore((s) => s.setSettingsTarget)
+  useEffect(() => {
+    if (!settingsTarget) return
+    const { tab: wantTab, acc } = settingsTarget
+    if (acc) localStorage.setItem(accordionKey(acc), '1')
+    setTab(wantTab as typeof tab)
+    setSettingsTarget(null)
+    if (!acc) return
+    // After the tab's panel has rendered. Two frames: one for the tab swap, one
+    // for the accordion body it contains.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-acc="${acc}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }))
+  }, [settingsTarget]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Snapshot of the last-persisted settings, so the auto-save effect can tell a
   // real edit from the initial load (and skip no-op saves).
@@ -252,7 +277,10 @@ export function SettingsPage() {
           </div>
         </AccordionSection>
 
-        <AccordionSection id="settings-files" title="Files" defaultOpen>
+        {/* Both rows here answer "what opens this, and where" — one for a single
+            file, one for the whole sandbox. Keeps the accordion id so a collapsed
+            state set before the rename carries over. */}
+        <AccordionSection id="settings-files" title="Files & editors" defaultOpen>
           <div className="ss-row">
             <div>
               <div className="ss-lbl">Open files with</div>
@@ -274,6 +302,28 @@ export function SettingsPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Editor to connect with</div>
+              <div className="ss-sub">
+                Which editor “Connect with…” attaches to a sandbox over SSH — you edit the files inside the
+                sandbox, not the host copy. All of these are VS Code derivatives: they share the{' '}
+                <code>--remote ssh-remote+</code> flag den drives, so an editor without it can’t connect this way.
+                Needs SSH access, which is set up under Runtime.
+              </div>
+            </div>
+            {/* FieldSelect, not a bare <select>: a native select renders with no
+                visible box on this page (`s-input` styles a text input, so it
+                gives no chevron and no affordance). It's also what every other
+                dropdown in Settings uses. */}
+            <FieldSelect
+              ariaLabel="Editor to connect with"
+              value={remoteEditor}
+              onChange={setRemoteEditor}
+              options={REMOTE_EDITORS.map((ed): FieldOption => ({ value: ed.id, label: ed.label }))}
+            />
           </div>
         </AccordionSection>
 

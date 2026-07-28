@@ -47,6 +47,10 @@ interface AppState {
   modal: ModalType
   // ⌘K command palette (search across sandboxes, groups, kits, and actions).
   paletteOpen: boolean
+  // Deep link into Settings: which tab to show and, optionally, which accordion
+  // section to expand and scroll to. Set by the command palette, consumed (and
+  // cleared) by SettingsPage on arrival.
+  settingsTarget: { tab: string; acc?: string } | null
   // Reusable input dialog (openPrompt/closePrompt). Null = closed.
   prompt: PromptConfig | null
   // Template shown in the inspect/details modal. Null = closed.
@@ -94,8 +98,9 @@ interface AppState {
   // Selected color theme id (drives the full palette: surfaces + accent).
   accent: string
   termTheme: string
-  // Which editor "Open in…" launches over the sandbox's SSH host. One choice
-  // rather than an entry per IDE — the menu shouldn't list editors you don't use.
+  // Which editor "Connect with…" attaches to the sandbox over its SSH host. One
+  // choice rather than an entry per IDE — the menu shouldn't list editors you
+  // don't use.
   remoteEditor: string
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
@@ -189,6 +194,7 @@ interface AppState {
   setActiveTab:       (tab: TabType) => void
   setModal:           (modal: ModalType) => void
   setPaletteOpen:     (open: boolean) => void
+  setSettingsTarget:  (target: { tab: string; acc?: string } | null) => void
   openPrompt:         (config: PromptConfig) => void
   closePrompt:        () => void
   setInspectTemplate: (t: Template | null) => void
@@ -208,6 +214,7 @@ export const useStore = create<AppState>((set) => ({
   activeTab: 'terminal',
   modal: null,
   paletteOpen: false,
+  settingsTarget: null,
   prompt: null,
   inspectTemplate: null,
   contextMenu: { visible: false, x: 0, y: 0, sandboxId: null, workspace: null },
@@ -656,6 +663,7 @@ export const useStore = create<AppState>((set) => ({
   setModal: (modal) => set({ modal }),
 
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setSettingsTarget: (settingsTarget) => set({ settingsTarget }),
 
   openPrompt: (config) => set({ prompt: config }),
   closePrompt: () => set({ prompt: null }),

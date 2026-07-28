@@ -21,7 +21,9 @@ export function AccordionSection({ id, title, badge, alert = false, defaultOpen 
   })
   const toggle = () => { const n = !open; setOpen(n); localStorage.setItem(key, n ? '1' : '0') }
   return (
-    <div className={`info-acc${open ? ' open' : ''}`}>
+    // data-acc exposes the id so a deep link (command palette → a specific
+    // setting) can scroll to this section.
+    <div className={`info-acc${open ? ' open' : ''}`} data-acc={id}>
       <button className="info-acc-hd" onClick={toggle}>
         {open ? <ChevronDown size={14} className="info-acc-chev" /> : <ChevronRight size={14} className="info-acc-chev" />}
         <span className="info-acc-title">{title}</span>
