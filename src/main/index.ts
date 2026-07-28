@@ -2104,6 +2104,9 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
     { label: running.length ? 'Running sandboxes' : 'No running sandboxes', enabled: false },
     ...running.map((s) => ({
       label: s.name,
+      // Same dot as the Sandboxes menu. These are all running, but a sandbox
+      // caught mid-transition still reads correctly.
+      icon: statusDotFor(s.status),
       click: () => navigateFromTray('minipit:open-sandbox', s.name)
     })),
     { type: 'separator' },
@@ -2144,6 +2147,55 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
 const MENU_LIST_LIMIT = 12
 let lastMenuSig = ''
 let lastMenuSandboxSig = ''
+// Status dots for menu items. A native menu label is plain text — no per-item
+// colour — but menu items DO take an icon, so the dot is drawn as a real image
+// instead of a ●/○ glyph.
+//
+// Built from a raw BGRA bitmap rather than a bundled asset: it's a circle, and
+// this way the colours come from one place and can't drift from the UI's. macOS
+// wants premultiplied BGRA, and the buffer is 2× the logical 16pt size for retina.
+// Cached per colour — menus rebuild often and these would otherwise be redrawn
+// pixel by pixel each time.
+const DOT_CACHE = new Map<string, Electron.NativeImage>()
+function statusDot(hex: string): Electron.NativeImage {
+  const cached = DOT_CACHE.get(hex)
+  if (cached) return cached
+  const S = 32                       // 16pt @2x
+  const R = 5.5 * 2                  // 5.5pt radius, so an 11pt dot
+  const c = (S - 1) / 2
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  const buf = Buffer.alloc(S * S * 4)
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      // Coverage over the last pixel of the edge → a cheap antialias, so the dot
+      // doesn't look like a staircase next to crisp menu text.
+      const d = Math.sqrt((x - c) ** 2 + (y - c) ** 2)
+      const a = Math.max(0, Math.min(1, R - d + 0.5))
+      const i = (y * S + x) * 4
+      buf[i] = Math.round(b * a)          // premultiplied, BGRA order
+      buf[i + 1] = Math.round(g * a)
+      buf[i + 2] = Math.round(r * a)
+      buf[i + 3] = Math.round(255 * a)
+    }
+  }
+  const img = nativeImage.createFromBitmap(buf, { width: S, height: S, scaleFactor: 2 })
+  DOT_CACHE.set(hex, img)
+  return img
+}
+
+// Status → dot colour. Deliberately not template images: a template image is
+// recoloured to the menu's text colour, which would throw the status away.
+function statusDotFor(status: string): Electron.NativeImage {
+  switch (status) {
+    case 'running': return statusDot('#30D158')                      // green
+    case 'starting': case 'stopping': case 'creating': return statusDot('#FFD60A')   // amber, in transition
+    case 'deleting': return statusDot('#FF453A')                     // red
+    default: return statusDot('#8E8E93')                             // stopped/unknown, neutral grey
+  }
+}
+
 // Name of the sandbox currently open in the window, mirrored from the renderer.
 // The Sandboxes menu marks it and puts the accelerators on its items, so a
 // shortcut is visibly bound to the sandbox it acts on.
@@ -2248,8 +2300,10 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     : sandboxes
   const sandboxItems: Electron.MenuItemConstructorOptions[] = sandboxes.length
     ? capped(ordered, (s) => ({
-        // Trailing marker rather than a leading one, so names stay left-aligned.
-        label: `${s.status === 'running' ? '●' : '○'}  ${s.name}${s.name === activeSandboxName ? '  ✓' : ''}`,
+        // Trailing ✓ for the open sandbox rather than a leading marker, so names
+        // stay left-aligned under the status icon.
+        label: `${s.name}${s.name === activeSandboxName ? '  ✓' : ''}`,
+        icon: statusDotFor(s.status),
         submenu: sandboxSubmenu(s)
       }), 'sandboxes')
     : [{ label: 'No sandboxes yet', enabled: false }]
