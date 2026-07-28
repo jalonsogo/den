@@ -457,6 +457,8 @@ declare global {
       onOpenModal(cb: (modal: string) => void): () => void
       onSetTab(cb: (tab: string) => void): () => void
       onStopActive(cb: () => void): () => void
+      setActiveSandbox(name: string | null): Promise<void>
+      onSandboxAction(cb: (name: string, action: string) => void): () => void
       agentWrite(name: string, data: string): Promise<void>
       agentDropFile(name: string, fileName: string, bytes: Uint8Array): Promise<string | null>
       agentResize(name: string, cols: number, rows: number): Promise<void>

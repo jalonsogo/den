@@ -2080,6 +2080,10 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
 const MENU_LIST_LIMIT = 12
 let lastMenuSig = ''
 let lastMenuSandboxSig = ''
+// Name of the sandbox currently open in the window, mirrored from the renderer.
+// The Sandboxes menu marks it and puts the accelerators on its items, so a
+// shortcut is visibly bound to the sandbox it acts on.
+let activeSandboxName: string | null = null
 
 async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSandboxes>>): Promise<void> {
   // Route clicks through navigateFromTray so they work even when the window is
@@ -2098,7 +2102,10 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
   const sig = JSON.stringify({
     s: sandboxes.map((s) => [s.name, s.status]),
     t: templates.map((t) => `${t.repository}:${t.tag}`),
-    m: kits.map((k) => [k.name, k.kind])
+    m: kits.map((k) => [k.name, k.kind]),
+    // Part of the key: switching sandboxes moves the ✓ and the accelerators, so
+    // the menu genuinely differs even when the data behind it hasn't changed.
+    a: activeSandboxName
   })
   if (sig === lastMenuSig && Menu.getApplicationMenu()) return
   lastMenuSig = sig
@@ -2112,10 +2119,59 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     return shown
   }
 
+  // Each sandbox gets its own submenu of actions. These used to sit at the top
+  // level as "Stop Sandbox" / "Open in Finder" / "Logs", which never said WHICH
+  // sandbox they meant — they silently acted on whichever was open. Now the
+  // target is the thing you pick, and the accelerators live on the open
+  // sandbox's items so the shortcut is visibly attached to what it affects.
+  // Like navigateFromTray, but carries two arguments (name + action), so it can't
+  // just delegate to it.
+  const act = (name: string, action: string): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow()
+      mainWindow?.webContents.once('did-finish-load', () =>
+        mainWindow?.webContents.send('minipit:sandbox-action', name, action))
+      return
+    }
+    showMainWindow()
+    mainWindow.webContents.send('minipit:sandbox-action', name, action)
+  }
+  const sandboxSubmenu = (s: { name: string; status: string; workspace: string }): Electron.MenuItemConstructorOptions[] => {
+    const current = s.name === activeSandboxName
+    const running = s.status === 'running'
+    return [
+      { label: 'Open', click: () => act(s.name, 'open') },
+      { type: 'separator' },
+      running
+        ? { label: 'Stop', accelerator: current ? 'Cmd+.' : undefined, click: () => act(s.name, 'stop') }
+        : { label: 'Start', click: () => act(s.name, 'start') },
+      { label: 'Restart', enabled: running, click: () => act(s.name, 'restart') },
+      { type: 'separator' },
+      {
+        label: 'Open in Finder',
+        accelerator: current ? 'Shift+Cmd+F' : undefined,
+        // Done here rather than round-tripping the renderer: it's just a path.
+        click: () => { if (s.workspace) void shell.openPath(s.workspace) }
+      },
+      { label: 'Logs', accelerator: current ? 'Cmd+L' : undefined, click: () => act(s.name, 'logs') },
+      { type: 'separator' },
+      { label: 'Copy SSH Command', click: () => clipboard.writeText(`ssh ${s.name}.sbx`) }
+    ]
+  }
+  // The open sandbox goes first so it always survives the MENU_LIST_LIMIT cap —
+  // otherwise, past 12 sandboxes, the one you're working in could fall off the
+  // list and take Cmd+. / Shift+Cmd+F / Cmd+L with it.
+  const ordered = activeSandboxName
+    ? [
+        ...sandboxes.filter((s) => s.name === activeSandboxName),
+        ...sandboxes.filter((s) => s.name !== activeSandboxName)
+      ]
+    : sandboxes
   const sandboxItems: Electron.MenuItemConstructorOptions[] = sandboxes.length
-    ? capped(sandboxes, (s) => ({
-        label: `${s.status === 'running' ? '●' : '○'}  ${s.name}`,
-        click: () => go('minipit:open-sandbox', s.name)
+    ? capped(ordered, (s) => ({
+        // Trailing marker rather than a leading one, so names stay left-aligned.
+        label: `${s.status === 'running' ? '●' : '○'}  ${s.name}${s.name === activeSandboxName ? '  ✓' : ''}`,
+        submenu: sandboxSubmenu(s)
       }), 'sandboxes')
     : [{ label: 'No sandboxes yet', enabled: false }]
 
@@ -2185,10 +2241,10 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       submenu: [
         { label: 'Show All Sandboxes', accelerator: 'Shift+Cmd+S', click: () => go('minipit:navigate', 'sandboxes') },
         { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
-        { label: 'Stop Sandbox', accelerator: 'Cmd+.', click: () => go('minipit:stop-active') },
-        { label: 'Open in Finder', accelerator: 'Shift+Cmd+F', click: () => go('minipit:open-in-finder') },
-        { label: 'Logs', accelerator: 'Cmd+L', click: () => go('minipit:navigate', 'logs') },
         { type: 'separator' },
+        { label: 'All Logs', click: () => go('minipit:navigate', 'logs') },
+        { type: 'separator' },
+        // Per-sandbox actions live in each sandbox's own submenu below.
         ...sandboxItems
       ]
     },
@@ -4074,6 +4130,16 @@ function setupIPC(): void {
   // restarts — the terminal's minimumContrastRatio keeps that legible meanwhile.
   ipcMain.handle('minipit:term-mode', (_, mode: 'light' | 'dark') => {
     if (mode === 'light' || mode === 'dark') termMode = mode
+  })
+
+  // Which sandbox the window has open. Rebuilds the Sandboxes menu so the ✓ and
+  // the accelerators follow it (the signature includes this name, so the rebuild
+  // isn't skipped).
+  ipcMain.handle('minipit:active-sandbox', (_, name: string | null) => {
+    const next = typeof name === 'string' && name ? name : null
+    if (next === activeSandboxName) return
+    activeSandboxName = next
+    void setAppMenu()
   })
 }
 

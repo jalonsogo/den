@@ -35,6 +35,17 @@ export function App() {
   const termMode = resolveTermTheme(termThemeId, appTheme).mode
   useEffect(() => { window.minipit?.setTermMode(termMode) }, [termMode])
 
+  // Mirror which sandbox is open so the Sandboxes menu can mark it and put the
+  // keyboard accelerators on that sandbox's own items — a menu item saying
+  // "Stop Sandbox" can't tell you which one it means.
+  const activeSandboxId = useStore((s) => s.activeSandboxId)
+  const activeSandboxName = useStore(
+    (s) => s.sandboxes.find((x) => x.id === s.activeSandboxId)?.name ?? null
+  )
+  useEffect(() => {
+    window.minipit?.setActiveSandbox?.(activeSandboxName)
+  }, [activeSandboxName, activeSandboxId])
+
   useEffect(() => {
     // Initial load
     window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
@@ -105,6 +116,48 @@ export function App() {
     // Menu-bar (tray) quick-open: jump to a sandbox.
     const unsub6 = window.minipit?.onOpenSandbox((name) => setActiveSandboxId(name))
 
+    // A menu action aimed at a specific sandbox by name. Run here rather than in
+    // main so the sidebar reflects the transition immediately (main would have to
+    // wait for the next poll to show "stopping"/"starting").
+    const unsubAction = window.minipit?.onSandboxAction?.((name, action) => {
+      const s = useStore.getState()
+      const sb = s.sandboxes.find((x) => x.name === name)
+      if (!sb) return
+      switch (action) {
+        case 'open':
+          s.setActiveSandboxId(sb.id)
+          break
+        case 'start':
+          s.updateSandbox(sb.id, { status: 'starting' })
+          window.minipit?.runSandbox(name)
+            .then(() => s.updateSandbox(sb.id, { status: 'running' }))
+            .catch(() => s.updateSandbox(sb.id, { status: 'stopped' }))
+          break
+        case 'stop':
+          s.updateSandbox(sb.id, { status: 'stopping' })
+          window.minipit?.stopSandbox(name)
+            .then(() => s.updateSandbox(sb.id, { status: 'stopped', uptimeSeconds: undefined }))
+            .catch(() => s.updateSandbox(sb.id, { status: 'running' }))
+          break
+        case 'restart':
+          s.updateSandbox(sb.id, { status: 'stopping' })
+          ;(async () => {
+            try {
+              await window.minipit?.stopSandbox(name)
+              await window.minipit?.runSandbox(name)
+              s.updateSandbox(sb.id, { status: 'running' })
+            } catch { s.updateSandbox(sb.id, { status: 'running' }) }
+          })()
+          break
+        case 'logs':
+          // logsReturn is what the Logs page's back button uses to come back here.
+          s.setLogsSandbox(name)
+          s.setLogsReturn(sb.id)
+          s.setActivePage('logs')
+          break
+      }
+    })
+
     return () => {
       unsub1?.()
       unsub2?.()
@@ -115,6 +168,7 @@ export function App() {
       unsub4?.()
       unsub5?.()
       unsub6?.()
+      unsubAction?.()
       unsubFiles?.()
     }
   }, [])

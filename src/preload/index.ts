@@ -202,6 +202,16 @@ const api = {
     ipcRenderer.on('minipit:stop-active', handler)
     return () => ipcRenderer.removeListener('minipit:stop-active', handler)
   },
+  // Which sandbox is open, mirrored to main so the Sandboxes menu can mark it and
+  // hang the keyboard accelerators off that sandbox's own items.
+  setActiveSandbox: (name: string | null) => ipcRenderer.invoke('minipit:active-sandbox', name),
+  // A menu action aimed at a NAMED sandbox (not whichever is active). The
+  // renderer runs these because it owns the optimistic status updates.
+  onSandboxAction: (cb: (name: string, action: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string, action: string) => cb(name, action)
+    ipcRenderer.on('minipit:sandbox-action', handler)
+    return () => ipcRenderer.removeListener('minipit:sandbox-action', handler)
+  },
 
   agentWrite: (name: string, data: string) => ipcRenderer.invoke('minipit:agent-write', name, data),
   agentDropFile: (name: string, fileName: string, bytes: Uint8Array): Promise<string | null> =>
