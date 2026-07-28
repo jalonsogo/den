@@ -422,7 +422,7 @@ declare global {
       skillsImport(opts?: { dryRun?: boolean }): Promise<SkillsImport>
       sshStatus(): Promise<SshStatus>
       sshSetup(): Promise<{ ok: boolean; output?: string; error?: string }>
-      openRemoteEditor(name: string, workspace: string, editor?: string): Promise<{ ok: boolean; viaUri?: boolean; error?: string }>
+      openRemoteEditor(name: string, workspace: string, editor?: string): Promise<{ ok: boolean; viaUri?: boolean; warmStart?: boolean; error?: string }>
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
       policyCheck(resource: string, name?: string): Promise<{ ok: boolean; decision: 'allow' | 'deny' | 'unknown'; supportMessage?: string; raw?: string; error?: string }>

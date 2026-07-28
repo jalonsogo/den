@@ -1174,6 +1174,63 @@ function sshConfigPath(): string {
   return join(require('os').homedir(), '.ssh', 'config')
 }
 
+// A short TMPDIR for a spawned remote editor, or undefined if one can't be made.
+//
+// VS Code's Remote-SSH puts its askpass unix socket at
+//   $TMPDIR/vscode-ssh-askpass-<40 hex>.sock          (64-char filename)
+// macOS's default per-user TMPDIR (/var/folders/xx/<28 chars>/T/) is ~49 bytes,
+// so the full path lands around 113 — past the 104-byte sun_path limit in
+// sockaddr_un. The bind fails ("AF_UNIX path too long", surfaced to Node as
+// EINVAL), Remote-SSH can't answer its own delay-shutdown request, times out
+// after ~5s, and reconnects — looping forever while reporting nothing but
+// `listen EINVAL` deep in its log. Measured on macOS 25.5 / Remote-SSH 0.123:
+// 113 bytes fails, the same filename under a short dir binds fine.
+//
+// /tmp/den-<uid> keeps the full path at ~77 bytes. Created 0700 rather than
+// using bare /tmp, which is world-writable.
+//
+// CAVEAT: this only bites on a COLD start. `code --remote` on an
+// already-running editor hands the request to that process over IPC, and its
+// environment — not ours — is what the extension host inherits.
+function shortEditorTmpDir(): string | undefined {
+  // Linux allows 108 bytes and typically has TMPDIR=/tmp, so there's nothing to
+  // work around; leave other platforms' environment untouched.
+  if (process.platform !== 'darwin') return undefined
+  try {
+    const fs = require('fs')
+    const dir = `/tmp/den-${process.getuid?.() ?? 0}`
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    // A pre-existing dir keeps its old mode, so assert it.
+    try { fs.chmodSync(dir, 0o700) } catch { /* not ours to chmod — still usable */ }
+    return dir
+  } catch {
+    return undefined
+  }
+}
+
+// Is this editor already running? Decides whether the TMPDIR above can actually
+// take effect: `code --remote` on a live instance is just IPC to that process, so
+// the environment it was originally launched with is the one that counts.
+// Matching the app bundle rather than a process name — the main process is a
+// generically-named Electron binary.
+const EDITOR_BUNDLE: Record<string, string> = {
+  code: 'Visual Studio Code.app', cursor: 'Cursor.app',
+  windsurf: 'Windsurf.app', codium: 'VSCodium.app'
+}
+function isEditorRunning(bin: string): Promise<boolean> {
+  const bundle = EDITOR_BUNDLE[bin]
+  if (!bundle) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    // pgrep exits 0 when something matched, 1 when nothing did.
+    execFile('pgrep', ['-f', bundle], { timeout: 4000 }, (err) => resolve(!err))
+  })
+}
+
+// Explain the reconnect-loop once per app session, the first time we hand a
+// remote-open to an editor that was already running. Repeating it on every open
+// would be noise, and most of the time the editor's TMPDIR is fine.
+let warnedEditorTmpdir = false
+
 // Run `sbx setup ssh`. Shared by the IPC handler and the Runtime menu; writes to
 // ~/.ssh/config, so both call sites are explicit user actions.
 async function sshSetup(): Promise<{ ok: boolean; output?: string; error?: string }> {
@@ -3963,17 +4020,40 @@ function setupIPC(): void {
     const bin = editor && editor in EDITORS ? editor : 'code'
     const scheme = EDITORS[bin]
     const host = `${name}.sbx`
+    // Hand the editor a short TMPDIR so Remote-SSH's askpass socket fits inside
+    // the 104-byte sun_path limit (see shortEditorTmpDir — without it the
+    // connection silently reconnect-loops on macOS).
+    const tmp = shortEditorTmpDir()
+    const env = tmp ? { ...guiEnv(), TMPDIR: tmp } : guiEnv()
+    // Check BEFORE launching — afterwards it's running either way.
+    const alreadyRunning = tmp ? await isEditorRunning(bin) : false
     try {
       await new Promise<void>((resolve, reject) => {
         // Detached: the editor outlives den, and we don't want its stdio.
         const proc = spawn(bin, ['--remote', `ssh-remote+${host}`, workspace], {
-          env: guiEnv(), detached: true, stdio: 'ignore'
+          env, detached: true, stdio: 'ignore'
         })
         proc.on('error', reject)
         proc.unref()
         resolve()
       })
-      return { ok: true }
+      if (alreadyRunning && !warnedEditorTmpdir) {
+        warnedEditorTmpdir = true
+        // Non-blocking: the window is already opening, and this is advice for if
+        // it misbehaves, not a failure.
+        void dialog.showMessageBox({
+          type: 'info',
+          message: 'Opening in an editor that was already running',
+          detail:
+            `den gives the editor a short temporary directory so VS Code's SSH helper socket fits inside macOS's `
+            + `104-character limit. Because ${bin} was already open, it keeps the temporary directory it started `
+            + `with, and den can't change that.\n\n`
+            + `If the remote window connects and then retries in a loop, quit ${bin} once and open the sandbox `
+            + `again — den will launch it with the short path.`,
+          buttons: ['OK']
+        })
+      }
+      return { ok: true, warmStart: alreadyRunning }
     } catch {
       // No CLI on PATH ("code" isn't installed until you run "Shell Command:
       // Install 'code' command"), so hand the URI to the OS instead — that only
