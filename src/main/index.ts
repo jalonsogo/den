@@ -2149,6 +2149,10 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
 // from the menu bar. Rebuilt when that data changes; the signature guard below
 // avoids needless rebuilds (which would close a menu the user has open).
 const MENU_LIST_LIMIT = 12
+// Sandboxes get a tighter cap than the Library lists: this menu shows a submenu
+// per row, and the ordering already puts what matters on top, so a long tail is
+// just a wall to scroll past. The overflow gets a "View All …" link instead.
+const SANDBOX_MENU_LIMIT = 7
 let lastMenuSig = ''
 let lastMenuSandboxSig = ''
 // Status dots for menu items. A native menu label is plain text — no per-item
@@ -2329,21 +2333,33 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
   const ordered = [...sandboxes].sort((a, b) =>
     sandboxRank(a.status, agentState.get(a.name)) - sandboxRank(b.status, agentState.get(b.name))
   )
-  // The open sandbox has to survive the MENU_LIST_LIMIT cap: there are already
-  // more sandboxes than the cap here, so a stopped one you're working in would
-  // otherwise fall off the end and take Cmd+. / Shift+Cmd+F / Cmd+L with it.
-  // Only hoisted when the ranking doesn't already keep it — no point disturbing
-  // the order otherwise.
+  // The open sandbox has to survive the cap: with more sandboxes than fit, a
+  // stopped one you're working in would otherwise fall off the end and take
+  // Cmd+. / Shift+Cmd+F / Cmd+L with it. Only hoisted when the ranking doesn't
+  // already keep it in range — no point disturbing the order otherwise.
   const activeIdx = ordered.findIndex((s) => s.name === activeSandboxName)
-  if (activeIdx >= MENU_LIST_LIMIT) ordered.unshift(...ordered.splice(activeIdx, 1))
+  if (activeIdx >= SANDBOX_MENU_LIMIT) ordered.unshift(...ordered.splice(activeIdx, 1))
   const sandboxItems: Electron.MenuItemConstructorOptions[] = sandboxes.length
-    ? capped(ordered, (s) => ({
-        // Trailing ✓ for the open sandbox rather than a leading marker, so names
-        // stay left-aligned under the status icon.
-        label: `${s.name}${s.name === activeSandboxName ? '  ✓' : ''}`,
-        icon: statusDotFor(s.status, agentState.get(s.name)),
-        submenu: sandboxSubmenu(s)
-      }), 'sandboxes')
+    ? [
+        ...ordered.slice(0, SANDBOX_MENU_LIMIT).map((s) => ({
+          // Trailing ✓ for the open sandbox rather than a leading marker, so
+          // names stay left-aligned under the status icon.
+          label: `${s.name}${s.name === activeSandboxName ? '  ✓' : ''}`,
+          icon: statusDotFor(s.status, agentState.get(s.name)),
+          submenu: sandboxSubmenu(s)
+        })),
+        // A way out rather than a dead end: the old tail was a disabled "N more
+        // sandboxes…", which told you they existed and then refused to help.
+        ...(ordered.length > SANDBOX_MENU_LIMIT
+          ? [
+              { type: 'separator' } as Electron.MenuItemConstructorOptions,
+              {
+                label: `View All ${ordered.length} Sandboxes…`,
+                click: () => go('minipit:navigate', 'sandboxes')
+              } as Electron.MenuItemConstructorOptions
+            ]
+          : [])
+      ]
     : [{ label: 'No sandboxes yet', enabled: false }]
 
   // A Library submenu: "Show all" + the list (each opens the management page,
