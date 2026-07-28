@@ -2162,14 +2162,16 @@ let lastMenuSandboxSig = ''
 // pixel by pixel each time.
 const DOT_CACHE = new Map<string, Electron.NativeImage>()
 // `hollow` draws a ring rather than a disc: an outline reads as "nothing running
-// here" without spending a colour on it.
-function statusDot(hex: string, hollow = false): Electron.NativeImage {
-  const key = `${hex}${hollow ? '-ring' : ''}`
+// here" without spending a colour on it. `opacity` fades the whole glyph — used
+// to keep that outline quiet, so a list of stopped sandboxes doesn't read as
+// twelve hard circles competing with the names.
+function statusDot(hex: string, hollow = false, opacity = 1): Electron.NativeImage {
+  const key = `${hex}${hollow ? '-ring' : ''}@${opacity}`
   const cached = DOT_CACHE.get(key)
   if (cached) return cached
   const S = 32                       // 16pt @2x
   const R = 5.5 * 2                  // 5.5pt radius, so an 11pt dot
-  const W = 3                        // ring stroke, 1.5pt
+  const W = 2                        // ring stroke, 1pt — a hairline, not a border
   const c = (S - 1) / 2
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -2182,9 +2184,9 @@ function statusDot(hex: string, hollow = false): Electron.NativeImage {
       // outer disc minus the inner one, which antialiases both edges at once.
       const d = Math.sqrt((x - c) ** 2 + (y - c) ** 2)
       const outer = Math.max(0, Math.min(1, R - d + 0.5))
-      const a = hollow
+      const a = opacity * (hollow
         ? Math.max(0, outer - Math.max(0, Math.min(1, R - W - d + 0.5)))
-        : outer
+        : outer)
       const i = (y * S + x) * 4
       buf[i] = Math.round(b * a)          // premultiplied, BGRA order
       buf[i + 1] = Math.round(g * a)
@@ -2211,8 +2213,10 @@ function statusDotFor(status: string, activity?: AgentState): Electron.NativeIma
     return statusDot('#30D158')                               // up, activity unknown
   }
   // Stopped, plus everything transitional (starting/stopping/creating/deleting):
-  // nothing is running, so spend no colour on it — just an outline.
-  return statusDot(nativeTheme.shouldUseDarkColors ? '#98989D' : '#3A3A3C', true)
+  // nothing is running, so spend no colour on it — just a faint outline. Held at
+  // 45%: most of this list is usually stopped, and a solid ring on every row
+  // competes with the names instead of receding behind them.
+  return statusDot(nativeTheme.shouldUseDarkColors ? '#98989D' : '#3A3A3C', true, 0.45)
 }
 
 // Menu sort key: working, then waiting, then merely running, then transitional,
