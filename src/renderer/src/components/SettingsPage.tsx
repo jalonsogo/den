@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { THEMES, type Theme } from '../lib/themes'
 import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { SecretsPanel } from './SecretsPage'
+import { SkillsPanel } from './SkillsPanel'
 import { SbxRuntimePanel } from './SbxRuntimePanel'
 import { AccordionSection } from './AccordionSection'
 import { FieldSelect, type FieldOption } from './FieldSelect'
@@ -43,7 +44,7 @@ export function SettingsPage() {
     termTheme, setTermTheme, display, setDisplay,
     fileOpenMode, setFileOpenMode, density, setDensity, densityCustom, setDensityCustom
   } = useStore()
-  const [tab, setTab] = useState<'general' | 'runtime' | 'secrets'>('general')
+  const [tab, setTab] = useState<'general' | 'runtime' | 'secrets' | 'skills'>('general')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
 
@@ -127,10 +128,15 @@ export function SettingsPage() {
       <div className="tabs">
         <div className={`tab${tab === 'general' ? ' active' : ''}`} onClick={() => setTab('general')}>General</div>
         <div className={`tab${tab === 'secrets' ? ' active' : ''}`} onClick={() => setTab('secrets')}>Secrets</div>
+        {/* Skills sits next to Secrets: both are host-level stores that get
+            shared into sandboxes, rather than per-sandbox settings. */}
+        <div className={`tab${tab === 'skills' ? ' active' : ''}`} onClick={() => setTab('skills')}>Skills</div>
         <div className={`tab${tab === 'runtime' ? ' active' : ''}`} onClick={() => setTab('runtime')}>Runtime</div>
       </div>
 
-      {tab === 'runtime' ? (
+      {tab === 'skills' ? (
+        <SkillsPanel />
+      ) : tab === 'runtime' ? (
         <SbxRuntimePanel
           sbxPath={settings.sbxPath}
           onChangePath={(v) => setSettings((s) => ({ ...s, sbxPath: v }))}

@@ -1168,11 +1168,102 @@ function emitBlock(b: PolicyBlock): void {
 // Best-effort parse of `sbx policy log --json`. The exact schema isn't pinned
 // across sbx versions, so tolerate several field names and both array/object
 // envelopes. Returns only denials.
+// ~/.ssh/config — where `sbx setup ssh` writes its managed *.sbx block.
+function sshConfigPath(): string {
+  return join(require('os').homedir(), '.ssh', 'config')
+}
+
+// Read `sbx skills import` output (both --dry-run and the real run).
+//
+// Observed v0.37.0 dry-run lines:
+//   Would import skill "dds-lint"
+//   Skipping ".DS_Store": not a directory
+//   Skipping "find-skills": symlink
+//   Dry run: 10 skill(s) would be imported into /Users/…/agent-skills
+// The import verb is matched loosely (would import / importing / imported) so the
+// real run's wording doesn't have to be guessed exactly — a missed line only
+// costs a name in the summary list, and the raw output is always shown too.
+function parseSkillsImport(raw: string): {
+  imported: string[]
+  skipped: Array<{ name: string; reason: string }>
+  storePath?: string
+} {
+  const imported: string[] = []
+  const skipped: Array<{ name: string; reason: string }> = []
+  let storePath: string | undefined
+  for (const line of raw.split('\n')) {
+    const l = line.trim()
+    const imp = l.match(/^(?:would\s+import|import(?:ed|ing))\s+skill\s+"([^"]+)"/i)
+    if (imp) { imported.push(imp[1]); continue }
+    const skip = l.match(/^skipping\s+"([^"]+)"\s*:\s*(.+)$/i)
+    if (skip) { skipped.push({ name: skip[1], reason: skip[2].trim() }); continue }
+    // Trailing summary names the store directory — the only place it's printed.
+    const store = l.match(/imported\s+into\s+(.+?)\s*$/i)
+    if (store) storePath = store[1]
+  }
+  // Sources are scanned in order and a name can be skipped once per source that
+  // also has it, so the same skill shows up repeatedly; de-dupe for display.
+  return { imported: [...new Set(imported)], skipped, storePath }
+}
+
+// Folder names currently in the shared store — what a sharing sandbox will see.
+// There's no `sbx skills ls`, so this reads the directory sbx names in its own
+// output. Best-effort: an unreadable or not-yet-created store is just empty.
+function listSkillsStore(storePath?: string): string[] {
+  if (!storePath) return []
+  try {
+    return require('fs')
+      .readdirSync(storePath, { withFileTypes: true })
+      .filter((e: { isDirectory(): boolean }) => e.isDirectory())
+      .map((e: { name: string }) => e.name)
+      .sort((a: string, b: string) => a.localeCompare(b))
+  } catch {
+    return []
+  }
+}
+
+// An organization can attach a support message to its governance policy (sbx
+// v0.37+) — typically who to contact when a request is denied. Worth showing
+// verbatim next to a block instead of leaving the user stuck.
+//
+// The exact key is read defensively across the plausible spellings: it only
+// appears when governance is ACTIVE, which needs an org-managed policy, so it
+// could not be observed against a local install (`governance: {active: false}`).
+// Same tolerant approach den already takes for the policy-log fields. If the key
+// turns out to differ, this returns undefined and nothing is shown — it never
+// invents or mislabels a message.
+function governanceSupportMessage(gov: unknown): string | undefined {
+  if (!gov || typeof gov !== 'object') return undefined
+  const g = gov as Record<string, unknown>
+  const keys = [
+    'support_message', 'supportMessage',
+    'support_contact', 'supportContact',
+    'contact', 'message', 'support'
+  ]
+  for (const k of keys) {
+    const v = g[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return undefined
+}
+
+// Read `sbx policy log --json` into blocks.
+//
+// The real v0.37 payload is `{ blocked_hosts: [...], allowed_hosts: [...] }`,
+// and each row names its sandbox in `vm_name`. This used to look only for a
+// top-level array or `entries`/`log`/`events`, none of which sbx emits — so
+// every call parsed to zero rows and log-sourced blocks never appeared in den at
+// all (only the PTY output scanner worked). `blocked_hosts` is read first; the
+// generic shapes are kept as a fallback for other sbx builds.
 function parsePolicyLogJson(raw: string, fallbackSandbox?: string): PolicyBlock[] {
   let data: unknown
   try { data = JSON.parse(raw) } catch { return [] }
-  const env = data as { entries?: unknown; log?: unknown; events?: unknown }
-  const rows = (Array.isArray(data) ? data : env?.entries ?? env?.log ?? env?.events ?? []) as Array<Record<string, unknown>>
+  const env = data as { blocked_hosts?: unknown; entries?: unknown; log?: unknown; events?: unknown }
+  // Entries under `blocked_hosts` are denials by definition — no decision field
+  // to filter on, so remember which list we're reading.
+  const blocked = Array.isArray(env?.blocked_hosts) ? env.blocked_hosts : null
+  const rows = (blocked
+    ?? (Array.isArray(data) ? data : env?.entries ?? env?.log ?? env?.events ?? [])) as Array<Record<string, unknown>>
   const pick = (o: Record<string, unknown>, keys: string[]): string | undefined => {
     for (const k of keys) { const v = o[k]; if (typeof v === 'string' && v.trim()) return v.trim() }
     return undefined
@@ -1180,14 +1271,17 @@ function parsePolicyLogJson(raw: string, fallbackSandbox?: string): PolicyBlock[
   const out: PolicyBlock[] = []
   for (const r of rows) {
     if (!r || typeof r !== 'object') continue
-    const decision = pick(r, ['decision', 'action', 'verdict'])?.toLowerCase()
-    if (decision && !/deny|denied|block/.test(decision)) continue   // skip allows
+    if (!blocked) {
+      const decision = pick(r, ['decision', 'action', 'verdict'])?.toLowerCase()
+      if (decision && !/deny|denied|block/.test(decision)) continue   // skip allows
+    }
     const host = pick(r, ['host', 'domain', 'hostname', 'target'])
     if (!host) continue
     const tsStr = pick(r, ['last_seen', 'lastSeen', 'timestamp', 'time', 'at', 'seen_at'])
     const ts = tsStr ? Date.parse(tsStr) : NaN
     out.push({
-      sandbox: pick(r, ['sandbox', 'sandbox_name', 'sandboxName']) ?? fallbackSandbox ?? '',
+      // `vm_name` is what v0.37 calls the sandbox in this payload.
+      sandbox: pick(r, ['sandbox', 'sandbox_name', 'sandboxName', 'vm_name', 'vmName']) ?? fallbackSandbox ?? '',
       host,
       rule: pick(r, ['rule', 'rule_name', 'ruleName']),
       reason: pick(r, ['reason', 'detail', 'message']),
@@ -1198,11 +1292,16 @@ function parsePolicyLogJson(raw: string, fallbackSandbox?: string): PolicyBlock[
   return out
 }
 
+// `sbx policy log` has no --sandbox flag (v0.37 accepts only --json/--limit/
+// --type/-q), and passing one made the whole command fail — so a per-sandbox
+// fetch returned nothing even once the payload was parsed correctly. Ask for the
+// full log and narrow by the row's own sandbox name instead.
 function fetchPolicyLog(name?: string): Promise<PolicyBlock[]> {
-  const args = ['policy', 'log', '--json']
-  if (name) args.push('--sandbox', name)
-  return sbx(args, { timeout: 12000 })
-    .then((out) => parsePolicyLogJson(out, name))
+  return sbx(['policy', 'log', '--json'], { timeout: 12000 })
+    .then((out) => {
+      const blocks = parsePolicyLogJson(out, name)
+      return name ? blocks.filter((b) => !b.sandbox || b.sandbox === name) : blocks
+    })
     .catch(() => [])
 }
 
@@ -1759,6 +1858,41 @@ function showMainWindow(): void {
 
 // Show the window (recreating it if it was closed) and deliver a tray-driven
 // navigation event once the renderer has finished loading.
+// Stop then start sandboxd. Shared by the Runtime IPC handler and the menu-bar
+// item, so both stream into the same Diagnostics output box.
+async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
+  const send = (chunk: string) =>
+    mainWindow?.webContents.send('minipit:daemon-output', chunk)
+  const step = async (args: string[]) => {
+    send(`$ sbx ${args.join(' ')}\r\n`)
+    const { code } = await ptyRun(args, send, 60000)
+    return code
+  }
+  try {
+    await step(['daemon', 'stop'])          // best-effort — ignore its exit code
+    const code = await step(['daemon', 'start', '-d'])
+    if (code !== 0) return { ok: false, error: `sbx daemon start exited ${code}` }
+    send('\nDaemon restarted.\n')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
+// sbx version for the menu bar. Cached because the tray menu is rebuilt
+// synchronously (and often); refreshed in the background on each rebuild so a
+// runtime update shows up without restarting den.
+let cachedSbxVersion = ''
+function refreshSbxVersion(): void {
+  sbx(['version'], { timeout: 8000 })
+    .then((raw) => {
+      // "sbx version: v0.37.0 <sha>" — keep the version, drop the commit.
+      const v = raw.match(/v?\d+\.\d+\.\d+\S*/)?.[0] ?? ''
+      if (v && v !== cachedSbxVersion) { cachedSbxVersion = v; updateTrayMenu(lastTraySandboxes) }
+    })
+    .catch(() => { /* runtime missing or daemon down — the item just says "unknown" */ })
+}
+
 function navigateFromTray(channel: string, payload: string): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
@@ -1780,9 +1914,14 @@ function createTray(): void {
   updateTrayMenu([])
 }
 
+// Last list the tray was built from, so an async refresh (e.g. the sbx version
+// landing) can rebuild without the caller having to pass it again.
+let lastTraySandboxes: Array<{ name: string; status: string; workspace: string }> = []
+
 // Build the menu-bar dropdown: quick access to running sandboxes and projects.
 function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspace: string }>): void {
   if (!tray) return
+  lastTraySandboxes = sandboxes
   const running = sandboxes.filter((s) => s.status === 'running')
 
   const projects: { workspace: string; count: number }[] = []
@@ -1803,9 +1942,32 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
     { type: 'separator' },
     { label: 'New Sandbox…', click: () => navigateFromTray('minipit:open-modal', 'new-sandbox') },
     { type: 'separator' },
+    // Runtime, without opening den first: what version is installed, a daemon
+    // restart for when sandboxes stop responding, and a jump to the log viewer.
+    {
+      label: 'Runtime',
+      submenu: [
+        { label: cachedSbxVersion ? `sbx ${cachedSbxVersion}` : 'sbx version unknown', enabled: false },
+        { type: 'separator' },
+        {
+          label: 'Restart daemon',
+          // Show the window first: the restart streams into the Diagnostics box
+          // in Settings ▸ Runtime, and a silent background restart would look
+          // like nothing happened.
+          click: () => {
+            navigateFromTray('minipit:navigate', 'settings')
+            void restartDaemon()
+          }
+        },
+        { label: 'Log viewer', click: () => navigateFromTray('minipit:navigate', 'logs') }
+      ]
+    },
+    { type: 'separator' },
     { label: 'Quit den', role: 'quit' }
   ]
   tray.setContextMenu(Menu.buildFromTemplate(items))
+  // Kick a version read on first build (and pick up runtime updates later).
+  if (!cachedSbxVersion) refreshSbxVersion()
 }
 
 // The application menu mirrors the sidebar navigation and lists live data
@@ -2000,6 +2162,8 @@ function setupIPC(): void {
     name?: string
     template?: string
     kits?: string[]
+    ports?: string[]
+    noShareSkills?: boolean
   }) => {
     // Ensure the target workspace folder exists — defaults like ~/den/<name>
     // won't have been created yet (no-op for existing project/clone folders).
@@ -2010,6 +2174,12 @@ function setupIPC(): void {
     if (config.memory) args.push('-m', config.memory)
     if (config.branch) args.push('--clone')
     if (config.template) args.push('-t', config.template)
+    // -p is honoured at creation only (sbx v0.37+); re-attaching ignores it, so
+    // later changes go through `sbx ports` (see port-publish below).
+    for (const spec of config.ports ?? []) args.push('-p', spec)
+    // The shared skills store is mounted by default, so only the opt-out is ever
+    // passed. Hidden from `sbx create --help` in v0.37.0 but accepted.
+    if (config.noShareSkills) args.push('--no-share-skills')
     // --kit can only be passed at creation; stack one flag per kit directory.
     for (const dir of config.kits ?? []) args.push('--kit', dir)
     args.push(config.agent, config.workspace)
@@ -2413,24 +2583,7 @@ function setupIPC(): void {
   // render under the Restart daemon button, separate from the diagnostics box.
   // The first step is best-effort — if the daemon is already down, `stop` may
   // exit non-zero, which shouldn't block the restart.
-  ipcMain.handle('minipit:daemon-restart', async () => {
-    const send = (chunk: string) =>
-      mainWindow?.webContents.send('minipit:daemon-output', chunk)
-    const step = async (args: string[]) => {
-      send(`$ sbx ${args.join(' ')}\r\n`)
-      const { code } = await ptyRun(args, send, 60000)
-      return code
-    }
-    try {
-      await step(['daemon', 'stop'])          // best-effort — ignore its exit code
-      const code = await step(['daemon', 'start', '-d'])
-      if (code !== 0) return { ok: false, error: `sbx daemon start exited ${code}` }
-      send('\nDaemon restarted.\n')
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
-    }
-  })
+  ipcMain.handle('minipit:daemon-restart', () => restartDaemon())
 
   // Daemon health for the Diagnostics status indicator: `sbx daemon status`
   // (new in v0.35). Derive a running/stopped flag from the output, keep the raw
@@ -3257,9 +3410,6 @@ function setupIPC(): void {
       real,
       platform: process.platform,
       arch: process.arch,
-      // v0.35.x ships no Linux/ARM64 build — flag it so the UI can warn instead
-      // of offering an update that can't install. Expected back for v0.36.x.
-      noArm64LinuxBuild: process.platform === 'linux' && process.arch === 'arm64',
       canAutoUpdate: manager === 'brew' || manager === 'winget',
       releasesUrl: SBX_RELEASES_URL,
       updateCmd: displayCommand(manager, 'update'),
@@ -3314,16 +3464,37 @@ function setupIPC(): void {
   // running anything — `sbx policy check network <resource>` (new in v0.35).
   // Returns the parsed decision (allow/deny) plus the raw output for detail.
   ipcMain.handle('minipit:policy-check', async (_, resource: string, _name?: string) => {
+    // Read the decision from `--json` (v0.37+) rather than scanning the text.
+    // The old regex tested the whole output, so an ALLOWED host that merely
+    // contains "blocked"/"deny" in its name parsed as a denial. `allowed` is an
+    // explicit boolean, and the same payload carries the governance detail.
+    try {
+      const raw = await sbx(['policy', 'check', 'network', '--json', resource], { timeout: 12000 })
+      const j = JSON.parse(raw) as {
+        allowed?: boolean
+        governance?: Record<string, unknown>
+      }
+      if (typeof j.allowed === 'boolean') {
+        return {
+          ok: true,
+          decision: j.allowed ? 'allow' : 'deny',
+          supportMessage: governanceSupportMessage(j.governance),
+          raw
+        }
+      }
+      // Parsed, but not the shape we expect — fall through to the text reader.
+    } catch { /* no --json on this sbx, or non-JSON output: use the text path */ }
     try {
       // Documented form: `sbx policy check network <host>`. It's read-only and
       // evaluates the daemon-side authorizer, so no per-sandbox flag is passed
       // (its availability isn't pinned, and a bad flag would error the check).
       const raw = await sbx(['policy', 'check', 'network', resource], { timeout: 12000 })
-      const lc = raw.toLowerCase()
-      // Prefer an explicit deny/block signal; fall back to allow.
+      // Only look at the decision line, not the whole body (which repeats the
+      // host). sbx prints "Allowed: <target>" / "Denied: <target>" first.
+      const head = raw.split('\n').find((l) => /^\s*(allowed|denied|blocked)\s*:/i.test(l)) ?? raw
       const decision: 'allow' | 'deny' | 'unknown' =
-        /\b(deny|denied|block(ed)?|reject)/.test(lc) ? 'deny'
-          : /\b(allow(ed)?|permit(ted)?|ok\b)/.test(lc) ? 'allow'
+        /^\s*(denied|blocked)\s*:/i.test(head) ? 'deny'
+          : /^\s*allowed\s*:/i.test(head) ? 'allow'
             : 'unknown'
       return { ok: true, decision, raw }
     } catch (err) {
@@ -3620,6 +3791,103 @@ function setupIPC(): void {
   ipcMain.handle('minipit:pty-stop', (_, name: string) => {
     const proc = ptyMap.get(name)
     if (proc) { proc.kill(); ptyMap.delete(name) }
+  })
+
+  // ── Shared agent skills (sbx v0.37+) ──────────────────────────────────────
+  // `sbx skills import` copies skill folders from the host's agent directories
+  // (~/.agents/skills, ~/.claude/skills, …) into a store that new sandboxes
+  // mount read-write unless created with --no-share-skills.
+  //
+  // Driven in two steps from the GUI: preview with --dry-run, then commit with
+  // --force. --force isn't a shortcut here — a plain import PROMPTS before
+  // overwriting an existing skill, and there's no TTY behind an IPC call to
+  // answer it, so the command would hang until the timeout. The preview is what
+  // makes that safe: the user sees the exact overwrite list before confirming.
+  ipcMain.handle('minipit:skills-import', async (_, opts?: { dryRun?: boolean }) => {
+    const dryRun = !!opts?.dryRun
+    const args = ['skills', 'import', dryRun ? '--dry-run' : '--force']
+    try {
+      // Copying many skill folders is disk-bound; allow well past the 10s default.
+      const raw = await sbx(args, { timeout: 120000 })
+      const parsed = parseSkillsImport(raw)
+      return { ok: true, dryRun, raw, ...parsed, store: listSkillsStore(parsed.storePath) }
+    } catch (err) {
+      const error = (err instanceof Error ? err.message : String(err)).trim()
+      // A partial failure still prints per-skill lines, so parse what we got.
+      const parsed = parseSkillsImport(error)
+      return { ok: false, dryRun, raw: error, error, ...parsed, store: listSkillsStore(parsed.storePath) }
+    }
+  })
+
+  // ── SSH access to sandboxes (sbx v0.37+) ───────────────────────────────────
+  // `sbx setup ssh` writes a managed `Host *.sbx` block into ~/.ssh/config so
+  // `ssh <name>.sbx` reaches a sandbox with no key and no prompt (it authenticates
+  // through the daemon's Unix socket plus an active Docker login, and starts the
+  // daemon/sandbox on demand). That's also what makes remote-development clients
+  // like VS Code and Cursor work against a sandbox.
+  ipcMain.handle('minipit:ssh-status', () => {
+    // Only ever report counts and flags — never the file's contents. An ssh
+    // config routinely holds unrelated hosts and credentials, and none of it
+    // belongs in the renderer.
+    let cfg = ''
+    try { cfg = require('fs').readFileSync(sshConfigPath(), 'utf8') } catch { /* no config yet */ }
+    const blocks = (cfg.match(/^[ \t]*Host[ \t]+\S*\*\.sbx\b/gim) ?? []).length
+    return {
+      configured: blocks > 0,
+      // >1 means an earlier block was left behind (a hand-edited or
+      // partially-marked block defeats the idempotent rewrite). ssh takes the
+      // FIRST value it sees for each keyword, so a stale block silently wins over
+      // the current one and can drop settings the new block relies on.
+      duplicates: Math.max(0, blocks - 1),
+      path: sshConfigPath()
+    }
+  })
+
+  // Writes to ~/.ssh/config, so it only ever runs from an explicit user action.
+  ipcMain.handle('minipit:ssh-setup', async () => {
+    try {
+      const output = await sbx(['setup', 'ssh'], { timeout: 30000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Open a sandbox in a remote-development editor over the *.sbx SSH host. The
+  // workspace is bind-mounted at the same absolute path inside the sandbox as on
+  // the host, so the host path doubles as the remote path.
+  ipcMain.handle('minipit:open-remote-editor', async (_, name: string, workspace: string, editor?: string) => {
+    // Allowlist the binary: it ends up in spawn(), and the renderer shouldn't be
+    // able to name an arbitrary executable. Each entry also carries the URI
+    // scheme its app registers, for the no-CLI fallback below.
+    const EDITORS: Record<string, string> = {
+      code: 'vscode', cursor: 'cursor', windsurf: 'windsurf', codium: 'vscodium'
+    }
+    const bin = editor && editor in EDITORS ? editor : 'code'
+    const scheme = EDITORS[bin]
+    const host = `${name}.sbx`
+    try {
+      await new Promise<void>((resolve, reject) => {
+        // Detached: the editor outlives den, and we don't want its stdio.
+        const proc = spawn(bin, ['--remote', `ssh-remote+${host}`, workspace], {
+          env: guiEnv(), detached: true, stdio: 'ignore'
+        })
+        proc.on('error', reject)
+        proc.unref()
+        resolve()
+      })
+      return { ok: true }
+    } catch {
+      // No CLI on PATH ("code" isn't installed until you run "Shell Command:
+      // Install 'code' command"), so hand the URI to the OS instead — that only
+      // needs the app itself.
+      try {
+        await shell.openExternal(`${scheme}://vscode-remote/ssh-remote+${host}${workspace}`)
+        return { ok: true, viaUri: true }
+      } catch (err) {
+        return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+      }
+    }
   })
 
   // The renderer mirrors the terminal theme's light/dark polarity here so Claude's

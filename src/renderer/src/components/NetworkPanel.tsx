@@ -46,7 +46,9 @@ export function NetworkPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?:
   const [checkOpen, setCheckOpen] = useState(false)
   const [checkInput, setCheckInput] = useState('')
   const [checkBusy, setCheckBusy] = useState(false)
-  const [checkResult, setCheckResult] = useState<{ decision: 'allow' | 'deny' | 'unknown'; text: string } | null>(null)
+  // `support` is the org's governance support message (sbx v0.37+) — shown
+  // verbatim on a denial so the user knows who to ask, instead of just "blocked".
+  const [checkResult, setCheckResult] = useState<{ decision: 'allow' | 'deny' | 'unknown'; text: string; support?: string } | null>(null)
 
   const loadPolicy = () => {
     setPolLoading(true)
@@ -101,7 +103,7 @@ export function NetworkPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?:
     const text = r.decision === 'allow' ? `Allowed — ${resource} would be reachable.`
       : r.decision === 'deny' ? `Blocked — ${resource} would be denied by policy.`
         : (r.raw?.trim() || r.error || 'Could not determine a decision.')
-    setCheckResult({ decision: r.decision, text })
+    setCheckResult({ decision: r.decision, text, support: r.supportMessage })
   }
 
   // One-click allow straight from a recent block.
@@ -396,7 +398,14 @@ export function NetworkPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?:
 
               {checkResult && (
                 <div className={`np-banner ${checkResult.decision === 'allow' ? 'ok' : checkResult.decision === 'deny' ? 'err' : ''}`}>
-                  <span className="np-banner-txt">{checkResult.text}</span>
+                  <span className="np-banner-txt">
+                    {checkResult.text}
+                    {/* The org's own words, so render them as given — den has no
+                        idea whether it's a name, a URL or a ticket queue. */}
+                    {checkResult.support && (
+                      <span className="np-banner-support">{checkResult.support}</span>
+                    )}
+                  </span>
                 </div>
               )}
 

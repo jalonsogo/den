@@ -251,6 +251,29 @@ export interface PolicyRule {
   resources: string[]
 }
 
+// State of the managed `Host *.sbx` block that `sbx setup ssh` writes (v0.37+).
+// Deliberately carries no file contents — just whether it's there, and whether a
+// stale duplicate is shadowing it.
+export interface SshStatus {
+  configured: boolean
+  duplicates: number
+  path: string
+}
+
+// Result of `sbx skills import` (v0.37+). `imported` is what would be / was
+// copied; `store` is what the shared store holds now, which is what a sandbox
+// with skill sharing on actually sees.
+export interface SkillsImport {
+  ok: boolean
+  dryRun: boolean
+  imported: string[]
+  skipped: Array<{ name: string; reason: string }>
+  store: string[]
+  storePath?: string
+  raw: string
+  error?: string
+}
+
 export interface NetworkPolicy {
   ok: boolean
   governance?: string | null
@@ -265,7 +288,6 @@ export interface SbxInstallInfo {
   real: string
   platform?: string
   arch?: string
-  noArm64LinuxBuild?: boolean
   canAutoUpdate: boolean
   releasesUrl: string
   updateCmd: string
@@ -397,9 +419,13 @@ declare global {
       setRuntimeEnv(key: string, value: string | boolean | null): Promise<{ ok: boolean; error?: string }>
       onDiagnoseOutput(cb: (chunk: string) => void): () => void
       onDaemonOutput(cb: (chunk: string) => void): () => void
+      skillsImport(opts?: { dryRun?: boolean }): Promise<SkillsImport>
+      sshStatus(): Promise<SshStatus>
+      sshSetup(): Promise<{ ok: boolean; output?: string; error?: string }>
+      openRemoteEditor(name: string, workspace: string, editor?: string): Promise<{ ok: boolean; viaUri?: boolean; error?: string }>
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
-      policyCheck(resource: string, name?: string): Promise<{ ok: boolean; decision: 'allow' | 'deny' | 'unknown'; raw?: string; error?: string }>
+      policyCheck(resource: string, name?: string): Promise<{ ok: boolean; decision: 'allow' | 'deny' | 'unknown'; supportMessage?: string; raw?: string; error?: string }>
       policyAllow(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       policyDeny(name: string, resources: string): Promise<{ ok: boolean; output?: string; error?: string }>
       policyRm(name: string, resource: string): Promise<{ ok: boolean; output?: string; error?: string }>

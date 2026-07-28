@@ -94,6 +94,9 @@ interface AppState {
   // Selected color theme id (drives the full palette: surfaces + accent).
   accent: string
   termTheme: string
+  // Which editor "Open in…" launches over the sandbox's SSH host. One choice
+  // rather than an entry per IDE — the menu shouldn't list editors you don't use.
+  remoteEditor: string
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
   // Per-sandbox custom colour (by name); absent → the default neutral avatar.
@@ -155,6 +158,7 @@ interface AppState {
   setRightDockOpen:   (open: boolean) => void
   setAccent:          (id: string) => void
   setTermTheme:       (id: string) => void
+  setRemoteEditor:    (id: string) => void
   setSandboxIcon:     (name: string, iconKey: string | null) => void
   setSandboxColor:    (name: string, hex: string | null) => void
   setCustomizeSandbox:(name: string | null) => void
@@ -228,6 +232,7 @@ export const useStore = create<AppState>((set) => ({
   rightDockOpen: false,
   accent: localStorage.getItem('minipit:accent') ?? DEFAULT_THEME,
   termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
+  remoteEditor: localStorage.getItem('minipit:remoteEditor') ?? 'code',
   sandboxIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
@@ -296,6 +301,12 @@ export const useStore = create<AppState>((set) => ({
     set(() => {
       localStorage.setItem('minipit:termTheme', id)
       return { termTheme: id }
+    }),
+
+  setRemoteEditor: (id) =>
+    set(() => {
+      localStorage.setItem('minipit:remoteEditor', id)
+      return { remoteEditor: id }
     }),
 
   // Merge this origin's localStorage cache into the durable store (store wins),

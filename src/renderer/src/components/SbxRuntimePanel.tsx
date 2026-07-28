@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 
 import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { useStore } from '../store'
 import { AccordionSection } from './AccordionSection'
+import { REMOTE_EDITORS } from '../lib/remoteEditors'
 import type { SbxRelease } from '../types'
 
 type DiagMode = 'text' | 'json' | 'github-issue' | 'upload'
@@ -247,6 +248,12 @@ export function SbxRuntimePanel({
   const [runtimeNoProxy, setRuntimeNoProxy] = useState('')
   const [virtiofsCache, setVirtiofsCache] = useState(true)
   const [runtimeEnvDirty, setRuntimeEnvDirty] = useState(false)
+  const remoteEditorId = useStore((s) => s.remoteEditor)
+  const setRemoteEditor = useStore((s) => s.setRemoteEditor)
+  // SSH access (`sbx setup ssh`) — the managed *.sbx block in ~/.ssh/config.
+  const [ssh, setSsh] = useState<import('../types').SshStatus | null>(null)
+  const [sshBusy, setSshBusy] = useState(false)
+  const [sshMsg, setSshMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [preserveSecrets, setPreserveSecrets] = useState(true)
   const [resetConfirm, setResetConfirm] = useState('')
   const [resetBusy, setResetBusy] = useState(false)
@@ -429,6 +436,38 @@ export function SbxRuntimePanel({
     if (diagRef.current) diagRef.current.scrollTop = diagRef.current.scrollHeight
   }, [diagOut])
 
+  // Read the SSH-config state once on mount (cheap, and read-only).
+  const loadSsh = () => window.minipit?.sshStatus().then((s) => setSsh(s ?? null)).catch(() => setSsh(null))
+  useEffect(() => { void loadSsh() }, [])
+
+  const runSshSetup = async () => {
+    if (sshBusy) return
+    setSshBusy(true)
+    setSshMsg(null)
+    // Report what actually failed. Swallowing the rejection here (`.catch(() =>
+    // null)`) and falling back to "could not write the SSH config" blamed the
+    // file for what is usually an IPC problem — most often a stale main process
+    // in dev, where the renderer hot-reloads but the handler doesn't exist yet.
+    const r = await Promise.resolve()
+      .then(() => window.minipit?.sshSetup())
+      .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+    setSshBusy(false)
+    if (r?.ok) {
+      setSshMsg({ ok: true, text: 'SSH config written — sandboxes are reachable at <name>.sbx.' })
+    } else {
+      const err = r?.error?.trim()
+      setSshMsg({
+        ok: false,
+        text: !err ? 'Could not run sbx setup ssh — no response from the runtime bridge.'
+          // An unregistered channel means this build's main process predates the
+          // handler; a reload won't help, only a restart.
+          : /no handler registered/i.test(err) ? `${err} — restart den to load the updated main process.`
+            : err
+      })
+    }
+    void loadSsh()
+  }
+
   // Stream `sbx daemon` (restart) output into its own box.
   useEffect(() => {
     const unsub = window.minipit?.onDaemonOutput((chunk) =>
@@ -568,9 +607,7 @@ export function SbxRuntimePanel({
             <div className="ss-lbl">Latest release</div>
             <div className="ss-sub">{loading ? 'Checking GitHub…' : latest ? `${latest} · ${fmtDate(releases[0]?.date)}` : 'Unavailable'}</div>
           </div>
-          {install?.noArm64LinuxBuild ? (
-            <span className="rt-badge rt-badge-update">No Linux/ARM64 build</span>
-          ) : install && !install.canAutoUpdate ? (
+          {install && !install.canAutoUpdate ? (
             <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(install.releasesUrl)}>
               <ExternalLink size={13} /> Download
             </button>
@@ -589,14 +626,6 @@ export function SbxRuntimePanel({
             </div>
           )}
         </div>
-        {install?.noArm64LinuxBuild && (
-          <div className="ss-row" style={{ paddingTop: 0 }}>
-            <div className="rt-cmdhint">
-              v0.35.x ships no Linux/ARM64 build (stability issues); it’s planned to return in v0.36.x. Updating on
-              this platform won’t find an installable build — stay on your current version for now.
-            </div>
-          </div>
-        )}
         {install && !install.canAutoUpdate && (
           <div className="ss-row" style={{ paddingTop: 0 }}>
             <div className="rt-cmdhint">
@@ -679,22 +708,95 @@ export function SbxRuntimePanel({
             onClick={toggleVirtiofsCache}
           />
         </div>
+        {/* SSH access (sbx v0.37+). Writing ~/.ssh/config is a host-level change,
+            so it's an explicit button — never something den does on its own. */}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">SSH access</div>
+            <div className="ss-sub">
+              Reach sandboxes as <code>&lt;name&gt;.sbx</code> over SSH, and open them in remote-development tools
+              like VS Code and Cursor. Writes a managed block to <code>~/.ssh/config</code> — no key needed, but you
+              must be signed in to Docker.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+            {ssh?.configured && <span className="rt-badge">Configured</span>}
+            <button className="btn btn-default btn-sm" onClick={runSshSetup} disabled={sshBusy}>
+              {sshBusy ? 'Writing…' : ssh?.configured ? 'Re-run setup' : 'Set up SSH'}
+            </button>
+          </div>
+        </div>
+        {ssh && ssh.duplicates > 0 && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-cmdhint">
+              <strong>{ssh.duplicates + 1} <code>Host *.sbx</code> blocks</strong> found in <code>{ssh.path}</code>.
+              ssh uses the first value it finds for each setting, so an older block silently overrides the current
+              one — which can drop settings the new block needs (for example <code>IdentityAgent none</code>, without
+              which an external SSH agent intercepts the connection). Remove the stale block by hand, then re-run
+              setup.
+            </div>
+          </div>
+        )}
+        {sshMsg && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className={`np-banner ${sshMsg.ok ? 'ok' : 'err'}`} style={{ marginTop: 0 }}>
+              <span className="np-banner-txt">{sshMsg.text}</span>
+            </div>
+          </div>
+        )}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Editor for “Open in…”</div>
+            <div className="ss-sub">
+              Which editor a sandbox opens in over SSH. All of these are VS Code derivatives — they share the{' '}
+              <code>--remote ssh-remote+</code> flag den drives; editors without it can't be opened this way.
+            </div>
+          </div>
+          <select
+            className="term-theme-select"
+            value={remoteEditorId}
+            onChange={(e) => setRemoteEditor(e.target.value)}
+            style={{ width: 220 }}
+          >
+            {REMOTE_EDITORS.map((ed) => (
+              <option key={ed.id} value={ed.id}>{ed.label}</option>
+            ))}
+          </select>
+        </div>
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Upstream egress proxy</div>
             <div className="ss-sub">
               Chain sandbox egress through an upstream proxy (<code>DOCKER_SANDBOXES_PROXY</code>). Supports{' '}
-              <code>http://</code>, <code>https://</code> and <code>socks5://</code> / <code>socks5h://</code>.
+              <code>http://</code>, <code>https://</code> and <code>socks5://</code> / <code>socks5h://</code>, or{' '}
+              <code>system</code> to follow this Mac's own proxy settings — including a PAC auto-config URL
+              (sbx v0.37+).
             </div>
           </div>
-          <input
-            className="s-input"
-            value={runtimeProxy}
-            placeholder="socks5://host:1080"
-            onChange={(e) => setRuntimeProxy(e.target.value)}
-            onBlur={() => saveRuntimeEnv('runtimeProxy', runtimeProxy.trim())}
-            style={{ width: 220 }}
-          />
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+            {/* One-tap for the common case. Writes the literal `system` into the
+                same field rather than a separate setting, so there's one source
+                of truth and a custom URL still just overwrites it. */}
+            <button
+              className={`btn btn-sm ${runtimeProxy.trim() === 'system' ? 'btn-primary' : 'btn-default'}`}
+              onClick={() => {
+                const next = runtimeProxy.trim() === 'system' ? '' : 'system'
+                setRuntimeProxy(next)
+                saveRuntimeEnv('runtimeProxy', next)
+              }}
+              title="Follow the host operating system's proxy configuration"
+            >
+              System
+            </button>
+            <input
+              className="s-input"
+              value={runtimeProxy}
+              placeholder="socks5://host:1080"
+              onChange={(e) => setRuntimeProxy(e.target.value)}
+              onBlur={() => saveRuntimeEnv('runtimeProxy', runtimeProxy.trim())}
+              style={{ width: 220 }}
+            />
+          </div>
         </div>
         <div className="ss-row">
           <div>
