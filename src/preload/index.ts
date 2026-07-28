@@ -203,6 +203,7 @@ const api = {
     ipcRenderer.invoke('minipit:agent-drop-file', name, fileName, bytes),
   agentResize: (name: string, cols: number, rows: number) => ipcRenderer.invoke('minipit:agent-resize', name, cols, rows),
   agentEnsure: (name: string, cols: number, rows: number) => ipcRenderer.invoke('minipit:agent-ensure', name, cols, rows),
+  setAppTheme: (mode: 'light' | 'dark') => ipcRenderer.invoke('minipit:app-theme', mode),
   onAgentOutput: (cb: (name: string, data: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, name: string, data: string) => cb(name, data)
     ipcRenderer.on('minipit:agent-output', handler)

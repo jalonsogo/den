@@ -45,6 +45,23 @@ const uptimeMap = new Map<string, number>()
 // error with "No conversation found to continue"). Consumed on first ensure.
 const freshSandboxes = new Set<string>()
 
+// Effective app light/dark mode, mirrored from the renderer (which resolves
+// themePref → light/dark). Used to set Claude Code's own theme (themeId) so its
+// text matches the terminal background. Defaults to dark until the renderer
+// reports; updated via the app-theme IPC.
+let appThemeMode: 'light' | 'dark' = 'dark'
+// Recent raw agent output per sandbox. Replayed to the renderer when a terminal
+// reattaches (sandbox switch / tab return) so the freshly-mounted, empty xterm
+// reconstructs the current screen immediately — instead of waiting (sometimes
+// >10s) for a busy agent to redraw in response to a resize nudge. A full-screen
+// TUI like Claude Code redraws the whole frame on each update, so replaying the
+// tail leaves xterm in the correct final state; the cap keeps memory bounded.
+const agentOutBuf = new Map<string, string>()
+const AGENT_BUF_MAX = 1_000_000
+// Claude Code stores its theme as a numeric themeId in ~/.claude/settings.json:
+// 0 Dark · 1 Light · 2 Dark(colorblind) · 3 Light(colorblind) · 4 Dark ANSI · 5 Light ANSI.
+const claudeThemeId = (): number => (appThemeMode === 'light' ? 1 : 0)
+
 function getSbxPath(): string {
   const stored = store.get('sbxPath') as string | undefined
   if (stored) return stored
@@ -1256,7 +1273,10 @@ const EXEC_RETRIES = 5
 const EXEC_RETRY_MS = 1000
 
 function injectClaudeHooks(name: string, attempt = 0): void {
-  const cfg = JSON.stringify(DEN_HOOKS)
+  // Merge Claude's theme (themeId) alongside the hooks so its text stays
+  // readable against den's terminal background (light app → light Claude theme).
+  // Claude reads this at startup, so it takes effect on the next agent session.
+  const cfg = JSON.stringify({ ...DEN_HOOKS, themeId: claudeThemeId() })
   // Write den_hooks to a real file and merge two plain files with jq. Process
   // substitution (`<(…)`) is bash-only and the sandbox's /bin/sh is dash, so
   // `sh -c` would fail with "Syntax error: ( unexpected" and never install the hooks.
@@ -1623,11 +1643,16 @@ function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { contin
       noConversation = true
     }
     mainWindow?.webContents.send('minipit:agent-output', name, data)
+    // Keep a bounded tail of raw output for replay on reattach (see agentOutBuf).
+    let b = (agentOutBuf.get(name) ?? '') + data
+    if (b.length > AGENT_BUF_MAX) b = b.slice(b.length - AGENT_BUF_MAX)
+    agentOutBuf.set(name, b)
     scanOutputForBlocks(name, data)
   })
 
   proc.onExit(() => {
     sbxProcesses.delete(name)
+    agentOutBuf.delete(name)
     // The `--continue` reconnect failed because there was no prior conversation.
     // Retry once as a fresh session rather than surfacing the error and dying.
     if (noConversation) {
@@ -3532,7 +3557,14 @@ function setupIPC(): void {
         !isFresh && sb?.status === 'running' && (sb.agent ?? '').startsWith('claude')
       spawnSandboxProcess(name, cols, rows, { continueSession })
     } else {
-      // Session exists — nudge the size so the TUI repaints cleanly at this size.
+      // Reattaching to a live session: the renderer just mounted a fresh, empty
+      // terminal. Replay the buffered output so it shows the current screen at
+      // once — a busy agent (e.g. mid-response) can otherwise ignore the resize
+      // nudge below for many seconds, leaving the terminal blank until then.
+      // The renderer subscribed before invoking this, so it receives the replay.
+      const buf = agentOutBuf.get(name)
+      if (buf) mainWindow?.webContents.send('minipit:agent-output', name, buf)
+      // Nudge the size so the TUI repaints cleanly at this size.
       try { proc.resize(Math.max(2, cols - 1), rows) } catch { /* ignore */ }
       try { proc.resize(cols, rows) } catch { /* ignore */ }
     }
@@ -3541,6 +3573,12 @@ function setupIPC(): void {
   ipcMain.handle('minipit:pty-stop', (_, name: string) => {
     const proc = ptyMap.get(name)
     if (proc) { proc.kill(); ptyMap.delete(name) }
+  })
+
+  // Renderer mirrors its resolved light/dark mode here so Claude's themeId can
+  // be set to match on the next agent launch (see injectClaudeHooks).
+  ipcMain.handle('minipit:app-theme', (_, mode: 'light' | 'dark') => {
+    if (mode === 'light' || mode === 'dark') appThemeMode = mode
   })
 }
 

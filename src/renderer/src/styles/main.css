@@ -1255,6 +1255,42 @@ html, body, #root {
   background: color-mix(in srgb, var(--primary) 16%, var(--tbg, #111));
 }
 
+/* xterm switches to the arrow cursor while a TUI has mouse tracking on. den
+   hands plain left-drags back to the emulator (see TerminalPanel), so the text
+   cursor is the honest one. */
+.term .xterm.enable-mouse-events {
+  cursor: text;
+}
+
+/* Terminal right-click Copy/Paste menu. Themed off the terminal fg/bg vars so
+   it reads on any term theme (light or dark). */
+.term-ctx {
+  z-index: 10;
+  min-width: 132px;
+  padding: 4px;
+  display: flex; flex-direction: column;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tfg, #fff) 8%, var(--tbg, #111));
+  border: 1px solid color-mix(in srgb, var(--tfg, #fff) 14%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.term-ctx-item {
+  appearance: none;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--tfg, #fff) 85%, transparent);
+  cursor: pointer;
+}
+.term-ctx-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
+}
+.term-ctx-item:disabled { opacity: 0.4; cursor: default; }
+
 .term-theme-select {
   appearance: none;
   -webkit-appearance: none;

@@ -23,6 +23,12 @@ import type { Sandbox, LogLine, PolicyBlock } from './types'
 export function App() {
   const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation, loadAutoSync } = useStore()
 
+  // Mirror the resolved light/dark mode to main so it can set Claude Code's own
+  // theme (themeId) to match — keeps the agent's text readable against the
+  // terminal background. Applies to the next agent launch.
+  const appThemeMode = useStore((s) => s.theme)
+  useEffect(() => { window.minipit?.setAppTheme(appThemeMode) }, [appThemeMode])
+
   useEffect(() => {
     // Initial load
     window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))

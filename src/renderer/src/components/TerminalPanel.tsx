@@ -5,6 +5,7 @@ import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { useStore, unackedBlockCount } from '../store'
 import { termTheme as resolveTermTheme } from '../lib/termThemes'
@@ -26,10 +27,17 @@ interface XTermProps {
   onDropFiles?: (files: File[]) => void
   // Bumping this number forces a redraw (refit + repaint the attached TUI).
   redraw?: number
-  // Send Shift+Enter as ESC+CR (a newline in Claude Code / most TUIs) instead of
-  // a bare CR, which the agent reads as "submit" — stranding half-typed messages.
+  // When true, Shift+Enter inserts a newline (ESC+CR) instead of submitting.
   shiftEnterNewline?: boolean
 }
+
+// GPU (WebGL) rendering toggle, OFF by default. The WebGL renderer intermittently
+// leaves the terminal blank/partially-painted until a resize forces a full
+// repaint — a known issue with hidden/shown/remounted GPU canvases, which den
+// does constantly (tab + segment switches). The DOM renderer repaints reliably
+// on refresh, and the GPU gain is marginal for a chat-style TUI. Flip to true to
+// re-enable (would need per-visibility clearTextureAtlas/refresh handling first).
+const ENABLE_WEBGL = false
 
 // A real VT100 terminal (xterm.js) that handles full-screen TUIs like Claude Code.
 function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles, redraw, shiftEnterNewline }: XTermProps) {
@@ -45,7 +53,23 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
   // a stable callback (otherwise effects depending on it would re-fire endlessly).
   const onResizeRef = useRef(onResize)
   onResizeRef.current = onResize
+  // onInput likewise changes identity each render; the context-menu callbacks
+  // read it through a ref so they don't need to be rebuilt on every render.
+  const onInputRef = useRef(onInput)
+  onInputRef.current = onInput
   const [dragging, setDragging] = useState(false)
+  // Right-click menu: null when closed, else where to anchor it and whether
+  // there's a selection to copy. Positioned relative to the container.
+  const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
+
+  const copySelection = useCallback(() => {
+    const sel = termRef.current?.getSelection()
+    if (sel) navigator.clipboard?.writeText(sel).catch(() => {})
+  }, [])
+
+  const pasteClipboard = useCallback(() => {
+    navigator.clipboard?.readText().then((t) => { if (t) onInputRef.current(t) }).catch(() => {})
+  }, [])
 
   // Force the attached agent to repaint. Refit, then push the size to the PTY:
   // if it changed that's a real SIGWINCH (the TUI redraws); if it's unchanged —
@@ -81,7 +105,24 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       lineHeight: 1.0,
       theme,
       allowProposedApi: true,
-      scrollback: 5000
+      scrollback: 5000,
+      // Never let the agent paint text you can't read. A TUI picks its colors for
+      // the theme IT thinks it's in: Claude Code running its dark palette in a
+      // light terminal draws near-white text (and near-black diff backgrounds)
+      // straight onto white, which vanishes — and the same mismatch hits `ls`
+      // colors in the shell. xterm's default (1) means "render it as asked", so
+      // set a WCAG-AA floor: any foreground that lands under 4.5:1 against the
+      // background it's actually drawn on — including the selection block — gets
+      // nudged until it clears. Dim cells only need half the ratio, so they stay
+      // distinguishable from normal text.
+      minimumContrastRatio: 4.5,
+      // Needed by the force-select interceptor below: on macOS xterm only lets
+      // the emulator take a drag away from a mouse-tracking TUI when Option is
+      // held AND this option is on (it defaults to off). altClickMovesCursor is
+      // turned off so the Option press we synthesize can never be mistaken for
+      // an alt-click, which would send cursor-movement keys to the agent.
+      macOptionClickForcesSelection: true,
+      altClickMovesCursor: false
     })
     termRef.current = term
     const fit = new FitAddon()
@@ -94,11 +135,27 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     term.open(ref.current)
     fitRef.current = fit
 
+    // GPU-accelerated rendering. Much cheaper redraws than the default DOM
+    // renderer, which matters for a full-screen TUI that repaints often. The
+    // WebGL context can be lost (GPU reset, tab backgrounded, driver hiccup);
+    // when that happens the addon emits onContextLoss — dispose it so xterm
+    // falls back to its DOM renderer instead of freezing on a dead canvas.
+    if (ENABLE_WEBGL) {
+      try {
+        const webgl = new WebglAddon()
+        webgl.onContextLoss(() => { try { webgl.dispose() } catch { /* ignore */ } })
+        term.loadAddon(webgl)
+      } catch { /* WebGL unavailable — xterm keeps its DOM renderer */ }
+    }
+
     // Fit to the container and force a repaint. xterm's canvas can render blank
     // if it was sized before layout settled (navigation, font load, dock width),
     // so refit across a couple of frames + a delayed fallback — otherwise the
     // screen stays empty until some resize (e.g. toggling a dock) forces a fit.
     let disposed = false
+    // Set once the agent writes anything, so the reattach nudges below can stop
+    // pestering a terminal that has already painted.
+    let gotData = false
     const refit = () => {
       try {
         fit.fit()
@@ -122,41 +179,110 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
 
     refit()
     sentColsRef.current = term.cols; sentRowsRef.current = term.rows
+    // Subscribe to output BEFORE attaching the session, so we never miss the
+    // first frame or the reattach replay (main emits it during agent-ensure).
+    const unsub = subscribe((data) => { gotData = true; term.write(data) })
+    const dataDisp = term.onData(onInput)
     onStart(term.cols, term.rows)
     requestAnimationFrame(() => { kick(); requestAnimationFrame(kick) })
-    // After layout settles, force a repaint — covers a fresh terminal reattaching
-    // to an already-running agent (sandbox switch), where the size won't change so
-    // syncSize alone wouldn't trigger a redraw and the view would stay blank.
-    const settleT = setTimeout(() => { if (!disposed) forceRedraw() }, 150)
+    // A fresh terminal reattaching to an already-running agent starts empty and
+    // only fills when the agent redraws in response to our resize nudge. A BUSY
+    // agent (mid-response — worst on the actively-working sandbox) may defer that
+    // first SIGWINCH, leaving the view blank until another resize lands: the
+    // "white until I toggle a dock" symptom. So re-nudge on a schedule until the
+    // agent actually paints something (gotData), then stop.
+    const settleTimers = [150, 500, 1200, 2500, 4000].map((ms) =>
+      setTimeout(() => { if (!disposed && !gotData) forceRedraw() }, ms)
+    )
     // Monospace metrics are sometimes measured before the web font loads, giving
     // a mis-sized (occasionally blank) grid; refit + redraw once fonts are ready.
     document.fonts?.ready?.then(() => { if (!disposed) forceRedraw() }).catch(() => {})
     if (visible) setTimeout(() => { try { term.focus() } catch { /* ignore */ } }, 0)
 
-    const unsub = subscribe((data) => term.write(data))
-    const dataDisp = term.onData(onInput)
-
-    // Copy-on-select: xterm draws its selection on a canvas (not a DOM
-    // selection), so the menu Copy role can't see it. Mirror the selection to
-    // the clipboard ourselves so text can be copied out of the terminal.
-    const selDisp = term.onSelectionChange(() => {
+    // xterm draws its selection on a canvas, not as a DOM selection, so the
+    // browser/menu copy machinery can't see it. Intercept the 'copy' event
+    // (fired by Cmd+C and the Edit ▸ Copy menu role) and fill the clipboard
+    // from xterm's own selection. Without this the menu copy role would copy
+    // the empty DOM selection and clobber whatever was on the clipboard.
+    const el = ref.current
+    const onCopy = (ev: ClipboardEvent) => {
       const sel = term.getSelection()
-      if (sel) navigator.clipboard?.writeText(sel).catch(() => {})
-    })
+      if (!sel) return
+      ev.clipboardData?.setData('text/plain', sel)
+      ev.preventDefault()
+    }
+    el.addEventListener('copy', onCopy)
 
-    // Cmd/Ctrl+Shift+V → paste from the clipboard into the PTY (a reliable
-    // in-terminal paste that doesn't depend on the menu reaching xterm).
+    // Let a plain left-drag select text even while the agent has mouse tracking
+    // on. With tracking on, xterm reports the button to the PTY and its
+    // SelectionService stays disabled unless shouldForceSelection() is true —
+    // Option on macOS (and only with macOptionClickForcesSelection), Shift
+    // elsewhere. So a plain drag never selected anything here: the highlight you
+    // saw was the TUI painting its own (unthemed, dark-on-dark in light themes),
+    // while getSelection() still held whatever stale selection was made before
+    // the agent grabbed the mouse — which is what Copy then pasted.
+    //
+    // Swallow the plain press and re-dispatch it as the force-select chord: the
+    // emulator selects (themed, and getSelection() matches the highlight exactly)
+    // and doesn't report the button to the PTY. Its own document mousemove/mouseup
+    // listeners then drive the rest of the drag, so click-count gestures
+    // (double = word, triple = line) keep working via `detail`. Modified clicks
+    // are left alone, so Cmd+click still reaches the TUI.
+    const forceSelectKey = /Mac/i.test(navigator.userAgent) ? 'altKey' : 'shiftKey'
+    let synthesizing = false
+    const onMouseDownCapture = (e: MouseEvent) => {
+      if (synthesizing || e.button !== 0) return
+      if (e.altKey || e.shiftKey || e.metaKey || e.ctrlKey) return
+      // Tracking off (shell, or an agent that hasn't enabled it): xterm already
+      // owns the drag, and forcing here would break Shift-click range-extend.
+      if (term.modes.mouseTrackingMode === 'none') return
+      e.preventDefault()
+      e.stopPropagation()
+      synthesizing = true
+      try {
+        e.target?.dispatchEvent(new MouseEvent('mousedown', {
+          bubbles: true, cancelable: true, view: window,
+          clientX: e.clientX, clientY: e.clientY,
+          screenX: e.screenX, screenY: e.screenY,
+          button: e.button, buttons: e.buttons, detail: e.detail,
+          [forceSelectKey]: true
+        }))
+      } finally {
+        synthesizing = false
+      }
+    }
+    el.addEventListener('mousedown', onMouseDownCapture, true)
+
+    // Ctrl+Shift+C → copy the selection (Windows/Linux, where a bare Ctrl+C must
+    // stay SIGINT for the shell/agent). macOS Cmd+C is handled by the DOM 'copy'
+    // listener above instead, so it cooperates with the Edit ▸ Copy menu role.
     term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && e.code === 'KeyC' && e.ctrlKey && e.shiftKey
+          && !e.metaKey && !e.altKey && term.hasSelection()) {
+        const sel = term.getSelection()
+        if (sel) navigator.clipboard?.writeText(sel).catch(() => {})
+        return false
+      }
+      // Cmd/Ctrl+Shift+V → paste from the clipboard into the PTY (a reliable
+      // in-terminal paste that doesn't depend on the menu reaching xterm).
       if (e.type === 'keydown' && (e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyV') {
         navigator.clipboard?.readText().then((t) => { if (t) onInput(t) }).catch(() => {})
         return false
       }
-      // Shift+Enter: insert a newline instead of submitting. xterm would send a
-      // bare CR (identical to Enter), so we emit ESC+CR ourselves — the sequence
-      // Claude Code (and most line editors) treat as a literal newline.
-      if (shiftEnterNewline && e.type === 'keydown' && e.key === 'Enter' && e.shiftKey
+      // Shift+Enter: insert a newline instead of submitting. The encoding
+      // depends on the agent's keyboard mode. Claude Code turns on the Kitty
+      // keyboard protocol (CSI > 1 u), under which modified Enter must be sent
+      // as CSI-u: `CSI 13 ; 2 u` (13 = Enter, 2 = Shift). In legacy mode neither
+      // \r nor \n works (both submit), so we fall back to \n (== Ctrl+J newline)
+      // for agents that don't enable the protocol.
+      if (shiftEnterNewline && e.key === 'Enter' && e.shiftKey
           && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        onInput('\x1b\r')
+        // Send ESC+CR — identical to Alt/Option+Enter, which the agent treats as
+        // a literal newline (verified in-app). Emit once, on keydown, and return
+        // false for EVERY event type of this chord (keydown/keypress/keyup):
+        // otherwise xterm's keypress handler turns Enter's charCode (13) into a
+        // bare CR and the agent submits despite the newline we just sent.
+        if (e.type === 'keydown') onInput('\x1b\r')
         return false
       }
       return true
@@ -167,10 +293,11 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
 
     return () => {
       disposed = true
-      clearTimeout(settleT)
+      settleTimers.forEach(clearTimeout)
       ro.disconnect()
       dataDisp.dispose()
-      selDisp.dispose()
+      el.removeEventListener('copy', onCopy)
+      el.removeEventListener('mousedown', onMouseDownCapture, true)
       unsub?.()
       term.dispose()
       onDispose?.()
@@ -193,7 +320,18 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       forceRedraw()
       try { termRef.current?.focus() } catch { /* ignore */ }
     })
-    return () => cancelAnimationFrame(raf)
+    // The terminal's canvas can be blanked while the window is backgrounded or
+    // occluded — you return to a white screen that only a resize repaints (the
+    // old "toggle a dock to fix it"). Repaint when the window is refocused or the
+    // page becomes visible again. Only while this segment is the visible one.
+    const repaint = () => { if (!document.hidden) forceRedraw() }
+    window.addEventListener('focus', repaint)
+    document.addEventListener('visibilitychange', repaint)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('focus', repaint)
+      document.removeEventListener('visibilitychange', repaint)
+    }
   }, [visible, forceRedraw])
 
   // Explicit redraw trigger (the toolbar "Redraw" control). Only the visible
@@ -202,6 +340,20 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     if (redraw && visible) forceRedraw()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [redraw])
+
+  // Dismiss the right-click menu on Escape or when the window loses focus.
+  // (Outside clicks are handled by the container's onMouseDown.)
+  useEffect(() => {
+    if (!menu) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null) }
+    const close = () => setMenu(null)
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('blur', close)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('blur', close)
+    }
+  }, [menu])
 
   // A drop only fires if dragover is preventDefault'd — otherwise Electron's
   // default file-open kicks in and the drop never reaches us.
@@ -227,12 +379,31 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       }
     : {}
 
+  // Right-click opens Copy/Paste over the selection a drag just made (see the
+  // force-select interceptor above). contextmenu still bubbles to us even when
+  // xterm forwards the mouse button to the PTY.
+  const onContextMenu = (e: React.MouseEvent) => {
+    if (!visible) return
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    // Clamp so the ~150×80 menu stays inside the terminal container.
+    const x = Math.min(e.clientX - rect.left, rect.width - 150)
+    const y = Math.min(e.clientY - rect.top, rect.height - 80)
+    setMenu({ x: Math.max(0, x), y: Math.max(0, y), hasSelection: !!termRef.current?.hasSelection() })
+  }
+
   // Clicking anywhere in the container (incl. padding) focuses the terminal.
   // The xterm mount (`ref`) is a dedicated inner div so xterm can own its DOM
   // while React owns the wrapper (overlay + drop handlers).
   return (
     <div
-      onMouseDown={() => { if (visible) termRef.current?.focus() }}
+      onMouseDown={(e) => {
+        // A left/middle click dismisses an open menu; right-click is handled by
+        // onContextMenu. Focus the terminal (unless the click is on the menu).
+        if (menu && e.button !== 2) setMenu(null)
+        if (visible) termRef.current?.focus()
+      }}
+      onContextMenu={onContextMenu}
       style={{ position: 'relative', flex: 1, minHeight: 0, width: '100%', height: '100%' }}
       {...dnd}
     >
@@ -240,6 +411,29 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       {dragging && (
         <div className="term-drop">
           <span>Drop files to attach to the agent</span>
+        </div>
+      )}
+      {menu && (
+        <div
+          className="term-ctx"
+          style={{ position: 'absolute', top: menu.y, left: menu.x }}
+          // Keep the terminal's selection alive: don't let a mousedown in the
+          // menu move focus/clear the canvas selection before Copy runs.
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <button
+            className="term-ctx-item"
+            disabled={!menu.hasSelection}
+            onClick={() => { copySelection(); setMenu(null) }}
+          >
+            Copy
+          </button>
+          <button
+            className="term-ctx-item"
+            onClick={() => { pasteClipboard(); setMenu(null) }}
+          >
+            Paste
+          </button>
         </div>
       )}
     </div>
