@@ -1508,6 +1508,10 @@ function setAgentState(name: string, state: AgentState): void {
   agentState.set(name, state)
   hookLog(`${name} state → ${state}`)
   mainWindow?.webContents.send('minipit:agent-activity', name, state)
+  // The menus colour and order sandboxes by this, so rebuild. Cheap enough:
+  // the early return above means this only fires on a real transition, not on
+  // every hook event.
+  void setAppMenu()
 }
 
 // Dev-only trace for verifying the Claude Code hook pipeline. Logs to the den
@@ -2104,9 +2108,9 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
     { label: running.length ? 'Running sandboxes' : 'No running sandboxes', enabled: false },
     ...running.map((s) => ({
       label: s.name,
-      // Same dot as the Sandboxes menu. These are all running, but a sandbox
-      // caught mid-transition still reads correctly.
-      icon: statusDotFor(s.status),
+      // Same dot as the Sandboxes menu, so green/yellow means the same thing in
+      // both places.
+      icon: statusDotFor(s.status, agentState.get(s.name)),
       click: () => navigateFromTray('minipit:open-sandbox', s.name)
     })),
     { type: 'separator' },
@@ -2157,11 +2161,15 @@ let lastMenuSandboxSig = ''
 // Cached per colour — menus rebuild often and these would otherwise be redrawn
 // pixel by pixel each time.
 const DOT_CACHE = new Map<string, Electron.NativeImage>()
-function statusDot(hex: string): Electron.NativeImage {
-  const cached = DOT_CACHE.get(hex)
+// `hollow` draws a ring rather than a disc: an outline reads as "nothing running
+// here" without spending a colour on it.
+function statusDot(hex: string, hollow = false): Electron.NativeImage {
+  const key = `${hex}${hollow ? '-ring' : ''}`
+  const cached = DOT_CACHE.get(key)
   if (cached) return cached
   const S = 32                       // 16pt @2x
   const R = 5.5 * 2                  // 5.5pt radius, so an 11pt dot
+  const W = 3                        // ring stroke, 1.5pt
   const c = (S - 1) / 2
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -2169,10 +2177,14 @@ function statusDot(hex: string): Electron.NativeImage {
   const buf = Buffer.alloc(S * S * 4)
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
-      // Coverage over the last pixel of the edge → a cheap antialias, so the dot
-      // doesn't look like a staircase next to crisp menu text.
+      // Coverage over the last pixel of each edge → a cheap antialias, so the dot
+      // doesn't look like a staircase next to crisp menu text. A ring is the
+      // outer disc minus the inner one, which antialiases both edges at once.
       const d = Math.sqrt((x - c) ** 2 + (y - c) ** 2)
-      const a = Math.max(0, Math.min(1, R - d + 0.5))
+      const outer = Math.max(0, Math.min(1, R - d + 0.5))
+      const a = hollow
+        ? Math.max(0, outer - Math.max(0, Math.min(1, R - W - d + 0.5)))
+        : outer
       const i = (y * S + x) * 4
       buf[i] = Math.round(b * a)          // premultiplied, BGRA order
       buf[i + 1] = Math.round(g * a)
@@ -2181,19 +2193,35 @@ function statusDot(hex: string): Electron.NativeImage {
     }
   }
   const img = nativeImage.createFromBitmap(buf, { width: S, height: S, scaleFactor: 2 })
-  DOT_CACHE.set(hex, img)
+  DOT_CACHE.set(key, img)
   return img
 }
 
-// Status → dot colour. Deliberately not template images: a template image is
-// recoloured to the menu's text colour, which would throw the status away.
-function statusDotFor(status: string): Electron.NativeImage {
-  switch (status) {
-    case 'running': return statusDot('#30D158')                      // green
-    case 'starting': case 'stopping': case 'creating': return statusDot('#FFD60A')   // amber, in transition
-    case 'deleting': return statusDot('#FF453A')                     // red
-    default: return statusDot('#8E8E93')                             // stopped/unknown, neutral grey
+// Agent lifecycle, coloured the way den's own UI already does it: green working,
+// yellow waiting, and an uncoloured outline for anything not up.
+//
+// Deliberately not template images — a template image is recoloured to the
+// menu's text colour, which would throw the status away. That also means the
+// outline can't adapt on its own, so its colour comes from the current
+// appearance and the menus are rebuilt when that changes (nativeTheme 'updated').
+function statusDotFor(status: string, activity?: AgentState): Electron.NativeImage {
+  if (status === 'running') {
+    if (activity === 'working') return statusDot('#30D158')   // green — mid-turn
+    if (activity === 'waiting') return statusDot('#FFD60A')   // yellow — wants you
+    return statusDot('#30D158')                               // up, activity unknown
   }
+  // Stopped, plus everything transitional (starting/stopping/creating/deleting):
+  // nothing is running, so spend no colour on it — just an outline.
+  return statusDot(nativeTheme.shouldUseDarkColors ? '#98989D' : '#3A3A3C', true)
+}
+
+// Menu sort key: working, then waiting, then merely running, then transitional,
+// then stopped. Ordered by what wants attention rather than by name — an idle
+// sandbox is the least interesting row in the list.
+function sandboxRank(status: string, activity?: AgentState): number {
+  if (status === 'running') return activity === 'working' ? 0 : activity === 'waiting' ? 1 : 2
+  if (status === 'stopped') return 4
+  return 3    // starting / stopping / creating / deleting
 }
 
 // Name of the sandbox currently open in the window, mirrored from the renderer.
@@ -2216,7 +2244,9 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
 
   // Skip the rebuild when nothing menu-relevant changed.
   const sig = JSON.stringify({
-    s: sandboxes.map((s) => [s.name, s.status]),
+    // Agent activity is part of the key: it drives both the dot colour and the
+    // ordering, so a working→waiting flip is a genuinely different menu.
+    s: sandboxes.map((s) => [s.name, s.status, agentState.get(s.name) ?? '']),
     t: templates.map((t) => `${t.repository}:${t.tag}`),
     m: kits.map((k) => [k.name, k.kind]),
     // Part of the key: switching sandboxes moves the ✓ and the accelerators, so
@@ -2289,21 +2319,25 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       { label: 'Copy SSH Command', click: () => clipboard.writeText(`ssh ${s.name}.sbx`) }
     ]
   }
-  // The open sandbox goes first so it always survives the MENU_LIST_LIMIT cap —
-  // otherwise, past 12 sandboxes, the one you're working in could fall off the
-  // list and take Cmd+. / Shift+Cmd+F / Cmd+L with it.
-  const ordered = activeSandboxName
-    ? [
-        ...sandboxes.filter((s) => s.name === activeSandboxName),
-        ...sandboxes.filter((s) => s.name !== activeSandboxName)
-      ]
-    : sandboxes
+  // Working → waiting → running → transitional → stopped, keeping sbx's own
+  // (alphabetical) order within each band, so a sandbox doesn't jump around
+  // relative to its peers. Sorting a copy: `sandboxes` is used elsewhere.
+  const ordered = [...sandboxes].sort((a, b) =>
+    sandboxRank(a.status, agentState.get(a.name)) - sandboxRank(b.status, agentState.get(b.name))
+  )
+  // The open sandbox has to survive the MENU_LIST_LIMIT cap: there are already
+  // more sandboxes than the cap here, so a stopped one you're working in would
+  // otherwise fall off the end and take Cmd+. / Shift+Cmd+F / Cmd+L with it.
+  // Only hoisted when the ranking doesn't already keep it — no point disturbing
+  // the order otherwise.
+  const activeIdx = ordered.findIndex((s) => s.name === activeSandboxName)
+  if (activeIdx >= MENU_LIST_LIMIT) ordered.unshift(...ordered.splice(activeIdx, 1))
   const sandboxItems: Electron.MenuItemConstructorOptions[] = sandboxes.length
     ? capped(ordered, (s) => ({
         // Trailing ✓ for the open sandbox rather than a leading marker, so names
         // stay left-aligned under the status icon.
         label: `${s.name}${s.name === activeSandboxName ? '  ✓' : ''}`,
-        icon: statusDotFor(s.status),
+        icon: statusDotFor(s.status, agentState.get(s.name)),
         submenu: sandboxSubmenu(s)
       }), 'sandboxes')
     : [{ label: 'No sandboxes yet', enabled: false }]
@@ -4330,7 +4364,16 @@ app.whenReady().then(() => {
     })
   }
   applyBrandIcon()
-  nativeTheme.on('updated', applyBrandIcon)
+  nativeTheme.on('updated', () => {
+    applyBrandIcon()
+    // The stopped-sandbox outline is a real (non-template) image, so it can't
+    // recolour itself when the system flips light/dark. Drop the cached dots and
+    // rebuild both menus with the colour for the new appearance.
+    DOT_CACHE.clear()
+    lastMenuSig = ''
+    void setAppMenu()
+    updateTrayMenu(lastTraySandboxes)
+  })
 
   // Content-Security-Policy for the renderer. Production loads only bundled
   // local assets (script-src 'self'); the sole remote resource is the Gravatar
