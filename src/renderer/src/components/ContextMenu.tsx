@@ -262,6 +262,21 @@ export function ContextMenu() {
       </div>
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(sandbox.workspace).catch(() => {}) }}>Copy Path</div>
       <div className="ctx-sep" />
+      {/* Remote access over the *.sbx SSH host (sbx v0.37+). The editor opens the
+          workspace at the same absolute path it has on the host — that's where
+          the sandbox mounts it. Both entries are useful before `sbx setup ssh`
+          has ever run (the ssh command is what you'd paste to try it), so they
+          aren't gated on status; Settings ▸ Runtime is where it gets enabled. */}
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace) }}>
+        Open in VS Code
+      </div>
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, 'cursor') }}>
+        Open in Cursor
+      </div>
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(`ssh ${sandbox.name}.sbx`).catch(() => {}) }}>
+        Copy SSH Command
+      </div>
+      <div className="ctx-sep" />
       <div
         className="ctx-item"
         onClick={() => {

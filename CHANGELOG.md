@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **SSH access to sandboxes (sbx v0.37).** Settings → Runtime can run `sbx setup ssh`, which makes every sandbox reachable as `<name>.sbx`. New per-sandbox actions **Open in VS Code**, **Open in Cursor** and **Copy SSH Command**; the editor opens the workspace at the path the sandbox mounts it on. den also warns when `~/.ssh/config` has more than one `Host *.sbx` block, because ssh takes the first value it finds and a stale block silently overrides the current one.
+- **Shared agent skills (sbx v0.37).** New Settings → Skills tab: previews what `sbx skills import` would copy from the host's agent skill folders, shows what the shared store already holds, flags which imports replace an existing skill, and lists what sbx skipped (symlinked skill folders are silently excluded). Import always previews with `--dry-run` first. New sandboxes can opt out of the store with a **Shared agent skills** toggle (`--no-share-skills`).
+- **Publish ports at creation.** The New Sandbox modal takes a port list, passed as `-p` (sbx v0.37 accepts it on `create`). Later changes still go through the Network panel.
+- **`system` proxy preset.** One tap sets `DOCKER_SANDBOXES_PROXY=system`, routing sandbox egress through this Mac's own proxy settings, including a PAC auto-config URL.
+- Governance-policy denials now show the organization's configured support message, so a block says who to contact.
+
+### Fixed
+- **Policy log entries never appeared.** den looked for `entries`/`log`/`events` in `sbx policy log --json`, but sbx emits `blocked_hosts`/`allowed_hosts` and names the sandbox in `vm_name`, so every fetch parsed to zero rows. It also passed a `--sandbox` flag the command doesn't accept, which failed the call outright — two faults that masked each other. Only blocks scraped from terminal output were reaching the UI.
+- **"Test access" could report a false denial.** The decision was read by regex over the whole output, so an *allowed* host whose name contains "blocked" or "deny" parsed as denied. It now reads the explicit `allowed` boolean from `--json`, falling back to the decision line only.
+- Linux/ARM64 users are no longer told there's no build for their platform and to stay on their current version — sbx v0.37 ships `linux-arm64` again.
+
 ## [0.7.1] - 2026-07-14
 
 ### Fixed

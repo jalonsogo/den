@@ -31,6 +31,13 @@ function Section({ title, open, onToggle, children }: {
 const slugify = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9._+-]+/g, '-').replace(/^-+|-+$/g, '')
 
+// Split a free-text port list into one mapping per `-p`. Accepts commas and/or
+// whitespace so "8080, 3000:3000/tcp" works; the mappings themselves are left
+// untouched for sbx to validate (it owns the [[HOST_IP:]HOST_PORT:]PORT[/PROTO]
+// grammar, and duplicating that here would only drift).
+const parsePorts = (raw: string): string[] =>
+  raw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+
 // Mirror sbx's default sandbox name: <agent>-<workdir>. Empty when no folder.
 function deriveName(agent: string, workspace: string): string {
   const folder = workspace.split('/').filter(Boolean).pop() ?? ''
@@ -60,6 +67,12 @@ export function NewSandboxModal() {
   const [wsBase, setWsBase]           = useState('')     // ~/den base for the default path
   const [wsEdited, setWsEdited]       = useState(false)  // user picked their own folder
   const [memIdx, setMemIdx]           = useState(0)
+  // Ports to publish at creation (sbx v0.37+ accepts -p on create). Free text so
+  // the full sbx form works; split on commas/whitespace into one -p per mapping.
+  const [portsRaw, setPortsRaw]       = useState('')
+  // The shared skills store is mounted read-write into new sandboxes by default
+  // (sbx v0.37+); this opts the sandbox out via --no-share-skills.
+  const [shareSkills, setShareSkills] = useState(true)
   // A session inside a project shares that one folder, so isolate by default to
   // keep concurrent sandboxes from stomping the same working tree (toggleable).
   const [clone, setClone]             = useState(!!newSandboxWorkspace || newSandboxFeature)
@@ -220,7 +233,10 @@ export function NewSandboxModal() {
           memory: memValue !== 'default' ? memValue : undefined,
           branch: clone,
           template: source === 'template' && template ? template : undefined,
-          kits: selKits
+          kits: selKits,
+          ports: parsePorts(portsRaw),
+          // Only sent when opting out — the store is mounted by default.
+          noShareSkills: !shareSkills
         })
         const sandboxes = await window.minipit?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
@@ -251,6 +267,8 @@ export function NewSandboxModal() {
     ...(source === 'template' && template ? ['-t', template] : []),
     ...(memValue !== 'default' ? ['-m', memValue] : []),
     ...(clone ? ['--clone'] : []),
+    ...parsePorts(portsRaw).flatMap((p) => ['-p', p]),
+    ...(shareSkills ? [] : ['--no-share-skills']),
     ...selKits.flatMap((entry) => ['--kit', q(entry)]),
     agent,
     q(workspace || '<workspace>')
@@ -527,6 +545,45 @@ export function NewSandboxModal() {
                     <div className="mem-slider-labels">
                       {MEM_VALUES.map((v) => <span key={v}>{v}</span>)}
                     </div>
+                  </div>
+                </div>
+
+                {/* Published ports. Only settable at creation — `sbx run`/`create`
+                    apply -p when the sandbox is made and ignore it on re-attach,
+                    so afterwards the Network panel (sbx ports) is the way in. */}
+                <div className="fg">
+                  <label className="flabel">
+                    Publish ports <span className="flabel-hint">host access to sandbox services</span>
+                  </label>
+                  <input
+                    className="finput"
+                    value={portsRaw}
+                    spellCheck={false}
+                    placeholder="8080:80, 3000"
+                    onChange={(e) => setPortsRaw(e.target.value)}
+                  />
+                  <div className="fhint">
+                    <code>[[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL]</code>, comma-separated. Creation-time only
+                    (sbx v0.37+) — add or remove them later from the Network panel.
+                  </div>
+                </div>
+
+                {/* Shared skills store (sbx v0.37+). Default on, matching sbx. */}
+                <div className="fg">
+                  <label className="flabel">Shared agent skills</label>
+                  <div className="tog-row">
+                    <button
+                      className={`s-toggle${shareSkills ? ' on' : ''}`}
+                      onClick={() => setShareSkills((v) => !v)}
+                    />
+                    Mount the shared skills store{' '}
+                    <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
+                      --no-share-skills
+                    </code>
+                  </div>
+                  <div className="fhint">
+                    Skills imported with <code>sbx skills import</code> are mounted read-write, so this sandbox both
+                    reads them and can add to them. Uncheck to isolate it (<code>--no-share-skills</code>).
                   </div>
                 </div>
           </Section>

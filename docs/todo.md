@@ -11,6 +11,19 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done (keep briefly for context)
 
 These shipped but were only typecheck/build-verified. Confirm in the running app:
 
+- [ ] **Governance support message** (sbx v0.37) — the key name in
+      `sbx policy check network --json` could not be observed: it only appears when
+      governance is *active*, which needs an org-managed policy. `governanceSupportMessage()`
+      in `src/main/index.ts` reads several plausible spellings (`support_message`,
+      `supportMessage`, `contact`, …) and shows nothing if none match. Confirm against a
+      real governed host and pin the key.
+- [ ] **`sbx skills import` real-run wording** — the `--dry-run` output is parsed against
+      verified output ("Would import skill …"), but the non-dry verb wasn't observed. The
+      parser accepts would import / importing / imported; confirm and narrow.
+- [ ] **`sbx setup ssh` write** — not run during development (it edits `~/.ssh/config`).
+      Confirm the button writes the managed block and that the duplicate-block warning
+      clears after removing a stale one.
+
 
 ## Near-term features
 - [ ] **Onboarding flow**
@@ -18,7 +31,10 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
       leaking the Homebrew cask conflict to users. Design already drafted in
       [`release-channels-proposal.md`](release-channels-proposal.md).
 - [ ] **Search / command palette** (⌘K) across sandboxes, groups, kits, and actions.
-- [ ] **VSCode Integration** Following https://github.com/DockerSolutionsEngineering/ai.gov.sbx-vscode-ssh 
+- [x] **VSCode Integration** — done via sbx v0.37's native SSH support (`sbx setup ssh` +
+      `<name>.sbx`), which removes the need for the custom bridge in
+      https://github.com/DockerSolutionsEngineering/ai.gov.sbx-vscode-ssh. Settings → Runtime
+      runs the setup; per-sandbox actions open VS Code / Cursor over that host.
 - [ ] **Add an integrated terminal** 
 
 ## Platform & release

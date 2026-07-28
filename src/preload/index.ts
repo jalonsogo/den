@@ -103,6 +103,11 @@ const api = {
     ipcRenderer.on('minipit:daemon-output', handler)
     return () => ipcRenderer.removeListener('minipit:daemon-output', handler)
   },
+  skillsImport:  (opts?: { dryRun?: boolean }) => ipcRenderer.invoke('minipit:skills-import', opts),
+  sshStatus:     ()                     => ipcRenderer.invoke('minipit:ssh-status'),
+  sshSetup:      ()                     => ipcRenderer.invoke('minipit:ssh-setup'),
+  openRemoteEditor: (name: string, workspace: string, editor?: string) =>
+    ipcRenderer.invoke('minipit:open-remote-editor', name, workspace, editor),
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
   policyCheck:   (resource: string, name?: string) => ipcRenderer.invoke('minipit:policy-check', resource, name),
