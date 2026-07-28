@@ -435,7 +435,7 @@ declare global {
       agentDropFile(name: string, fileName: string, bytes: Uint8Array): Promise<string | null>
       agentResize(name: string, cols: number, rows: number): Promise<void>
       agentEnsure(name: string, cols: number, rows: number): Promise<void>
-      setAppTheme(mode: 'light' | 'dark'): Promise<void>
+      setTermMode(mode: 'light' | 'dark'): Promise<void>
       onAgentOutput(cb: (name: string, data: string) => void): () => void
       onAgentExit(cb: (name: string) => void): () => void
       ptyStart(name: string, cols: number, rows: number): Promise<void>

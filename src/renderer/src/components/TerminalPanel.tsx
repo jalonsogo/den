@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { Folder, Info, Play, RefreshCw, AlertTriangle, Network, SquareTerminal, GitCompare } from 'lucide-react'
+import { Folder, Info, Play, AlertTriangle, Network, SquareTerminal, GitCompare } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -25,8 +25,6 @@ interface XTermProps {
   onDispose?: () => void
   // If provided, the terminal accepts dropped files (e.g. images for the agent).
   onDropFiles?: (files: File[]) => void
-  // Bumping this number forces a redraw (refit + repaint the attached TUI).
-  redraw?: number
   // When true, Shift+Enter inserts a newline (ESC+CR) instead of submitting.
   shiftEnterNewline?: boolean
 }
@@ -40,7 +38,7 @@ interface XTermProps {
 const ENABLE_WEBGL = false
 
 // A real VT100 terminal (xterm.js) that handles full-screen TUIs like Claude Code.
-function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles, redraw, shiftEnterNewline }: XTermProps) {
+function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles, shiftEnterNewline }: XTermProps) {
   const ref = useRef<HTMLDivElement>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -106,16 +104,20 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       theme,
       allowProposedApi: true,
       scrollback: 5000,
-      // Never let the agent paint text you can't read. A TUI picks its colors for
-      // the theme IT thinks it's in: Claude Code running its dark palette in a
-      // light terminal draws near-white text (and near-black diff backgrounds)
-      // straight onto white, which vanishes — and the same mismatch hits `ls`
-      // colors in the shell. xterm's default (1) means "render it as asked", so
-      // set a WCAG-AA floor: any foreground that lands under 4.5:1 against the
-      // background it's actually drawn on — including the selection block — gets
-      // nudged until it clears. Dim cells only need half the ratio, so they stay
-      // distinguishable from normal text.
-      minimumContrastRatio: 4.5,
+      // Rescue floor for text that would otherwise be unreadable: any foreground
+      // under 3:1 against the background it's actually drawn on — cell background,
+      // or the selection block over it — gets nudged until it clears. Catches a
+      // TUI whose palette assumes the opposite polarity (Claude Code painting its
+      // dark theme's near-white text into a light terminal, `ls`'s dark blue on
+      // black) and low-contrast pairs inside a selection.
+      //
+      // Deliberately 3 rather than WCAG-AA 4.5: at 4.5 this stops being a rescue
+      // and starts rewriting palettes, pushing every dim-by-design grey (ANSI 0,
+      // Dracula's comment grey, Solarized's base01) into mid-grey. den's own
+      // themes are tuned to clear 3:1 unselected, so nothing there is adjusted at
+      // all; only genuinely invisible combinations get touched. Dim cells need
+      // half the ratio, so dim text still reads as dim.
+      minimumContrastRatio: 3,
       // Needed by the force-select interceptor below: on macOS xterm only lets
       // the emulator take a drag away from a mouse-tracking TUI when Option is
       // held AND this option is on (it defaults to off). altClickMovesCursor is
@@ -334,13 +336,6 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     }
   }, [visible, forceRedraw])
 
-  // Explicit redraw trigger (the toolbar "Redraw" control). Only the visible
-  // terminal needs it; the hidden sibling repaints when it's shown.
-  useEffect(() => {
-    if (redraw && visible) forceRedraw()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [redraw])
-
   // Dismiss the right-click menu on Escape or when the window loses focus.
   // (Outside clicks are handled by the container's onMouseDown.)
   useEffect(() => {
@@ -461,7 +456,7 @@ function StoppedView({ theme, label, status, onStart }: { theme: ITheme; label: 
 
 // ── Agent tab ─────────────────────────────────────────────────────────────
 
-function AgentTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void; redraw: number }) {
+function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void }) {
   if (sandbox.status !== 'running') {
     return <StoppedView theme={theme} label="Start the sandbox to launch the agent." status={sandbox.status} onStart={onStart} />
   }
@@ -470,7 +465,6 @@ function AgentTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: 
       sandboxId={sandbox.id}
       visible={visible}
       theme={theme}
-      redraw={redraw}
       shiftEnterNewline
       subscribe={(write) => window.minipit?.onAgentOutput((name, data) => { if (name === sandbox.name) write(data) })}
       onInput={(data) => window.minipit?.agentWrite(sandbox.name, data)}
@@ -497,7 +491,7 @@ function AgentTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: 
 
 // ── Shell tab ─────────────────────────────────────────────────────────────
 
-function ShellTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void; redraw: number }) {
+function ShellTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox; visible: boolean; theme: ITheme; onStart?: () => void }) {
   if (sandbox.status !== 'running') {
     return <StoppedView theme={theme} label="Start the sandbox to open a shell." status={sandbox.status} onStart={onStart} />
   }
@@ -506,7 +500,6 @@ function ShellTerminal({ sandbox, visible, theme, onStart, redraw }: { sandbox: 
       sandboxId={sandbox.id}
       visible={visible}
       theme={theme}
-      redraw={redraw}
       subscribe={(write) => window.minipit?.onPtyOutput((name, data) => { if (name === sandbox.name) write(data) })}
       onInput={(data) => window.minipit?.ptyWrite(sandbox.name, data)}
       onResize={(cols, rows) => window.minipit?.ptyResize(sandbox.name, cols, rows)}
@@ -531,9 +524,6 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
   onStart?: () => void
 }) {
   const [segment, setSegment] = useState<'agent' | 'shell'>('agent')
-  // Bumped by the Redraw control to force the visible terminal to repaint — an
-  // escape hatch for the occasional blank/stale agent view.
-  const [redrawNonce, setRedrawNonce] = useState(0)
   const termThemeId = useStore((s) => s.termTheme)
   const appTheme = useStore((s) => s.theme)
   const theme = resolveTermTheme(termThemeId, appTheme).theme
@@ -579,7 +569,7 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
           position: segment === 'agent' ? 'relative' : 'absolute',
           inset: segment === 'agent' ? undefined : 0
         }}>
-          <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} onStart={onStart} redraw={redrawNonce} />
+          <AgentTerminal sandbox={sandbox} visible={segment === 'agent'} theme={theme} onStart={onStart} />
         </div>
 
         <div style={{
@@ -590,13 +580,14 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
           position: segment === 'shell' ? 'relative' : 'absolute',
           inset: segment === 'shell' ? undefined : 0
         }}>
-          <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} redraw={redrawNonce} />
+          <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} />
         </div>
       </div>
 
-      {/* Vertical activity rail: Agent (top) · reload · panels (Info / Network /
-          Files / Changes) · Shell (bottom). Hover previews carry the labels the
-          rail itself hides. */}
+      {/* Vertical activity rail: the terminal switch (Agent / Shell) on top, then
+          the docked panels (Info / Network / Files / Changes) below a separator —
+          what the pane shows, then what opens beside it. Hover previews carry the
+          labels the rail itself hides. */}
       <Tooltip.Provider delayDuration={300} skipDelayDuration={500}>
         <div className="term-rail">
           {tip(agentLabel, 'Agent terminal',
@@ -608,15 +599,19 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
             </button>
           )}
 
-          {tip('Redraw', 'Force the terminal to repaint',
+          {tip('Shell', 'Interactive shell in the sandbox',
             <button
-              className="term-rail-btn"
-              onClick={() => setRedrawNonce((n) => n + 1)}
+              className={`term-rail-btn${segment === 'shell' ? ' active' : ''}`}
+              onClick={() => setSegment('shell')}
             >
-              <RefreshCw size={16} />
+              <SquareTerminal size={17} />
             </button>
           )}
 
+          <div className="term-rail-sep" />
+
+          {/* Grouped with the panels rather than the terminal switch: it opens the
+              Network dock, same as the icon two rows down. */}
           {hasBlocks && onShowNetwork && tip('Network blocked', 'Requests were denied — view details',
             <button
               className="term-rail-btn warn"
@@ -625,8 +620,6 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
               <AlertTriangle size={16} />
             </button>
           )}
-
-          <div className="term-rail-sep" />
 
           {onShowInfo && tip('Info', 'Status, workspaces, kits & secrets',
             <button
@@ -659,15 +652,6 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
             >
               <GitCompare size={17} />
               {changeCount > 0 && <span className="term-rail-badge">{changeCount > 99 ? '99+' : changeCount}</span>}
-            </button>
-          )}
-
-          {tip('Shell', 'Interactive shell in the sandbox',
-            <button
-              className={`term-rail-btn${segment === 'shell' ? ' active' : ''}`}
-              onClick={() => setSegment('shell')}
-            >
-              <SquareTerminal size={17} />
             </button>
           )}
         </div>

@@ -18,11 +18,18 @@ export interface TermTheme {
 // unless the user explicitly picks another theme. These are its two palettes.
 const DEN_DARK: ITheme = {
   background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4',
-  selectionBackground: '#2f4f7a', selectionInactiveBackground: '#20344f',
+  // Deep enough that the colored palette still clears the terminal's 3:1 contrast
+  // floor when drawn on top of it (worst case 3.12:1): a mid-blue selection put
+  // every ANSI color under the floor, so selecting text visibly restyled it. Only
+  // the dim ANSI-0 grey below still gets lifted while selected — unavoidable for a
+  // grey that sits at the selection's own luminance.
+  selectionBackground: '#233c5c', selectionInactiveBackground: '#1b2d44',
   // `black` (ANSI 0) is a visible dim grey, not near-background: at #1e1e1e it
   // was all but invisible on the #0a0a0a background, so dim text/borders drawn
-  // in color 0 vanished. #4d4d4d keeps it clearly readable (cf. GitHub Dark).
-  black: '#4d4d4d', red: '#f44747', green: '#6a9955', yellow: '#d7ba7d',
+  // in color 0 vanished. #5f5f5f is the dimmest grey that still clears the
+  // terminal's 3:1 floor here (3.10:1), so it renders exactly as written instead
+  // of being nudged at paint time.
+  black: '#5f5f5f', red: '#f44747', green: '#6a9955', yellow: '#d7ba7d',
   blue: '#569cd6', magenta: '#c586c0', cyan: '#4ec9b0', white: '#d4d4d4',
   brightBlack: '#8a8a8a', brightRed: '#f44747', brightGreen: '#6a9955', brightYellow: '#d7ba7d',
   brightBlue: '#569cd6', brightMagenta: '#c586c0', brightCyan: '#4ec9b0', brightWhite: '#ffffff'
@@ -31,10 +38,11 @@ const DEN_LIGHT: ITheme = {
   background: '#ffffff', foreground: '#2b2b2b', cursor: '#2b2b2b',
   selectionBackground: '#b3d4fc', selectionInactiveBackground: '#d8e6f7',
   // `white` (ANSI 7) must stay readable on the white background: #dcdcdc was
-  // near-invisible, so text drawn in color 7 disappeared. #9a9a9a is a legible
-  // mid-grey while still reading as the "light" slot.
+  // near-invisible, so text drawn in color 7 disappeared. #949494 is a legible
+  // mid-grey that still reads as the "light" slot, and it clears the terminal's
+  // 3:1 floor (3.03:1) so it isn't darkened at paint time.
   black: '#2b2b2b', red: '#c0392b', green: '#3c7d3f', yellow: '#9a6700',
-  blue: '#2f6fbf', magenta: '#9b4bbf', cyan: '#2a8a8a', white: '#9a9a9a',
+  blue: '#2f6fbf', magenta: '#9b4bbf', cyan: '#2a8a8a', white: '#949494',
   brightBlack: '#6a6a6a', brightRed: '#c0392b', brightGreen: '#3c7d3f', brightYellow: '#9a6700',
   brightBlue: '#2f6fbf', brightMagenta: '#9b4bbf', brightCyan: '#2a8a8a', brightWhite: '#000000'
 }
@@ -55,7 +63,7 @@ export const TERM_THEMES: TermTheme[] = [
     mode: 'dark',
     theme: {
       background: '#0D1117', foreground: '#E6EDF3', cursor: '#E6EDF3',
-      selectionBackground: '#264F78', selectionInactiveBackground: '#1C3550',
+      selectionBackground: '#1f3b5c', selectionInactiveBackground: '#182e47',
       black: '#484F58', red: '#FF7B72', green: '#3FB950', yellow: '#D29922',
       blue: '#58A6FF', magenta: '#BC8CFF', cyan: '#39C5CF', white: '#B1BAC4',
       brightBlack: '#6E7681', brightRed: '#FFA198', brightGreen: '#56D364', brightYellow: '#E3B341',
