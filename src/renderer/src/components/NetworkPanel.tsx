@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, AlertTriangle, ShieldAlert, Check, Ban, Globe, Scale, Lock } from 'lucide-react'
+import { AlertTriangle, ShieldAlert, Check, Ban, Globe, Scale, Lock } from 'lucide-react'
 import { useStore } from '../store'
 import { PortsPanel } from './PortsPanel'
 import { AccordionSection } from './AccordionSection'
@@ -17,7 +17,9 @@ function detectPreset(rules: PolicyRule[]): 'allow-all' | 'balanced' | 'deny-all
   return 'balanced'
 }
 
-export function NetworkPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: () => void }) {
+// Header carries no close button — see the note on InfoPanel: the toolbar's
+// right-dock toggle and the rail icon already close the dock.
+export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
   const { updateSandbox, ackPolicyBlocks } = useStore()
   // Select the stored array directly (a stable ref) and fall back to a shared
   // constant — `?? []` inside the selector returns a new array each render and
@@ -174,9 +176,6 @@ export function NetworkPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?:
     <div className="info-dock">
       <div className="info-dock-hd">
         <span className="info-dock-title">Network</span>
-        {onClose && (
-          <button className="info-dock-x" onClick={onClose} title="Close"><X size={15} /></button>
-        )}
       </div>
       <div className="info-panel">
         {blocks.length > 0 && (

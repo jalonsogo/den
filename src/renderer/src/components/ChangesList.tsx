@@ -35,6 +35,13 @@ export function ChangesList({ changes, onOpen, onContext, empty, statFor, allowD
         const m = STATUS_META[c.status] ?? STATUS_META.modified
         const name = c.path.split('/').pop() || c.path
         const dir = c.path.slice(0, c.path.length - name.length).replace(/\/$/, '')
+        // The dir label is split so the deepest (most informative) segment stays
+        // whole and only the leading segments ellipsize. Truncating with CSS
+        // `direction: rtl` instead would reorder paths that start with punctuation
+        // (".claude" renders as "claude.") and clip leading characters silently.
+        const cut = dir.lastIndexOf('/')
+        const dirHead = cut < 0 ? '' : dir.slice(0, cut + 1)
+        const dirTail = cut < 0 ? dir : dir.slice(cut + 1)
         const openable = !!onOpen && (allowDeleted || c.status !== 'deleted')
         const Icon = m.Icon
         const stat = statFor?.(c.path)
@@ -59,7 +66,12 @@ export function ChangesList({ changes, onOpen, onContext, empty, statFor, allowD
             )}
             <Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
             <span className="changes-name">{name}</span>
-            {dir && <span className="changes-dir">{dir}</span>}
+            {dir && (
+              <span className="changes-dir">
+                {dirHead && <span className="changes-dir-head">{dirHead}</span>}
+                <span className="changes-dir-tail">{dirTail}</span>
+              </span>
+            )}
             {stat && !stat.binary && (stat.added > 0 || stat.deleted > 0) && (
               <span className="changes-stat">
                 <span className="changes-add">+{stat.added}</span>{' '}

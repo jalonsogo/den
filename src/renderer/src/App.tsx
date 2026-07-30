@@ -19,7 +19,7 @@ import { NewKitModal } from './components/modals/NewKitModal'
 import { CommandPalette } from './components/CommandPalette'
 import { PromptModal } from './components/modals/PromptModal'
 import { TemplateInspectModal } from './components/modals/TemplateInspectModal'
-import type { Sandbox, LogLine, PolicyBlock } from './types'
+import type { Sandbox, LogLine, PolicyBlock, SandboxError } from './types'
 
 export function App() {
   const { activePage, modal, setSandboxes, setModal, setActivePage, setActiveTab, appendLog, updateSandbox, setActiveSandboxId, addPolicyBlock, setAgentActivity, syncProjectConfig, loadSandboxIsolation, loadAutoSync } = useStore()
@@ -68,9 +68,18 @@ export function App() {
 
     // Live updates from main process
     const unsub1 = window.minipit?.onSandboxesUpdated((s) => {
-      setSandboxes(s as Sandbox[])
+      const list = s as Sandbox[]
+      setSandboxes(list)
       // A create/delete changes the isolation map — keep it fresh.
       loadSandboxIsolation()
+      // A recorded start failure is stale once the sandbox is up (or gone).
+      // Doing it here covers every entry point — header, tray, palette, restart —
+      // rather than each one having to remember to clear it.
+      const st = useStore.getState()
+      for (const name of Object.keys(st.sandboxErrors)) {
+        const sb = list.find((x) => x.name === name)
+        if (!sb || sb.status === 'running') st.clearSandboxError(name)
+      }
     })
 
     // Stream real log lines from sbx processes
@@ -81,6 +90,15 @@ export function App() {
     })
 
     const unsubBlock = window.minipit?.onPolicyBlock?.((b) => addPolicyBlock(b as PolicyBlock))
+
+    // `sbx run` refused the launch. `runSandbox` is fire-and-forget (it can't
+    // report this), and the optimistic "starting"/"running" would otherwise sit
+    // there forever — so record the reason and put the sandbox back to stopped.
+    const unsubErr = window.minipit?.onSandboxError?.((e) => {
+      const err = e as SandboxError
+      useStore.getState().setSandboxError(err)
+      updateSandbox(err.sandbox, { status: 'stopped', uptimeSeconds: undefined })
+    })
 
     // The agent needs the user (question / permission / idle): play the distinct
     // "ask" cue. This event is sent just before the matching activity→waiting, so
@@ -167,6 +185,7 @@ export function App() {
       unsub1?.()
       unsub2?.()
       unsubBlock?.()
+      unsubErr?.()
       unsubAttn?.()
       unsubAct?.()
       unsub3?.()

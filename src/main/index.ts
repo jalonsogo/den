@@ -658,14 +658,25 @@ function parsePolicyLs(out: string) {
 }
 
 function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
+  const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {
     // maxBuffer: the default is 1 MB — `sbx ls --json` / `exec … find` on a busy
     // machine or large tree can exceed that and fail with an opaque "Command
     // failed", so give it generous headroom. On error, prefer stderr, then any
-    // stdout captured, then the raw execFile message.
-    execFile(getSbxPath(), args, { timeout: opts?.timeout ?? 10000, maxBuffer: 32 * 1024 * 1024, env: guiEnv() }, (err, stdout, stderr) => {
-      if (err) reject(new Error((stderr || stdout || err.message || '').toString().trim() || err.message))
-      else resolve(stdout.trim())
+    // stdout captured.
+    execFile(getSbxPath(), args, { timeout, maxBuffer: 32 * 1024 * 1024, env: guiEnv() }, (err, stdout, stderr) => {
+      if (!err) return resolve(stdout.trim())
+      const out = (stderr || stdout || '').toString().trim()
+      if (out) return reject(new Error(out))
+      // Nothing on either stream: all execFile gives us is "Command failed: <cmd>",
+      // which says nothing about *how* it failed. That case is worth spelling out,
+      // because being killed at the timeout (a hung daemon) and exiting nonzero in
+      // silence (a bad subcommand, a sbx version drift) look identical otherwise —
+      // and this is the branch that logs on repeat from the poll loop.
+      const e = err as Error & { code?: number | string; signal?: string; killed?: boolean }
+      reject(new Error(`sbx ${args.join(' ')} ${e.killed || e.signal
+        ? `killed after ${timeout}ms (${e.signal ?? 'timeout'}) — no output`
+        : `exited with ${e.code ?? 'unknown status'} and no output`}`))
     })
   })
 }
@@ -1326,6 +1337,70 @@ function readSshStatus(): { configured: boolean; duplicates: number; path: strin
   }
 }
 
+// ── Desktop apps that attach to a sandbox over SSH ───────────────────────────
+// Docker documents four editor/app integrations. Two are VS Code-family editors,
+// which den drives end to end (see the open-remote-editor handler). The other two
+// can only be pointed at a host from inside their own UI — neither exposes a CLI
+// flag or URI for adding an SSH connection, the way `code --remote` does. So den
+// does every part it can (check the managed ssh config, put the hostname on the
+// clipboard, launch the app) and then states the clicks that are left, instead of
+// leaving the integration undiscoverable.
+interface RemoteApp {
+  label: string
+  // macOS application name, for `open -a`. Also what tells us it isn't installed.
+  bundle: string
+  // Template the sandbox must be built from for the app's remote server to find
+  // its CLI. The ChatGPT app runs `codex` over the SSH connection, so a sandbox
+  // running any other agent connects and then can't start a session.
+  requiresAgent?: string
+  steps: string[]
+  caveat?: string
+}
+
+const REMOTE_APPS: Record<string, RemoteApp> = {
+  'claude-desktop': {
+    label: 'Claude Desktop',
+    bundle: 'Claude',
+    steps: [
+      'Open the environment drop-down (before starting a session) and choose “+ Add SSH connection”.',
+      'Give the connection a name, and paste the hostname into “SSH Host”.',
+      'Leave “SSH Port” and “Identity File” empty — the managed ssh config already supplies them.',
+      'Pick the connection from the environment drop-down, then use the remote folder picker to select the mounted workspace. It opens at /home/agent, which is not the mount.'
+    ],
+    // Straight from Docker's own warning: worth repeating at the moment of use,
+    // since the whole point of a sandbox is the isolation this trades away.
+    caveat:
+      'This sends your Anthropic credentials into the Claude Code process inside the sandbox, '
+      + 'which reduces the isolation the sandbox gives you.'
+  },
+  chatgpt: {
+    label: 'ChatGPT',
+    bundle: 'ChatGPT',
+    requiresAgent: 'codex',
+    steps: [
+      'Open Settings ▸ Connections and add an SSH connection.',
+      'Paste the hostname as the host.',
+      'Use the folder picker to select the mounted workspace as the remote project.'
+    ]
+  }
+}
+
+// Launch a macOS app by name. Distinguishes "not installed" from other failures,
+// because that's the one the user can act on.
+function openMacApp(bundle: string): Promise<{ ok: boolean; missing?: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const p = spawn('open', ['-a', bundle], { env: guiEnv() })
+    let err = ''
+    p.stderr?.on('data', (d) => { err += d.toString() })
+    p.on('error', (e) => resolve({ ok: false, error: e.message }))
+    p.on('close', (code) => {
+      if (code === 0) return resolve({ ok: true })
+      // `open -a` says "Unable to find application named '<name>'" for a missing app.
+      resolve({ ok: false, missing: /unable to find application/i.test(err), error: err.trim() })
+    })
+  })
+}
+
 // Read `sbx skills import` output (both --dry-run and the real run).
 //
 // Observed v0.37.0 dry-run lines:
@@ -1473,6 +1548,48 @@ function scanOutputForBlocks(name: string, data: string): void {
   }
   // Keep only the tail so the buffer can't grow unbounded.
   blockScanBuf.set(name, buf.slice(-2048))
+  scanOutputForStartError(name, buf)
+}
+
+// ── Failed launches ──────────────────────────────────────────────────────────
+// `sbx run` reports a refused launch on its own stderr and exits, e.g.
+//   ERROR: failed to start sandbox: start runtime: request failed: 422 …:
+//   workspace directory "/Users/me/Proj" no longer exists on the host; …
+// In a PTY that text lands in the agent stream — but a launch that fails never
+// reaches `running`, so the terminal is swapped for the stopped placeholder and
+// the message goes with it. The user is left with a sandbox that silently won't
+// start, and the reason only in the log file. Pull it out of the stream and
+// forward it as a structured event the UI can show (and act on).
+const START_ERR_RE = /ERROR:\s*failed to (?:start|run|create) sandbox:\s*([^\r\n]+)/i
+// The one failure with an obvious remedy: the host folder behind the workspace
+// mount was moved or deleted. sbx names the path, so lift it out and let the UI
+// offer the removal it suggests as a button.
+const WORKSPACE_GONE_RE = /workspace directory "([^"]+)" no longer exists/i
+// Last message forwarded per sandbox, so a marker sitting in the rolling tail
+// isn't re-emitted on every subsequent chunk. Cleared when a launch starts.
+const startErrSeen = new Map<string, string>()
+
+// `final` allows an unterminated last line — the failure message is usually the
+// very last thing `sbx run` writes before exiting, so mid-stream we only accept
+// a line we've seen the end of (otherwise a chunk boundary mid-message would
+// emit a truncated one), and the exit handler flushes whatever is left.
+function scanOutputForStartError(name: string, buf: string, final = false): void {
+  const m = START_ERR_RE.exec(buf)
+  if (!m) return
+  const rest = buf.slice(m.index + m[0].length)
+  if (!final && !/[\r\n]/.test(rest)) return
+  // Collapse the wrapped, multi-space CLI formatting into one readable line.
+  const message = m[1].trim().replace(/\s+/g, ' ').replace(/\s+\.$/, '')
+  if (startErrSeen.get(name) === message) return
+  startErrSeen.set(name, message)
+  const gone = WORKSPACE_GONE_RE.exec(message)
+  mainWindow?.webContents.send('minipit:sandbox-error', {
+    sandbox: name,
+    message,
+    kind: gone ? 'workspace-missing' : 'start-failed',
+    path: gone?.[1],
+    at: Date.now()
+  })
 }
 
 // ── Agent activity & file changes (Claude Code hooks) ────────────────────────
@@ -1488,17 +1605,44 @@ type AgentState = 'working' | 'waiting'
 const agentState = new Map<string, AgentState>()
 const eventTails = new Map<string, ReturnType<typeof spawn>>()
 
+// The append command every hook runs. Claude's hook payload carries no clock of
+// its own (only PostToolUse's `duration_ms`), and the tail below doesn't need one
+// since it reacts as lines arrive — but the file is also read after the fact, so
+// stamp each event with `den_ts` on the way in. Only the first line is touched;
+// payloads are single-line compact JSON (JSON strings can't hold raw newlines),
+// and any further lines pass through untouched rather than being dropped.
+//
+// awk, not sed: awk's `print` always terminates its output, so a payload that
+// arrives without a trailing newline can't glue itself onto the next event and
+// leave the tail with an unparsable line. sed would pass the missing newline
+// through. Both are POSIX, which matters because the sandbox's /bin/sh is dash.
+//
+// The epoch form (`date +%s%3N`) is deliberately avoided: the sandbox ships
+// uutils `date`, which ignores the %3N width and would splice all nine
+// nanosecond digits onto the seconds. ISO-8601 stays valid at any width, and
+// `new Date()` truncates the extra precision.
+//
+// `2>/dev/null || true`, and in that order: if the log isn't writable (read-only
+// ~/.den again) the shell's append fails with status 2 — and exit code 2 from a
+// PreToolUse hook *blocks the tool call*, so a sandbox that can't be logged would
+// have its agent unable to run tools at all. `|| true` keeps the hook advisory.
+// The stderr redirect has to come before `>>` because redirections apply left to
+// right: put it last and the shell's own "cannot create" message still lands in
+// the transcript before it's suppressed.
+const APPEND_EVENT =
+  `awk -v t="$(date -u +%FT%T.%3NZ)" 'NR==1{sub(/^\\{/, "{\\"den_ts\\":\\"" t "\\",")} 1' 2>/dev/null >> ~/.den/events.jsonl || true`
+
 const DEN_HOOKS = {
   hooks: {
-    UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    PreToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    PostToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
+    UserPromptSubmit: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    PreToolUse: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    PostToolUse: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
     // Notification fires when the agent needs the user — a permission prompt, an
     // asked question, or the idle "waiting for input" reminder. Distinct from
     // Stop (turn finished) so we can play a different cue.
-    Notification: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    Stop: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    SessionStart: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }]
+    Notification: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    Stop: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }]
   }
 }
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
@@ -1543,14 +1687,27 @@ function injectClaudeHooks(name: string, attempt = 0): Promise<void> {
   // Write den_hooks to a real file and merge two plain files with jq. Process
   // substitution (`<(…)`) is bash-only and the sandbox's /bin/sh is dash, so
   // `sh -c` would fail with "Syntax error: ( unexpected" and never install the hooks.
+  //
+  // Nothing here may depend on ~/.den being writable. It can be read-only — a
+  // host dir mounted over it with `ro` from the Mounts panel, say — and priming
+  // the event log is unrelated to installing the hooks. Previously `touch
+  // ~/.den/events.jsonl &&` aborted the whole script on EROFS, and the staging
+  // file went to ~/.den too, so the hooks never reached ~/.claude/settings.json
+  // and den showed no activity at all for that sandbox. The event log is now
+  // best-effort (matching the tail below) and staging goes to a temp dir, so a
+  // read-only ~/.den costs only the activity events. An unwritable ~/.claude
+  // still surfaces as an error from the settings write, which is the useful
+  // failure. The temp file is left behind deliberately: appending `rm` would make
+  // its exit status the script's, masking failures from the retry logic above.
   const script =
-    'mkdir -p ~/.claude ~/.den && touch ~/.den/events.jsonl && ' +
+    'mkdir -p ~/.claude 2>/dev/null; mkdir -p ~/.den 2>/dev/null; touch ~/.den/events.jsonl 2>/dev/null; ' +
     `den_hooks='${cfg.replace(/'/g, `'\\''`)}' && ` +
-    'printf %s "$den_hooks" > ~/.den/hooks.json && ' +
+    'den_tmp=${TMPDIR:-/tmp}/den-hooks.json && ' +
+    'printf %s "$den_hooks" > "$den_tmp" && ' +
     'if command -v jq >/dev/null 2>&1 && [ -s ~/.claude/settings.json ]; then ' +
-    '  jq -s ".[0] * .[1]" ~/.claude/settings.json ~/.den/hooks.json > ~/.claude/settings.json.tmp ' +
+    '  jq -s ".[0] * .[1]" ~/.claude/settings.json "$den_tmp" > ~/.claude/settings.json.tmp ' +
     '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
-    'else cp ~/.den/hooks.json ~/.claude/settings.json && echo wrote; fi'
+    'else cp "$den_tmp" ~/.claude/settings.json && echo wrote; fi'
   return new Promise((resolve) => {
     execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
       if (err) {
@@ -1818,7 +1975,14 @@ async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
   // doesn't support it and exits non-zero, which would surface as a handler error.
   // `stat -c` and its %F/%s/%n specifiers are supported by both BusyBox and GNU.
   // The format uses real tab separators (\t here is a literal tab in the string).
+  //
+  // The `[ -d ]` guard comes first so the commonest failure by far — a *host*
+  // workspace path that doesn't exist inside the container (folder moved on the
+  // host, clone/isolated layout, different mount point) — reports itself rather
+  // than arriving as find's bare exit 1 with stderr swallowed by the 2>/dev/null,
+  // which `sbx()` could only render as "exited with 1 and no output".
   const cmd =
+    '[ -d "$1" ] || { printf \'no such directory in sandbox: %s\\n\' "$1" >&2; exit 3; }; ' +
     'find "$1" -maxdepth 1 -mindepth 1 -exec stat -c "%F\t%s\t%n" {} + 2>/dev/null'
 
   let out: string
@@ -1901,6 +2065,11 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
   // stopped/deleted. Spawning now would strand a session nobody is attached to.
   if (spawnGen.get(name) !== gen) return
 
+  // Fresh launch: drop the previous attempt's scan state so a repeat of the same
+  // failure is reported again (and a stale tail can't re-trigger on its own).
+  blockScanBuf.delete(name)
+  startErrSeen.delete(name)
+
   // Reconnecting to an already-running sandbox: resume the agent's prior
   // conversation rather than starting fresh. `--continue` is a claude agent
   // flag (gated by the caller), passed through after the `--` separator.
@@ -1947,6 +2116,9 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
   proc.onExit(() => {
     sbxProcesses.delete(name)
     agentOutBuf.delete(name)
+    // A failure message is typically the last thing written before the exit, so
+    // it may still be an unterminated line in the tail — flush it now.
+    scanOutputForStartError(name, blockScanBuf.get(name) ?? '', true)
     // The `--continue` reconnect failed because there was no prior conversation.
     // Retry once as a fresh session rather than surfacing the error and dying.
     if (noConversation) {
@@ -4292,7 +4464,13 @@ function setupIPC(): void {
             + `104-character limit. Because ${bin} was already open, it keeps the temporary directory it started `
             + `with, and den can't change that.\n\n`
             + `If the remote window connects and then retries in a loop, quit ${bin} once and open the sandbox `
-            + `again — den will launch it with the short path.`,
+            + `again — den will launch it with the short path.\n\n`
+            // Docker documents this as the fix for the same reconnect loop. It's a
+            // second, independent lever (it stops Remote-SSH using the local server
+            // that needs the socket at all), so it's worth naming for anyone who
+            // can't quit the editor right now.
+            + `If that isn't practical, adding "remote.SSH.useLocalServer": false to your ${bin} user `
+            + `settings also avoids the loop.`,
           buttons: ['OK']
         })
       }
@@ -4308,6 +4486,76 @@ function setupIPC(): void {
         return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
       }
     }
+  })
+
+  // Point a desktop app (Claude Desktop, ChatGPT) at a sandbox over its *.sbx SSH
+  // host. See REMOTE_APPS for why this stops short of a fully automated open.
+  ipcMain.handle('minipit:open-remote-app', async (_, name: string, appId: string, agent?: string) => {
+    const app = REMOTE_APPS[appId]
+    if (!app) return { ok: false, error: `Unknown app "${appId}".` }
+    const host = `${name}.sbx`
+
+    // Wrong template: the app will connect and then fail to start a session, which
+    // looks like a broken integration rather than a wrong sandbox. Say so up front,
+    // but let the user proceed — they may have added the CLI via a kit.
+    if (app.requiresAgent && agent && agent !== app.requiresAgent) {
+      const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        message: `${app.label} needs a ${app.requiresAgent} sandbox`,
+        detail:
+          `${app.label} runs \`${app.requiresAgent}\` over the SSH connection, and "${name}" was created from `
+          + `the ${agent} template — so the app will connect but won't be able to start a session.\n\n`
+          + `Create a sandbox from the ${app.requiresAgent} template instead, unless you've added the `
+          + `${app.requiresAgent} CLI to this one yourself.`,
+        buttons: ['Cancel', 'Continue anyway'],
+        defaultId: 0,
+        cancelId: 0
+      })
+      if (response === 0) return { ok: false, canceled: true }
+    }
+
+    // Nothing works without the managed `Host *.sbx` block, and this is a much
+    // better moment to fix that than after the app reports a failed connection.
+    if (!readSshStatus().configured) {
+      const { response } = await dialog.showMessageBox({
+        type: 'info',
+        message: 'SSH access isn’t set up yet',
+        detail:
+          `${app.label} reaches a sandbox over ssh, which needs the managed "Host *.sbx" block in your `
+          + `~/.ssh/config. den can add it now by running \`sbx setup ssh\`.`,
+        buttons: ['Cancel', 'Set Up SSH Access'],
+        defaultId: 1,
+        cancelId: 0
+      })
+      if (response === 0) return { ok: false, canceled: true }
+      const setup = await sshSetup()
+      if (!setup.ok) return { ok: false, error: setup.error || 'Could not run `sbx setup ssh`.' }
+    }
+
+    // On the clipboard before the app opens, so it's ready to paste when the
+    // connection dialog appears — this is the one value the user has to transcribe.
+    clipboard.writeText(host)
+
+    const launched = await openMacApp(app.bundle)
+    if (!launched.ok) {
+      return {
+        ok: false,
+        error: launched.missing
+          ? `${app.label} doesn't appear to be installed.`
+          : launched.error || `Could not launch ${app.label}.`
+      }
+    }
+
+    await dialog.showMessageBox({
+      type: 'info',
+      message: `Add "${host}" as an SSH connection in ${app.label}`,
+      detail:
+        `The hostname is on your clipboard.\n\n`
+        + app.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
+        + (app.caveat ? `\n\nNote: ${app.caveat}` : ''),
+      buttons: ['OK']
+    })
+    return { ok: true, host }
   })
 
   // The renderer mirrors the terminal theme's light/dark polarity here so Claude's

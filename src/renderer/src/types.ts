@@ -220,6 +220,17 @@ export interface PolicyBlock {
   source: 'log' | 'output'
 }
 
+// A launch `sbx run` refused. `kind` picks the remedy the UI offers:
+// `workspace-missing` means the host folder behind the workspace mount is gone
+// (`path` holds it) and the sandbox can't start until it's restored or removed.
+export interface SandboxError {
+  sandbox: string
+  message: string
+  kind: 'workspace-missing' | 'start-failed'
+  path?: string
+  at: number
+}
+
 export interface StorageSection {
   count: number
   bytes: number | null
@@ -425,6 +436,7 @@ declare global {
       sshStatus(): Promise<SshStatus>
       sshSetup(): Promise<{ ok: boolean; output?: string; error?: string }>
       openRemoteEditor(name: string, workspace: string, editor?: string): Promise<{ ok: boolean; viaUri?: boolean; warmStart?: boolean; error?: string }>
+      openRemoteApp(name: string, app: string, agent?: string): Promise<{ ok: boolean; host?: string; canceled?: boolean; error?: string }>
       networkPolicy(name?: string): Promise<NetworkPolicy>
       policyLog(name?: string): Promise<PolicyBlock[]>
       policyCheck(resource: string, name?: string): Promise<{ ok: boolean; decision: 'allow' | 'deny' | 'unknown'; supportMessage?: string; raw?: string; error?: string }>
@@ -451,6 +463,7 @@ declare global {
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
+      onSandboxError(cb: (err: SandboxError) => void): () => void
       onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
       onAgentAttention(cb: (name: string) => void): () => void
       onFilesChanged(cb: (name: string) => void): () => void

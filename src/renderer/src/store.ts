@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { applyTheme, DEFAULT_THEME } from './lib/themes'
-import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template, Group } from './types'
+import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, SandboxError, AgentState, PromptConfig, Template, Group } from './types'
 
 type ThemePref = 'light' | 'dark' | 'system'
 const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -136,6 +136,10 @@ interface AppState {
   policyBlocks: Record<string, PolicyBlock[]>
   blocksSeenAt: Record<string, number>
   toasts: PolicyBlock[]
+  // Last refused launch per sandbox name. Sticky: a failed start leaves no other
+  // trace in the UI (the terminal is replaced by the stopped placeholder), so it
+  // stays until the sandbox starts, is dismissed, or is removed.
+  sandboxErrors: Record<string, SandboxError>
   // Per-sandbox agent state (working / waiting); absent = unknown/stopped.
   agentActivity: Record<string, AgentState>
   // Mixin-kit names auto-added to every new sandbox (marked in the Kits page).
@@ -208,6 +212,8 @@ interface AppState {
   addPolicyBlock:     (block: PolicyBlock) => void
   ackPolicyBlocks:    (sandboxName: string) => void
   dismissToast:       (block: PolicyBlock) => void
+  setSandboxError:    (err: SandboxError) => void
+  clearSandboxError:  (sandboxName: string) => void
   setAgentActivity:   (name: string, state: AgentState | null) => void
 }
 
@@ -271,6 +277,7 @@ export const useStore = create<AppState>((set) => ({
   policyBlocks: {},
   blocksSeenAt: {},
   toasts: [],
+  sandboxErrors: {},
   agentActivity: {},
   highlightSandbox: null,
   logsSandbox: null,
@@ -719,6 +726,17 @@ export const useStore = create<AppState>((set) => ({
         (t) => !(t.sandbox === block.sandbox && t.host === block.host && t.at === block.at)
       )
     })),
+
+  setSandboxError: (err) =>
+    set((state) => (err.sandbox ? { sandboxErrors: { ...state.sandboxErrors, [err.sandbox]: err } } : {})),
+
+  clearSandboxError: (sandboxName) =>
+    set((state) => {
+      if (!(sandboxName in state.sandboxErrors)) return {}
+      const next = { ...state.sandboxErrors }
+      delete next[sandboxName]
+      return { sandboxErrors: next }
+    }),
 
   setAgentActivity: (name, state) =>
     set((s) => {

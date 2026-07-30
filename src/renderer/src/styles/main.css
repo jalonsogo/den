@@ -1051,6 +1051,33 @@ html, body, #root {
   font-size: 11.5px; color: var(--t3);
 }
 .detail-subhdr > svg { flex-shrink: 0; }
+
+/* Refused-launch banner — sits between the header and the terminal, since a
+   stopped sandbox shows a generic placeholder that can't carry the reason. */
+.detail-error {
+  flex-shrink: 0; position: relative;
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 10px 16px 0; padding: 11px 12px;
+  background: color-mix(in srgb, var(--destruct) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destruct) 28%, var(--border));
+  border-radius: 8px;
+}
+.de-ic { color: var(--destruct); flex-shrink: 0; margin-top: 1px; }
+.de-main { flex: 1; min-width: 0; padding-right: 16px; }
+.de-title { font-size: 12.5px; font-weight: 600; color: var(--destruct); }
+.de-msg { font-size: 11.5px; color: var(--t2); line-height: 1.45; margin-top: 3px; }
+.de-path {
+  font-size: 11px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace;
+  margin-top: 5px; word-break: break-all;
+}
+.de-actions { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+.de-x {
+  position: absolute; right: 6px; top: 6px;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 5px; border: none; background: none;
+  color: var(--t3); cursor: pointer;
+}
+.de-x:hover { background: var(--bg-subtle); color: var(--t1); }
 .ds-folder { color: var(--t2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Clickable workspace folder — opens it in Finder; icon opens on hover. */
 .ds-folder-btn {
@@ -1812,7 +1839,12 @@ html, body, #root {
 .changes-check:hover { border-color: var(--t2); }
 .changes-check.on { background: var(--primary); border-color: var(--primary); }
 .changes-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 55%; }
-.changes-dir { font-size: 11px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 1; min-width: 0; }
+.changes-dir { font-size: 11px; color: var(--t3); white-space: nowrap; display: flex; flex: 1; min-width: 0; }
+/* Leading segments give way first (high flex-shrink), so the deepest directory
+   stays readable; both halves render left-to-right, unlike a `direction: rtl`
+   truncation, which garbles dotfile and nested paths. */
+.changes-dir-head { flex-shrink: 999; overflow: hidden; text-overflow: ellipsis; }
+.changes-dir-tail { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
 .changes-tag { font-size: 10px; font-weight: 700; font-family: 'SF Mono','Menlo',monospace; flex-shrink: 0; margin-left: auto; }
 .changes-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 28px 16px; }
 .changes-stat { font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; flex-shrink: 0; white-space: nowrap; }

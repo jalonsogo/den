@@ -3,7 +3,9 @@ import type { ReactNode } from 'react'
 import { Github } from 'lucide-react'
 import { useStore } from '../store'
 import { remoteEditor } from '../lib/remoteEditors'
+import { REMOTE_APPS } from '../lib/remoteApps'
 import { bringSandboxToHost } from '../lib/featureChanges'
+import { bridgeError } from '../lib/utils'
 
 // A hover-triggered flyout item for a context menu. Defaults to opening
 // rightward and flips left (nudging up) when it would overflow the viewport.
@@ -230,44 +232,44 @@ export function ContextMenu() {
     }
   }
 
-  // Attach the chosen editor over SSH, and SAY SO when it doesn't work. The
-  // result used to be discarded (`void …openRemoteEditor(...)`), so every failure
-  // mode — editor not installed, SSH not set up, or a dev main process that
-  // predates the handler — looked identical to a menu item that does nothing.
-  const connectEditor = async () => {
-    const r = await Promise.resolve()
-      .then(() => window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id))
-      .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
-    if (r?.ok) return
-    const err = r?.error?.trim()
-    alert(
-      !err
-        ? `Could not connect ${editor.label} — no response from the runtime bridge.`
-        // An unregistered channel means this build's main process predates the
-        // handler; reloading the window won't help, only a restart. Same hint the
-        // SSH setup button gives.
-        : /no handler registered/i.test(err)
-          ? `${err} — restart den to load the updated main process.`
-          : err
-    )
+  // The three "connect" actions all reach main over the preload bridge, and all
+  // three used to report a stale bridge as its raw JS error — `…is not a function`
+  // for an outdated preload, which reads like a bug in the feature rather than
+  // "relaunch the app". bridgeError does that triage; anything it passes through is
+  // a genuine failure (editor not installed, ssh not set up, app missing).
+  //
+  // They report at all because the result used to be discarded (`void …(…)`), which
+  // made every failure indistinguishable from a menu item that does nothing.
+  const callBridge = async (
+    run: () => Promise<{ ok: boolean; canceled?: boolean; error?: string } | undefined>,
+    what: string
+  ) => {
+    // Promise.resolve().then() so a *synchronous* throw — which is exactly what a
+    // missing preload method does — lands in the same catch as a rejection.
+    type Result = { ok: boolean; canceled?: boolean; error?: string } | undefined
+    const r: Result = await Promise.resolve().then(run)
+      .catch((e): Result => ({ ok: false, error: bridgeError(e, what) }))
+    if (r?.ok || r?.canceled) return
+    alert(r?.error?.trim() || bridgeError(null, what))
   }
 
-  // Open the ssh session in the user's terminal. Reports failures for the same
-  // reason connectEditor does — silence is indistinguishable from a dead menu item.
-  const connectTerminal = async () => {
-    const r = await Promise.resolve()
-      .then(() => window.minipit?.openSshTerminal(sandbox.name))
-      .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
-    if (r?.ok) return
-    const err = r?.error?.trim()
-    alert(
-      !err
-        ? 'Could not open a terminal — no response from the runtime bridge.'
-        : /no handler registered/i.test(err)
-          ? `${err} — restart den to load the updated main process.`
-          : err
+  const connectEditor = () =>
+    callBridge(
+      () => window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id),
+      `Connecting ${editor.label}`
     )
-  }
+
+  const connectTerminal = () =>
+    callBridge(() => window.minipit?.openSshTerminal(sandbox.name), 'Opening a terminal')
+
+  // Point Claude Desktop / the ChatGPT app at this sandbox over SSH. main does the
+  // automatable parts and shows the remaining in-app steps; a `canceled` result is
+  // the user backing out of one of its prompts, not a failure.
+  const connectApp = (appId: string, label: string) =>
+    callBridge(
+      () => window.minipit?.openRemoteApp(sandbox.name, appId, sandbox.agent),
+      `Connecting ${label}`
+    )
 
   // Clone-mode "feature" integrate flow lives in a shared helper (also used by
   // the sandbox header). Close the menu first, then run it.
@@ -318,6 +320,21 @@ export function ContextMenu() {
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void connectTerminal() }}>
         Connect in Terminal
       </div>
+      {/* Claude Desktop and the ChatGPT app run their agent inside the sandbox over
+          the same SSH host. Both need a connection added from inside their own UI
+          (they have no `--remote` equivalent), so these sit in a submenu rather
+          than alongside the editor entry that opens in one click. */}
+      <SubMenu label="Connect an app">
+        {REMOTE_APPS.map((a) => (
+          <div
+            key={a.id}
+            className="ctx-sub-item"
+            onClick={() => { setContextMenu({ visible: false }); void connectApp(a.id, a.label) }}
+          >
+            {a.label}
+          </div>
+        ))}
+      </SubMenu>
       <div className="ctx-sep" />
       <div
         className="ctx-item"

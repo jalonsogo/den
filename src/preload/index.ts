@@ -110,6 +110,8 @@ const api = {
   sshSetup:      ()                     => ipcRenderer.invoke('minipit:ssh-setup'),
   openRemoteEditor: (name: string, workspace: string, editor?: string) =>
     ipcRenderer.invoke('minipit:open-remote-editor', name, workspace, editor),
+  openRemoteApp: (name: string, app: string, agent?: string) =>
+    ipcRenderer.invoke('minipit:open-remote-app', name, app, agent),
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
   policyCheck:   (resource: string, name?: string) => ipcRenderer.invoke('minipit:policy-check', resource, name),
@@ -163,6 +165,13 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, block: unknown) => cb(block)
     ipcRenderer.on('minipit:policy-block', handler)
     return () => ipcRenderer.removeListener('minipit:policy-block', handler)
+  },
+  // A launch that `sbx run` refused (bad workspace, runtime error) — the message
+  // it printed before exiting, so the UI can show it instead of losing it.
+  onSandboxError: (cb: (err: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, err: unknown) => cb(err)
+    ipcRenderer.on('minipit:sandbox-error', handler)
+    return () => ipcRenderer.removeListener('minipit:sandbox-error', handler)
   },
   onAgentActivity: (cb: (name: string, state: 'working' | 'waiting' | null) => void) => {
     const handler = (_: Electron.IpcRendererEvent, name: string, state: 'working' | 'waiting' | null) => cb(name, state)
