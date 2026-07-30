@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Layers, Lock } from 'lucide-react'
+import { Layers, Lock } from 'lucide-react'
 import { formatUptime } from '../lib/utils'
 import { MountsPanel } from './MountsPanel'
 import { AgentIcon } from './AgentIcon'
@@ -29,7 +29,10 @@ function extractInspect(json: unknown): { secrets: InjectedSecret[]; authMode?: 
   return { secrets, authMode }
 }
 
-export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: () => void }) {
+// No close button in the header: the dock is closed from the toolbar's
+// right-dock toggle or by clicking its rail icon again, and a third control for
+// the same thing just crowds the panel (Files never had one either).
+export function InfoPanel({ sandbox }: { sandbox: Sandbox }) {
   const [kits, setKits] = useState<string[]>([])
   // `sbx inspect --json` detail — injected secrets + auth mode.
   const [inspect, setInspect] = useState<{ secrets: InjectedSecret[]; authMode?: string } | null>(null)
@@ -45,9 +48,6 @@ export function InfoPanel({ sandbox, onClose }: { sandbox: Sandbox; onClose?: ()
     <div className="info-dock">
       <div className="info-dock-hd">
         <span className="info-dock-title">Sandbox info</span>
-        {onClose && (
-          <button className="info-dock-x" onClick={onClose} title="Close"><X size={15} /></button>
-        )}
       </div>
       <div className="info-panel">
       <div className="info-stats">

@@ -9,7 +9,8 @@ import {
   nativeTheme,
   dialog,
   session,
-  powerSaveBlocker
+  powerSaveBlocker,
+  clipboard
 } from 'electron'
 import { join } from 'path'
 import http from 'http'
@@ -657,14 +658,25 @@ function parsePolicyLs(out: string) {
 }
 
 function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
+  const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {
     // maxBuffer: the default is 1 MB — `sbx ls --json` / `exec … find` on a busy
     // machine or large tree can exceed that and fail with an opaque "Command
     // failed", so give it generous headroom. On error, prefer stderr, then any
-    // stdout captured, then the raw execFile message.
-    execFile(getSbxPath(), args, { timeout: opts?.timeout ?? 10000, maxBuffer: 32 * 1024 * 1024, env: guiEnv() }, (err, stdout, stderr) => {
-      if (err) reject(new Error((stderr || stdout || err.message || '').toString().trim() || err.message))
-      else resolve(stdout.trim())
+    // stdout captured.
+    execFile(getSbxPath(), args, { timeout, maxBuffer: 32 * 1024 * 1024, env: guiEnv() }, (err, stdout, stderr) => {
+      if (!err) return resolve(stdout.trim())
+      const out = (stderr || stdout || '').toString().trim()
+      if (out) return reject(new Error(out))
+      // Nothing on either stream: all execFile gives us is "Command failed: <cmd>",
+      // which says nothing about *how* it failed. That case is worth spelling out,
+      // because being killed at the timeout (a hung daemon) and exiting nonzero in
+      // silence (a bad subcommand, a sbx version drift) look identical otherwise —
+      // and this is the branch that logs on repeat from the poll loop.
+      const e = err as Error & { code?: number | string; signal?: string; killed?: boolean }
+      reject(new Error(`sbx ${args.join(' ')} ${e.killed || e.signal
+        ? `killed after ${timeout}ms (${e.signal ?? 'timeout'}) — no output`
+        : `exited with ${e.code ?? 'unknown status'} and no output`}`))
     })
   })
 }
@@ -1173,6 +1185,222 @@ function sshConfigPath(): string {
   return join(require('os').homedir(), '.ssh', 'config')
 }
 
+// A short TMPDIR for a spawned remote editor, or undefined if one can't be made.
+//
+// VS Code's Remote-SSH puts its askpass unix socket at
+//   $TMPDIR/vscode-ssh-askpass-<40 hex>.sock          (64-char filename)
+// macOS's default per-user TMPDIR (/var/folders/xx/<28 chars>/T/) is ~49 bytes,
+// so the full path lands around 113 — past the 104-byte sun_path limit in
+// sockaddr_un. The bind fails ("AF_UNIX path too long", surfaced to Node as
+// EINVAL), Remote-SSH can't answer its own delay-shutdown request, times out
+// after ~5s, and reconnects — looping forever while reporting nothing but
+// `listen EINVAL` deep in its log. Measured on macOS 25.5 / Remote-SSH 0.123:
+// 113 bytes fails, the same filename under a short dir binds fine.
+//
+// /tmp/den-<uid> keeps the full path at ~77 bytes. Created 0700 rather than
+// using bare /tmp, which is world-writable.
+//
+// CAVEAT: this only bites on a COLD start. `code --remote` on an
+// already-running editor hands the request to that process over IPC, and its
+// environment — not ours — is what the extension host inherits.
+function shortEditorTmpDir(): string | undefined {
+  // Linux allows 108 bytes and typically has TMPDIR=/tmp, so there's nothing to
+  // work around; leave other platforms' environment untouched.
+  if (process.platform !== 'darwin') return undefined
+  try {
+    const fs = require('fs')
+    const dir = `/tmp/den-${process.getuid?.() ?? 0}`
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    // A pre-existing dir keeps its old mode, so assert it.
+    try { fs.chmodSync(dir, 0o700) } catch { /* not ours to chmod — still usable */ }
+    return dir
+  } catch {
+    return undefined
+  }
+}
+
+// ── Open an SSH session in a terminal ────────────────────────────────────────
+// Which terminal app to use, mirrored from the renderer's preference.
+let terminalPref = 'default'
+
+// Terminals that take a command straight off their CLI. Preferred when the
+// binary is on PATH: no temp script, and the terminal keeps its own shell setup.
+const TERMINAL_CLI: Record<string, (cmd: string) => { bin: string; args: string[] }> = {
+  Ghostty: (c) => ({ bin: 'ghostty', args: ['-e', c] }),
+  WezTerm: (c) => ({ bin: 'wezterm', args: ['start', '--', 'sh', '-lc', c] }),
+  kitty: (c) => ({ bin: 'kitty', args: ['sh', '-lc', c] }),
+  Alacritty: (c) => ({ bin: 'alacritty', args: ['-e', 'sh', '-lc', c] })
+}
+
+// Open `ssh <sandbox>.sbx` in a terminal window.
+//
+// Two strategies. If the chosen terminal has a CLI that accepts a command, use
+// it. Otherwise write a tiny executable .command script and hand it to `open`:
+// that's the only approach that works across GUI-only terminals, and with no
+// -a flag macOS routes it to whatever the user has registered for shell scripts
+// — so 'default' really is *their* terminal rather than a hardcoded Terminal.app.
+async function openSshInTerminal(name: string): Promise<{ ok: boolean; error?: string }> {
+  const host = `${name}.sbx`
+  const cmd = `ssh ${host}`
+  const pref = terminalPref
+  const cli = TERMINAL_CLI[pref]
+  if (cli) {
+    const spec = cli(cmd)
+    const spawned = await new Promise<boolean>((resolve) => {
+      try {
+        const p = spawn(spec.bin, spec.args, { env: guiEnv(), detached: true, stdio: 'ignore' })
+        p.on('error', () => resolve(false))
+        p.unref()
+        // No error by the next tick means it launched; ENOENT arrives immediately.
+        setTimeout(() => resolve(true), 150)
+      } catch { resolve(false) }
+    })
+    if (spawned) return { ok: true }
+    // Binary isn't installed — fall through to the script route, which only needs
+    // the .app to exist.
+  }
+  try {
+    const fs = require('fs')
+    // Sandbox names are limited to letters, digits, . + and -, but this string
+    // becomes a filename and a shell word, so keep it to that set regardless.
+    const safe = name.replace(/[^A-Za-z0-9._+-]/g, '_')
+    const file = join(require('os').tmpdir(), `den-ssh-${safe}.command`)
+    // `exec` so closing the ssh session closes the window's shell too, and
+    // 0700 because this is an executable dropped in a shared temp directory.
+    fs.writeFileSync(file, `#!/bin/sh\nexec ${cmd}\n`, { mode: 0o700 })
+    fs.chmodSync(file, 0o700)
+    if (pref === 'default') await shell.openPath(file)
+    else {
+      await new Promise<void>((resolve, reject) => {
+        const p = spawn('open', ['-a', pref, file], { env: guiEnv() })
+        p.on('error', reject)
+        p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`open -a ${pref} exited ${code}`))))
+      })
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
+// Is this editor already running? Decides whether the TMPDIR above can actually
+// take effect: `code --remote` on a live instance is just IPC to that process, so
+// the environment it was originally launched with is the one that counts.
+// Matching the app bundle rather than a process name — the main process is a
+// generically-named Electron binary.
+const EDITOR_BUNDLE: Record<string, string> = {
+  code: 'Visual Studio Code.app', cursor: 'Cursor.app',
+  windsurf: 'Windsurf.app', codium: 'VSCodium.app'
+}
+function isEditorRunning(bin: string): Promise<boolean> {
+  const bundle = EDITOR_BUNDLE[bin]
+  if (!bundle) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    // pgrep exits 0 when something matched, 1 when nothing did.
+    execFile('pgrep', ['-f', bundle], { timeout: 4000 }, (err) => resolve(!err))
+  })
+}
+
+// Explain the reconnect-loop once per app session, the first time we hand a
+// remote-open to an editor that was already running. Repeating it on every open
+// would be noise, and most of the time the editor's TMPDIR is fine.
+let warnedEditorTmpdir = false
+
+// Run `sbx setup ssh`. Shared by the IPC handler and the Runtime menu; writes to
+// ~/.ssh/config, so both call sites are explicit user actions.
+async function sshSetup(): Promise<{ ok: boolean; output?: string; error?: string }> {
+  try {
+    const output = await sbx(['setup', 'ssh'], { timeout: 30000 })
+    return { ok: true, output }
+  } catch (err) {
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+  }
+}
+
+// State of that managed block. Only ever returns counts and flags — an ssh
+// config routinely holds unrelated hosts and credentials, and none of that
+// belongs in the renderer (or a menu label). Shared by the ssh-status IPC handler
+// and the Runtime menu.
+function readSshStatus(): { configured: boolean; duplicates: number; path: string } {
+  let cfg = ''
+  try { cfg = require('fs').readFileSync(sshConfigPath(), 'utf8') } catch { /* no config yet */ }
+  const blocks = (cfg.match(/^[ \t]*Host[ \t]+\S*\*\.sbx\b/gim) ?? []).length
+  return {
+    configured: blocks > 0,
+    // >1 means an earlier block was left behind (a hand-edited or partially-marked
+    // block defeats sbx's idempotent rewrite). ssh takes the FIRST value it sees
+    // for each keyword, so a stale block silently wins over the current one and
+    // can drop settings it relies on — e.g. `IdentityAgent none`, without which an
+    // external SSH agent intercepts the connection.
+    duplicates: Math.max(0, blocks - 1),
+    path: sshConfigPath()
+  }
+}
+
+// ── Desktop apps that attach to a sandbox over SSH ───────────────────────────
+// Docker documents four editor/app integrations. Two are VS Code-family editors,
+// which den drives end to end (see the open-remote-editor handler). The other two
+// can only be pointed at a host from inside their own UI — neither exposes a CLI
+// flag or URI for adding an SSH connection, the way `code --remote` does. So den
+// does every part it can (check the managed ssh config, put the hostname on the
+// clipboard, launch the app) and then states the clicks that are left, instead of
+// leaving the integration undiscoverable.
+interface RemoteApp {
+  label: string
+  // macOS application name, for `open -a`. Also what tells us it isn't installed.
+  bundle: string
+  // Template the sandbox must be built from for the app's remote server to find
+  // its CLI. The ChatGPT app runs `codex` over the SSH connection, so a sandbox
+  // running any other agent connects and then can't start a session.
+  requiresAgent?: string
+  steps: string[]
+  caveat?: string
+}
+
+const REMOTE_APPS: Record<string, RemoteApp> = {
+  'claude-desktop': {
+    label: 'Claude Desktop',
+    bundle: 'Claude',
+    steps: [
+      'Open the environment drop-down (before starting a session) and choose “+ Add SSH connection”.',
+      'Give the connection a name, and paste the hostname into “SSH Host”.',
+      'Leave “SSH Port” and “Identity File” empty — the managed ssh config already supplies them.',
+      'Pick the connection from the environment drop-down, then use the remote folder picker to select the mounted workspace. It opens at /home/agent, which is not the mount.'
+    ],
+    // Straight from Docker's own warning: worth repeating at the moment of use,
+    // since the whole point of a sandbox is the isolation this trades away.
+    caveat:
+      'This sends your Anthropic credentials into the Claude Code process inside the sandbox, '
+      + 'which reduces the isolation the sandbox gives you.'
+  },
+  chatgpt: {
+    label: 'ChatGPT',
+    bundle: 'ChatGPT',
+    requiresAgent: 'codex',
+    steps: [
+      'Open Settings ▸ Connections and add an SSH connection.',
+      'Paste the hostname as the host.',
+      'Use the folder picker to select the mounted workspace as the remote project.'
+    ]
+  }
+}
+
+// Launch a macOS app by name. Distinguishes "not installed" from other failures,
+// because that's the one the user can act on.
+function openMacApp(bundle: string): Promise<{ ok: boolean; missing?: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const p = spawn('open', ['-a', bundle], { env: guiEnv() })
+    let err = ''
+    p.stderr?.on('data', (d) => { err += d.toString() })
+    p.on('error', (e) => resolve({ ok: false, error: e.message }))
+    p.on('close', (code) => {
+      if (code === 0) return resolve({ ok: true })
+      // `open -a` says "Unable to find application named '<name>'" for a missing app.
+      resolve({ ok: false, missing: /unable to find application/i.test(err), error: err.trim() })
+    })
+  })
+}
+
 // Read `sbx skills import` output (both --dry-run and the real run).
 //
 // Observed v0.37.0 dry-run lines:
@@ -1320,6 +1548,48 @@ function scanOutputForBlocks(name: string, data: string): void {
   }
   // Keep only the tail so the buffer can't grow unbounded.
   blockScanBuf.set(name, buf.slice(-2048))
+  scanOutputForStartError(name, buf)
+}
+
+// ── Failed launches ──────────────────────────────────────────────────────────
+// `sbx run` reports a refused launch on its own stderr and exits, e.g.
+//   ERROR: failed to start sandbox: start runtime: request failed: 422 …:
+//   workspace directory "/Users/me/Proj" no longer exists on the host; …
+// In a PTY that text lands in the agent stream — but a launch that fails never
+// reaches `running`, so the terminal is swapped for the stopped placeholder and
+// the message goes with it. The user is left with a sandbox that silently won't
+// start, and the reason only in the log file. Pull it out of the stream and
+// forward it as a structured event the UI can show (and act on).
+const START_ERR_RE = /ERROR:\s*failed to (?:start|run|create) sandbox:\s*([^\r\n]+)/i
+// The one failure with an obvious remedy: the host folder behind the workspace
+// mount was moved or deleted. sbx names the path, so lift it out and let the UI
+// offer the removal it suggests as a button.
+const WORKSPACE_GONE_RE = /workspace directory "([^"]+)" no longer exists/i
+// Last message forwarded per sandbox, so a marker sitting in the rolling tail
+// isn't re-emitted on every subsequent chunk. Cleared when a launch starts.
+const startErrSeen = new Map<string, string>()
+
+// `final` allows an unterminated last line — the failure message is usually the
+// very last thing `sbx run` writes before exiting, so mid-stream we only accept
+// a line we've seen the end of (otherwise a chunk boundary mid-message would
+// emit a truncated one), and the exit handler flushes whatever is left.
+function scanOutputForStartError(name: string, buf: string, final = false): void {
+  const m = START_ERR_RE.exec(buf)
+  if (!m) return
+  const rest = buf.slice(m.index + m[0].length)
+  if (!final && !/[\r\n]/.test(rest)) return
+  // Collapse the wrapped, multi-space CLI formatting into one readable line.
+  const message = m[1].trim().replace(/\s+/g, ' ').replace(/\s+\.$/, '')
+  if (startErrSeen.get(name) === message) return
+  startErrSeen.set(name, message)
+  const gone = WORKSPACE_GONE_RE.exec(message)
+  mainWindow?.webContents.send('minipit:sandbox-error', {
+    sandbox: name,
+    message,
+    kind: gone ? 'workspace-missing' : 'start-failed',
+    path: gone?.[1],
+    at: Date.now()
+  })
 }
 
 // ── Agent activity & file changes (Claude Code hooks) ────────────────────────
@@ -1335,17 +1605,44 @@ type AgentState = 'working' | 'waiting'
 const agentState = new Map<string, AgentState>()
 const eventTails = new Map<string, ReturnType<typeof spawn>>()
 
+// The append command every hook runs. Claude's hook payload carries no clock of
+// its own (only PostToolUse's `duration_ms`), and the tail below doesn't need one
+// since it reacts as lines arrive — but the file is also read after the fact, so
+// stamp each event with `den_ts` on the way in. Only the first line is touched;
+// payloads are single-line compact JSON (JSON strings can't hold raw newlines),
+// and any further lines pass through untouched rather than being dropped.
+//
+// awk, not sed: awk's `print` always terminates its output, so a payload that
+// arrives without a trailing newline can't glue itself onto the next event and
+// leave the tail with an unparsable line. sed would pass the missing newline
+// through. Both are POSIX, which matters because the sandbox's /bin/sh is dash.
+//
+// The epoch form (`date +%s%3N`) is deliberately avoided: the sandbox ships
+// uutils `date`, which ignores the %3N width and would splice all nine
+// nanosecond digits onto the seconds. ISO-8601 stays valid at any width, and
+// `new Date()` truncates the extra precision.
+//
+// `2>/dev/null || true`, and in that order: if the log isn't writable (read-only
+// ~/.den again) the shell's append fails with status 2 — and exit code 2 from a
+// PreToolUse hook *blocks the tool call*, so a sandbox that can't be logged would
+// have its agent unable to run tools at all. `|| true` keeps the hook advisory.
+// The stderr redirect has to come before `>>` because redirections apply left to
+// right: put it last and the shell's own "cannot create" message still lands in
+// the transcript before it's suppressed.
+const APPEND_EVENT =
+  `awk -v t="$(date -u +%FT%T.%3NZ)" 'NR==1{sub(/^\\{/, "{\\"den_ts\\":\\"" t "\\",")} 1' 2>/dev/null >> ~/.den/events.jsonl || true`
+
 const DEN_HOOKS = {
   hooks: {
-    UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    PreToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    PostToolUse: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
+    UserPromptSubmit: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    PreToolUse: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    PostToolUse: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
     // Notification fires when the agent needs the user — a permission prompt, an
     // asked question, or the idle "waiting for input" reminder. Distinct from
     // Stop (turn finished) so we can play a different cue.
-    Notification: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    Stop: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }],
-    SessionStart: [{ hooks: [{ type: 'command', command: 'cat >> ~/.den/events.jsonl' }] }]
+    Notification: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    Stop: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }]
   }
 }
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
@@ -1355,6 +1652,10 @@ function setAgentState(name: string, state: AgentState): void {
   agentState.set(name, state)
   hookLog(`${name} state → ${state}`)
   mainWindow?.webContents.send('minipit:agent-activity', name, state)
+  // The menus colour and order sandboxes by this, so rebuild. Cheap enough:
+  // the early return above means this only fires on a real transition, not on
+  // every hook event.
+  void setAppMenu()
 }
 
 // Dev-only trace for verifying the Claude Code hook pipeline. Logs to the den
@@ -1386,14 +1687,27 @@ function injectClaudeHooks(name: string, attempt = 0): Promise<void> {
   // Write den_hooks to a real file and merge two plain files with jq. Process
   // substitution (`<(…)`) is bash-only and the sandbox's /bin/sh is dash, so
   // `sh -c` would fail with "Syntax error: ( unexpected" and never install the hooks.
+  //
+  // Nothing here may depend on ~/.den being writable. It can be read-only — a
+  // host dir mounted over it with `ro` from the Mounts panel, say — and priming
+  // the event log is unrelated to installing the hooks. Previously `touch
+  // ~/.den/events.jsonl &&` aborted the whole script on EROFS, and the staging
+  // file went to ~/.den too, so the hooks never reached ~/.claude/settings.json
+  // and den showed no activity at all for that sandbox. The event log is now
+  // best-effort (matching the tail below) and staging goes to a temp dir, so a
+  // read-only ~/.den costs only the activity events. An unwritable ~/.claude
+  // still surfaces as an error from the settings write, which is the useful
+  // failure. The temp file is left behind deliberately: appending `rm` would make
+  // its exit status the script's, masking failures from the retry logic above.
   const script =
-    'mkdir -p ~/.claude ~/.den && touch ~/.den/events.jsonl && ' +
+    'mkdir -p ~/.claude 2>/dev/null; mkdir -p ~/.den 2>/dev/null; touch ~/.den/events.jsonl 2>/dev/null; ' +
     `den_hooks='${cfg.replace(/'/g, `'\\''`)}' && ` +
-    'printf %s "$den_hooks" > ~/.den/hooks.json && ' +
+    'den_tmp=${TMPDIR:-/tmp}/den-hooks.json && ' +
+    'printf %s "$den_hooks" > "$den_tmp" && ' +
     'if command -v jq >/dev/null 2>&1 && [ -s ~/.claude/settings.json ]; then ' +
-    '  jq -s ".[0] * .[1]" ~/.claude/settings.json ~/.den/hooks.json > ~/.claude/settings.json.tmp ' +
+    '  jq -s ".[0] * .[1]" ~/.claude/settings.json "$den_tmp" > ~/.claude/settings.json.tmp ' +
     '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
-    'else cp ~/.den/hooks.json ~/.claude/settings.json && echo wrote; fi'
+    'else cp "$den_tmp" ~/.claude/settings.json && echo wrote; fi'
   return new Promise((resolve) => {
     execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
       if (err) {
@@ -1661,7 +1975,14 @@ async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
   // doesn't support it and exits non-zero, which would surface as a handler error.
   // `stat -c` and its %F/%s/%n specifiers are supported by both BusyBox and GNU.
   // The format uses real tab separators (\t here is a literal tab in the string).
+  //
+  // The `[ -d ]` guard comes first so the commonest failure by far — a *host*
+  // workspace path that doesn't exist inside the container (folder moved on the
+  // host, clone/isolated layout, different mount point) — reports itself rather
+  // than arriving as find's bare exit 1 with stderr swallowed by the 2>/dev/null,
+  // which `sbx()` could only render as "exited with 1 and no output".
   const cmd =
+    '[ -d "$1" ] || { printf \'no such directory in sandbox: %s\\n\' "$1" >&2; exit 3; }; ' +
     'find "$1" -maxdepth 1 -mindepth 1 -exec stat -c "%F\t%s\t%n" {} + 2>/dev/null'
 
   let out: string
@@ -1744,6 +2065,11 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
   // stopped/deleted. Spawning now would strand a session nobody is attached to.
   if (spawnGen.get(name) !== gen) return
 
+  // Fresh launch: drop the previous attempt's scan state so a repeat of the same
+  // failure is reported again (and a stale tail can't re-trigger on its own).
+  blockScanBuf.delete(name)
+  startErrSeen.delete(name)
+
   // Reconnecting to an already-running sandbox: resume the agent's prior
   // conversation rather than starting fresh. `--continue` is a claude agent
   // flag (gated by the caller), passed through after the `--` separator.
@@ -1790,6 +2116,9 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
   proc.onExit(() => {
     sbxProcesses.delete(name)
     agentOutBuf.delete(name)
+    // A failure message is typically the last thing written before the exit, so
+    // it may still be an unterminated line in the tail — flush it now.
+    scanOutputForStartError(name, blockScanBuf.get(name) ?? '', true)
     // The `--continue` reconnect failed because there was no prior conversation.
     // Retry once as a fresh session rather than surfacing the error and dying.
     if (noConversation) {
@@ -1883,14 +2212,28 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
 // synchronously (and often); refreshed in the background on each rebuild so a
 // runtime update shows up without restarting den.
 let cachedSbxVersion = ''
+// Both menus retry the read while the version is still unknown (a down runtime
+// never fills it), so keep one probe in flight rather than stacking an exec per
+// menu rebuild.
+let sbxVersionProbe = false
 function refreshSbxVersion(): void {
+  if (sbxVersionProbe) return
+  sbxVersionProbe = true
   sbx(['version'], { timeout: 8000 })
     .then((raw) => {
       // "sbx version: v0.37.0 <sha>" — keep the version, drop the commit.
       const v = raw.match(/v?\d+\.\d+\.\d+\S*/)?.[0] ?? ''
-      if (v && v !== cachedSbxVersion) { cachedSbxVersion = v; updateTrayMenu(lastTraySandboxes) }
+      if (v && v !== cachedSbxVersion) {
+        cachedSbxVersion = v
+        updateTrayMenu(lastTraySandboxes)
+        // Both menus show the version. Clear the signature first — it's keyed on
+        // sandbox/template/kit data, so a version-only change wouldn't rebuild.
+        lastMenuSig = ''
+        void setAppMenu()
+      }
     })
     .catch(() => { /* runtime missing or daemon down — the item just says "unknown" */ })
+    .finally(() => { sbxVersionProbe = false })
 }
 
 function navigateFromTray(channel: string, payload: string): void {
@@ -1937,6 +2280,9 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
     { label: running.length ? 'Running sandboxes' : 'No running sandboxes', enabled: false },
     ...running.map((s) => ({
       label: s.name,
+      // Same dot as the Sandboxes menu, so green/yellow means the same thing in
+      // both places.
+      icon: statusDotFor(s.status, agentState.get(s.name)),
       click: () => navigateFromTray('minipit:open-sandbox', s.name)
     })),
     { type: 'separator' },
@@ -1975,8 +2321,93 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
 // from the menu bar. Rebuilt when that data changes; the signature guard below
 // avoids needless rebuilds (which would close a menu the user has open).
 const MENU_LIST_LIMIT = 12
+// Sandboxes get a tighter cap than the Library lists: this menu shows a submenu
+// per row, and the ordering already puts what matters on top, so a long tail is
+// just a wall to scroll past. The overflow gets a "View All …" link instead.
+const SANDBOX_MENU_LIMIT = 7
 let lastMenuSig = ''
 let lastMenuSandboxSig = ''
+// Status dots for menu items. A native menu label is plain text — no per-item
+// colour — but menu items DO take an icon, so the dot is drawn as a real image
+// instead of a ●/○ glyph.
+//
+// Built from a raw BGRA bitmap rather than a bundled asset: it's a circle, and
+// this way the colours come from one place and can't drift from the UI's. macOS
+// wants premultiplied BGRA, and the buffer is 2× the logical 16pt size for retina.
+// Cached per colour — menus rebuild often and these would otherwise be redrawn
+// pixel by pixel each time.
+const DOT_CACHE = new Map<string, Electron.NativeImage>()
+// `hollow` draws a ring rather than a disc: an outline reads as "nothing running
+// here" without spending a colour on it. `opacity` fades the whole glyph — used
+// to keep that outline quiet, so a list of stopped sandboxes doesn't read as
+// twelve hard circles competing with the names.
+function statusDot(hex: string, hollow = false, opacity = 1): Electron.NativeImage {
+  const key = `${hex}${hollow ? '-ring' : ''}@${opacity}`
+  const cached = DOT_CACHE.get(key)
+  if (cached) return cached
+  const S = 32                       // 16pt @2x
+  const R = 5.5 * 2                  // 5.5pt radius, so an 11pt dot
+  const W = 2                        // ring stroke, 1pt — a hairline, not a border
+  const c = (S - 1) / 2
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  const buf = Buffer.alloc(S * S * 4)
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      // Coverage over the last pixel of each edge → a cheap antialias, so the dot
+      // doesn't look like a staircase next to crisp menu text. A ring is the
+      // outer disc minus the inner one, which antialiases both edges at once.
+      const d = Math.sqrt((x - c) ** 2 + (y - c) ** 2)
+      const outer = Math.max(0, Math.min(1, R - d + 0.5))
+      const a = opacity * (hollow
+        ? Math.max(0, outer - Math.max(0, Math.min(1, R - W - d + 0.5)))
+        : outer)
+      const i = (y * S + x) * 4
+      buf[i] = Math.round(b * a)          // premultiplied, BGRA order
+      buf[i + 1] = Math.round(g * a)
+      buf[i + 2] = Math.round(r * a)
+      buf[i + 3] = Math.round(255 * a)
+    }
+  }
+  const img = nativeImage.createFromBitmap(buf, { width: S, height: S, scaleFactor: 2 })
+  DOT_CACHE.set(key, img)
+  return img
+}
+
+// Agent lifecycle, coloured the way den's own UI already does it: green working,
+// yellow waiting, and an uncoloured outline for anything not up.
+//
+// Deliberately not template images — a template image is recoloured to the
+// menu's text colour, which would throw the status away. That also means the
+// outline can't adapt on its own, so its colour comes from the current
+// appearance and the menus are rebuilt when that changes (nativeTheme 'updated').
+function statusDotFor(status: string, activity?: AgentState): Electron.NativeImage {
+  if (status === 'running') {
+    if (activity === 'working') return statusDot('#30D158')   // green — mid-turn
+    if (activity === 'waiting') return statusDot('#FFD60A')   // yellow — wants you
+    return statusDot('#30D158')                               // up, activity unknown
+  }
+  // Stopped, plus everything transitional (starting/stopping/creating/deleting):
+  // nothing is running, so spend no colour on it — just a faint outline. Held at
+  // 45%: most of this list is usually stopped, and a solid ring on every row
+  // competes with the names instead of receding behind them.
+  return statusDot(nativeTheme.shouldUseDarkColors ? '#98989D' : '#3A3A3C', true, 0.45)
+}
+
+// Menu sort key: working, then waiting, then merely running, then transitional,
+// then stopped. Ordered by what wants attention rather than by name — an idle
+// sandbox is the least interesting row in the list.
+function sandboxRank(status: string, activity?: AgentState): number {
+  if (status === 'running') return activity === 'working' ? 0 : activity === 'waiting' ? 1 : 2
+  if (status === 'stopped') return 4
+  return 3    // starting / stopping / creating / deleting
+}
+
+// Name of the sandbox currently open in the window, mirrored from the renderer.
+// The Sandboxes menu marks it and puts the accelerators on its items, so a
+// shortcut is visibly bound to the sandbox it acts on.
+let activeSandboxName: string | null = null
 
 async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSandboxes>>): Promise<void> {
   // Route clicks through navigateFromTray so they work even when the window is
@@ -1993,9 +2424,14 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
 
   // Skip the rebuild when nothing menu-relevant changed.
   const sig = JSON.stringify({
-    s: sandboxes.map((s) => [s.name, s.status]),
+    // Agent activity is part of the key: it drives both the dot colour and the
+    // ordering, so a working→waiting flip is a genuinely different menu.
+    s: sandboxes.map((s) => [s.name, s.status, agentState.get(s.name) ?? '']),
     t: templates.map((t) => `${t.repository}:${t.tag}`),
-    m: kits.map((k) => [k.name, k.kind])
+    m: kits.map((k) => [k.name, k.kind]),
+    // Part of the key: switching sandboxes moves the ✓ and the accelerators, so
+    // the menu genuinely differs even when the data behind it hasn't changed.
+    a: activeSandboxName
   })
   if (sig === lastMenuSig && Menu.getApplicationMenu()) return
   lastMenuSig = sig
@@ -2009,11 +2445,93 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     return shown
   }
 
+  // Each sandbox gets its own submenu of actions. These used to sit at the top
+  // level as "Stop Sandbox" / "Open in Finder" / "Logs", which never said WHICH
+  // sandbox they meant — they silently acted on whichever was open. Now the
+  // target is the thing you pick, and the accelerators live on the open
+  // sandbox's items so the shortcut is visibly attached to what it affects.
+  // Like navigateFromTray, but carries two arguments (name + action), so it can't
+  // just delegate to it.
+  const act = (name: string, action: string): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow()
+      mainWindow?.webContents.once('did-finish-load', () =>
+        mainWindow?.webContents.send('minipit:sandbox-action', name, action))
+      return
+    }
+    showMainWindow()
+    mainWindow.webContents.send('minipit:sandbox-action', name, action)
+  }
+  const sandboxSubmenu = (s: { name: string; status: string; workspace: string }): Electron.MenuItemConstructorOptions[] => {
+    const current = s.name === activeSandboxName
+    const running = s.status === 'running'
+    return [
+      { label: 'Open', click: () => act(s.name, 'open') },
+      { type: 'separator' },
+      running
+        ? { label: 'Stop', accelerator: current ? 'Cmd+.' : undefined, click: () => act(s.name, 'stop') }
+        : { label: 'Start', click: () => act(s.name, 'start') },
+      { label: 'Restart', enabled: running, click: () => act(s.name, 'restart') },
+      { type: 'separator' },
+      {
+        label: 'Open in Finder',
+        accelerator: current ? 'Shift+Cmd+F' : undefined,
+        // Done here rather than round-tripping the renderer: it's just a path.
+        click: () => { if (s.workspace) void shell.openPath(s.workspace) }
+      },
+      { label: 'Logs', accelerator: current ? 'Cmd+L' : undefined, click: () => act(s.name, 'logs') },
+      { type: 'separator' },
+      {
+        label: 'Connect in Terminal',
+        // Labelled generically rather than naming the app: the choice lives in
+        // Settings, and main would otherwise need its own copy of that list.
+        click: async () => {
+          const r = await openSshInTerminal(s.name)
+          if (!r.ok) {
+            void dialog.showMessageBox({
+              type: 'error',
+              message: `Could not open a terminal for ${s.name}`,
+              detail: r.error || 'The terminal app could not be launched.'
+            })
+          }
+        }
+      },
+      { label: 'Copy SSH Command', click: () => clipboard.writeText(`ssh ${s.name}.sbx`) }
+    ]
+  }
+  // Working → waiting → running → transitional → stopped, keeping sbx's own
+  // (alphabetical) order within each band, so a sandbox doesn't jump around
+  // relative to its peers. Sorting a copy: `sandboxes` is used elsewhere.
+  const ordered = [...sandboxes].sort((a, b) =>
+    sandboxRank(a.status, agentState.get(a.name)) - sandboxRank(b.status, agentState.get(b.name))
+  )
+  // The open sandbox has to survive the cap: with more sandboxes than fit, a
+  // stopped one you're working in would otherwise fall off the end and take
+  // Cmd+. / Shift+Cmd+F / Cmd+L with it. Only hoisted when the ranking doesn't
+  // already keep it in range — no point disturbing the order otherwise.
+  const activeIdx = ordered.findIndex((s) => s.name === activeSandboxName)
+  if (activeIdx >= SANDBOX_MENU_LIMIT) ordered.unshift(...ordered.splice(activeIdx, 1))
   const sandboxItems: Electron.MenuItemConstructorOptions[] = sandboxes.length
-    ? capped(sandboxes, (s) => ({
-        label: `${s.status === 'running' ? '●' : '○'}  ${s.name}`,
-        click: () => go('minipit:open-sandbox', s.name)
-      }), 'sandboxes')
+    ? [
+        ...ordered.slice(0, SANDBOX_MENU_LIMIT).map((s) => ({
+          // Trailing ✓ for the open sandbox rather than a leading marker, so
+          // names stay left-aligned under the status icon.
+          label: `${s.name}${s.name === activeSandboxName ? '  ✓' : ''}`,
+          icon: statusDotFor(s.status, agentState.get(s.name)),
+          submenu: sandboxSubmenu(s)
+        })),
+        // A way out rather than a dead end: the old tail was a disabled "N more
+        // sandboxes…", which told you they existed and then refused to help.
+        ...(ordered.length > SANDBOX_MENU_LIMIT
+          ? [
+              { type: 'separator' } as Electron.MenuItemConstructorOptions,
+              {
+                label: `View All ${ordered.length} Sandboxes…`,
+                click: () => go('minipit:navigate', 'sandboxes')
+              } as Electron.MenuItemConstructorOptions
+            ]
+          : [])
+      ]
     : [{ label: 'No sandboxes yet', enabled: false }]
 
   // A Library submenu: "Show all" + the list (each opens the management page,
@@ -2082,10 +2600,10 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       submenu: [
         { label: 'Show All Sandboxes', accelerator: 'Shift+Cmd+S', click: () => go('minipit:navigate', 'sandboxes') },
         { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
-        { label: 'Stop Sandbox', accelerator: 'Cmd+.', click: () => go('minipit:stop-active') },
-        { label: 'Open in Finder', accelerator: 'Shift+Cmd+F', click: () => go('minipit:open-in-finder') },
-        { label: 'Logs', accelerator: 'Cmd+L', click: () => go('minipit:navigate', 'logs') },
         { type: 'separator' },
+        { label: 'All Logs', click: () => go('minipit:navigate', 'logs') },
+        { type: 'separator' },
+        // Per-sandbox actions live in each sandbox's own submenu below.
         ...sandboxItems
       ]
     },
@@ -2095,6 +2613,72 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
         { label: 'Templates', submenu: libSubmenu(templates.map((t) => `${t.repository}:${t.tag}`), 'templates', 'Show All Templates', 'templates') },
         { label: 'Mixin Kits', submenu: libSubmenu(mixinKits.map((k) => k.name), 'mixins', 'Show All Mixin Kits', 'mixin kits') },
         { label: 'Sandbox Kits', submenu: libSubmenu(sandboxKits.map((k) => k.name), 'kits', 'Show All Sandbox Kits', 'sandbox kits') }
+      ]
+    },
+    {
+      // Runtime: the sbx layer under den. Kept out of Sandboxes (which lists
+      // individual sandboxes) because everything here is host-wide.
+      label: 'Runtime',
+      submenu: [
+        { label: cachedSbxVersion ? `sbx ${cachedSbxVersion}` : 'sbx version unknown', enabled: false },
+        { type: 'separator' },
+        // SSH access, read live at menu-build time so it reflects the current
+        // ~/.ssh/config rather than whatever it said at startup.
+        ...((): Electron.MenuItemConstructorOptions[] => {
+          const ssh = readSshStatus()
+          return [
+            {
+              label: ssh.configured
+                ? 'SSH access: configured — ssh <sandbox>.sbx'
+                : 'SSH access: not set up',
+              enabled: false
+            },
+            // Surfaced here too, not just in Settings: a stale duplicate block
+            // silently breaks connections, and the symptom (an SSH agent
+            // intercepting) gives no hint where to look.
+            ...(ssh.duplicates > 0
+              ? [{
+                  label: `⚠ ${ssh.duplicates + 1} "Host *.sbx" blocks — the stale one wins`,
+                  enabled: false
+                } as Electron.MenuItemConstructorOptions]
+              : []),
+            {
+              label: ssh.configured ? 'Re-run SSH Setup' : 'Set Up SSH Access…',
+              click: async () => {
+                const r = await sshSetup()
+                // Rebuild so the labels above reflect the new state, and force it
+                // past the signature guard (SSH state isn't part of that key).
+                lastMenuSig = ''
+                void setAppMenu()
+                if (!r.ok) {
+                  dialog.showMessageBox({
+                    type: 'error',
+                    message: 'Could not set up SSH access',
+                    detail: r.error || 'sbx setup ssh failed.'
+                  })
+                }
+              }
+            },
+            {
+              label: 'Copy SSH Config Path',
+              click: () => clipboard.writeText(ssh.path)
+            }
+          ]
+        })(),
+        { type: 'separator' },
+        {
+          label: 'Restart Daemon',
+          // Show Settings ▸ Runtime first: the restart streams into the
+          // Diagnostics box there, and a silent background restart looks like
+          // nothing happened.
+          click: () => {
+            navigateFromTray('minipit:navigate', 'settings')
+            void restartDaemon()
+          }
+        },
+        // No accelerator: View ▸ Logs already owns Cmd+L, and a duplicate binding
+        // in the same menu bar is ambiguous.
+        { label: 'Log Viewer', click: () => go('minipit:navigate', 'logs') }
       ]
     },
     {
@@ -2110,6 +2694,9 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  // Populate the Runtime menu's version line on first build, even if the tray
+  // hasn't been created yet (menu-bar-only mode builds these independently).
+  if (!cachedSbxVersion) refreshSbxVersion()
 }
 
 function setupIPC(): void {
@@ -3825,37 +4412,19 @@ function setupIPC(): void {
   // through the daemon's Unix socket plus an active Docker login, and starts the
   // daemon/sandbox on demand). That's also what makes remote-development clients
   // like VS Code and Cursor work against a sandbox.
-  ipcMain.handle('minipit:ssh-status', () => {
-    // Only ever report counts and flags — never the file's contents. An ssh
-    // config routinely holds unrelated hosts and credentials, and none of it
-    // belongs in the renderer.
-    let cfg = ''
-    try { cfg = require('fs').readFileSync(sshConfigPath(), 'utf8') } catch { /* no config yet */ }
-    const blocks = (cfg.match(/^[ \t]*Host[ \t]+\S*\*\.sbx\b/gim) ?? []).length
-    return {
-      configured: blocks > 0,
-      // >1 means an earlier block was left behind (a hand-edited or
-      // partially-marked block defeats the idempotent rewrite). ssh takes the
-      // FIRST value it sees for each keyword, so a stale block silently wins over
-      // the current one and can drop settings the new block relies on.
-      duplicates: Math.max(0, blocks - 1),
-      path: sshConfigPath()
-    }
-  })
+  ipcMain.handle('minipit:ssh-status', () => readSshStatus())
 
   // Writes to ~/.ssh/config, so it only ever runs from an explicit user action.
-  ipcMain.handle('minipit:ssh-setup', async () => {
-    try {
-      const output = await sbx(['setup', 'ssh'], { timeout: 30000 })
-      return { ok: true, output }
-    } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
-    }
-  })
+  ipcMain.handle('minipit:ssh-setup', () => sshSetup())
 
-  // Open a sandbox in a remote-development editor over the *.sbx SSH host. The
-  // workspace is bind-mounted at the same absolute path inside the sandbox as on
-  // the host, so the host path doubles as the remote path.
+  // Open a sandbox in a remote-development editor over the *.sbx SSH host.
+  //
+  // Pass the HOST path: the workspace is bind-mounted at the same absolute path
+  // inside the sandbox, so it doubles as the remote path. Don't be tempted to use
+  // the SSH login directory instead — `ssh <name>.sbx` lands in
+  // ~/workspace (/home/agent/workspace), which is an empty stub, NOT the mount.
+  // Verified against v0.37.0: the two are different inodes and only the host path
+  // holds the project, so opening the default cwd would give an empty window.
   ipcMain.handle('minipit:open-remote-editor', async (_, name: string, workspace: string, editor?: string) => {
     // Allowlist the binary: it ends up in spawn(), and the renderer shouldn't be
     // able to name an arbitrary executable. Each entry also carries the URI
@@ -3866,17 +4435,46 @@ function setupIPC(): void {
     const bin = editor && editor in EDITORS ? editor : 'code'
     const scheme = EDITORS[bin]
     const host = `${name}.sbx`
+    // Hand the editor a short TMPDIR so Remote-SSH's askpass socket fits inside
+    // the 104-byte sun_path limit (see shortEditorTmpDir — without it the
+    // connection silently reconnect-loops on macOS).
+    const tmp = shortEditorTmpDir()
+    const env = tmp ? { ...guiEnv(), TMPDIR: tmp } : guiEnv()
+    // Check BEFORE launching — afterwards it's running either way.
+    const alreadyRunning = tmp ? await isEditorRunning(bin) : false
     try {
       await new Promise<void>((resolve, reject) => {
         // Detached: the editor outlives den, and we don't want its stdio.
         const proc = spawn(bin, ['--remote', `ssh-remote+${host}`, workspace], {
-          env: guiEnv(), detached: true, stdio: 'ignore'
+          env, detached: true, stdio: 'ignore'
         })
         proc.on('error', reject)
         proc.unref()
         resolve()
       })
-      return { ok: true }
+      if (alreadyRunning && !warnedEditorTmpdir) {
+        warnedEditorTmpdir = true
+        // Non-blocking: the window is already opening, and this is advice for if
+        // it misbehaves, not a failure.
+        void dialog.showMessageBox({
+          type: 'info',
+          message: 'Opening in an editor that was already running',
+          detail:
+            `den gives the editor a short temporary directory so VS Code's SSH helper socket fits inside macOS's `
+            + `104-character limit. Because ${bin} was already open, it keeps the temporary directory it started `
+            + `with, and den can't change that.\n\n`
+            + `If the remote window connects and then retries in a loop, quit ${bin} once and open the sandbox `
+            + `again — den will launch it with the short path.\n\n`
+            // Docker documents this as the fix for the same reconnect loop. It's a
+            // second, independent lever (it stops Remote-SSH using the local server
+            // that needs the socket at all), so it's worth naming for anyone who
+            // can't quit the editor right now.
+            + `If that isn't practical, adding "remote.SSH.useLocalServer": false to your ${bin} user `
+            + `settings also avoids the loop.`,
+          buttons: ['OK']
+        })
+      }
+      return { ok: true, warmStart: alreadyRunning }
     } catch {
       // No CLI on PATH ("code" isn't installed until you run "Shell Command:
       // Install 'code' command"), so hand the URI to the OS instead — that only
@@ -3890,6 +4488,76 @@ function setupIPC(): void {
     }
   })
 
+  // Point a desktop app (Claude Desktop, ChatGPT) at a sandbox over its *.sbx SSH
+  // host. See REMOTE_APPS for why this stops short of a fully automated open.
+  ipcMain.handle('minipit:open-remote-app', async (_, name: string, appId: string, agent?: string) => {
+    const app = REMOTE_APPS[appId]
+    if (!app) return { ok: false, error: `Unknown app "${appId}".` }
+    const host = `${name}.sbx`
+
+    // Wrong template: the app will connect and then fail to start a session, which
+    // looks like a broken integration rather than a wrong sandbox. Say so up front,
+    // but let the user proceed — they may have added the CLI via a kit.
+    if (app.requiresAgent && agent && agent !== app.requiresAgent) {
+      const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        message: `${app.label} needs a ${app.requiresAgent} sandbox`,
+        detail:
+          `${app.label} runs \`${app.requiresAgent}\` over the SSH connection, and "${name}" was created from `
+          + `the ${agent} template — so the app will connect but won't be able to start a session.\n\n`
+          + `Create a sandbox from the ${app.requiresAgent} template instead, unless you've added the `
+          + `${app.requiresAgent} CLI to this one yourself.`,
+        buttons: ['Cancel', 'Continue anyway'],
+        defaultId: 0,
+        cancelId: 0
+      })
+      if (response === 0) return { ok: false, canceled: true }
+    }
+
+    // Nothing works without the managed `Host *.sbx` block, and this is a much
+    // better moment to fix that than after the app reports a failed connection.
+    if (!readSshStatus().configured) {
+      const { response } = await dialog.showMessageBox({
+        type: 'info',
+        message: 'SSH access isn’t set up yet',
+        detail:
+          `${app.label} reaches a sandbox over ssh, which needs the managed "Host *.sbx" block in your `
+          + `~/.ssh/config. den can add it now by running \`sbx setup ssh\`.`,
+        buttons: ['Cancel', 'Set Up SSH Access'],
+        defaultId: 1,
+        cancelId: 0
+      })
+      if (response === 0) return { ok: false, canceled: true }
+      const setup = await sshSetup()
+      if (!setup.ok) return { ok: false, error: setup.error || 'Could not run `sbx setup ssh`.' }
+    }
+
+    // On the clipboard before the app opens, so it's ready to paste when the
+    // connection dialog appears — this is the one value the user has to transcribe.
+    clipboard.writeText(host)
+
+    const launched = await openMacApp(app.bundle)
+    if (!launched.ok) {
+      return {
+        ok: false,
+        error: launched.missing
+          ? `${app.label} doesn't appear to be installed.`
+          : launched.error || `Could not launch ${app.label}.`
+      }
+    }
+
+    await dialog.showMessageBox({
+      type: 'info',
+      message: `Add "${host}" as an SSH connection in ${app.label}`,
+      detail:
+        `The hostname is on your clipboard.\n\n`
+        + app.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
+        + (app.caveat ? `\n\nNote: ${app.caveat}` : ''),
+      buttons: ['OK']
+    })
+    return { ok: true, host }
+  })
+
   // The renderer mirrors the terminal theme's light/dark polarity here so Claude's
   // themeId can be set to match. Every launch writes the config before starting
   // claude (see spawnSandboxProcess), so this is picked up by the next agent
@@ -3897,6 +4565,24 @@ function setupIPC(): void {
   // restarts — the terminal's minimumContrastRatio keeps that legible meanwhile.
   ipcMain.handle('minipit:term-mode', (_, mode: 'light' | 'dark') => {
     if (mode === 'light' || mode === 'dark') termMode = mode
+  })
+
+  // Preferred terminal app, mirrored from the renderer so the Sandboxes menu's
+  // "Connect in Terminal" honours it (menus are built in main).
+  ipcMain.handle('minipit:terminal-app', (_, id: string) => {
+    if (typeof id === 'string' && id) terminalPref = id
+  })
+
+  ipcMain.handle('minipit:open-ssh-terminal', (_, name: string) => openSshInTerminal(name))
+
+  // Which sandbox the window has open. Rebuilds the Sandboxes menu so the ✓ and
+  // the accelerators follow it (the signature includes this name, so the rebuild
+  // isn't skipped).
+  ipcMain.handle('minipit:active-sandbox', (_, name: string | null) => {
+    const next = typeof name === 'string' && name ? name : null
+    if (next === activeSandboxName) return
+    activeSandboxName = next
+    void setAppMenu()
   })
 }
 
@@ -3946,7 +4632,16 @@ app.whenReady().then(() => {
     })
   }
   applyBrandIcon()
-  nativeTheme.on('updated', applyBrandIcon)
+  nativeTheme.on('updated', () => {
+    applyBrandIcon()
+    // The stopped-sandbox outline is a real (non-template) image, so it can't
+    // recolour itself when the system flips light/dark. Drop the cached dots and
+    // rebuild both menus with the colour for the new appearance.
+    DOT_CACHE.clear()
+    lastMenuSig = ''
+    void setAppMenu()
+    updateTrayMenu(lastTraySandboxes)
+  })
 
   // Content-Security-Policy for the renderer. Production loads only bundled
   // local assets (script-src 'self'); the sole remote resource is the Gravatar
@@ -3977,9 +4672,13 @@ app.whenReady().then(() => {
   })
 
   setAppMenu().catch(() => {})
+  // Register IPC before the window exists, so there is no window in which the
+  // renderer can invoke a channel that isn't handled yet. setupIPC is synchronous
+  // and finishes long before renderer JS runs, but ordering it after createWindow
+  // left that guarantee resting on load timing rather than on the code.
+  setupIPC()
   createWindow()
   createTray()
-  setupIPC()
   startPolling()
 
   app.on('activate', () => {

@@ -193,13 +193,21 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
   // workspace is a host path that isn't always valid inside the container, so
   // resolve it (falls back to the container's working dir) — this is what makes
   // browsing work even when the host path is gone or mounted elsewhere.
+  // `rootReady` gates the first listing on that resolution. Without it we always
+  // fired one listing at the unresolved host path, which for any sandbox whose
+  // workspace isn't valid in-container is a guaranteed failure — a console error
+  // per mount and a retry cycle before the resolved path even gets a turn.
+  const [rootReady, setRootReady] = useState(false)
   useEffect(() => {
     setCwd(sandbox.workspace)
+    setRootReady(false)
     if (sandbox.status !== 'running') return
     let cancelled = false
     window.minipit?.workspaceRoot(sandbox.name, sandbox.workspace)
-      .then((root) => { if (!cancelled && root) setCwd(root) })
-      .catch(() => {})
+      .then((root) => { if (!cancelled) { if (root) setCwd(root); setRootReady(true) } })
+      // Couldn't resolve (sandbox not ready yet): fall back to listing the stored
+      // path rather than leaving the panel permanently blank.
+      .catch(() => { if (!cancelled) setRootReady(true) })
     return () => { cancelled = true }
   }, [sandbox.id, sandbox.workspace, sandbox.status, sandbox.name])
 
@@ -297,7 +305,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
   // Reload the root listing. Keeps the current rows visible while refetching;
   // only shows the (delayed) placeholder when we have nothing cached yet.
   const load = useCallback(async () => {
-    if (sandbox.status !== 'running') return
+    if (sandbox.status !== 'running' || !rootReady) return
     const haveCache = dirCache.has(cacheKey(sandbox.name, cwd))
     let t: ReturnType<typeof setTimeout> | undefined
     if (!haveCache) t = setTimeout(() => { if (mounted.current) setSlow(true) }, SLOW_MS)
@@ -329,7 +337,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
       if (t) clearTimeout(t)
       if (mounted.current) setSlow(false)
     }
-  }, [sandbox.name, cwd, sandbox.status])
+  }, [sandbox.name, cwd, sandbox.status, rootReady])
 
   // Seed from cache (instant for a directory we've viewed before), then refresh.
   // reloadNonce re-runs this after a failed attempt (the auto-retry backoff).
@@ -596,7 +604,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
               <RefreshCw size={12} /> Retry
             </button>
           </div>
-        ) : (slow || retrying) && tree.length === 0 ? (
+        ) : (slow || retrying || !rootReady) && tree.length === 0 ? (
           <div className="files-empty">Loading files…</div>
         ) : tree.length === 0 ? (
           <div className="files-empty">{atWorkspace ? 'Workspace is empty' : 'Folder is empty'}</div>

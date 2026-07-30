@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Github } from 'lucide-react'
 import { useStore } from '../store'
-import { TERM_THEMES, TERM_THEME_GROUPS, DEFAULT_TERM_THEME } from '../lib/termThemes'
 import { remoteEditor } from '../lib/remoteEditors'
+import { REMOTE_APPS } from '../lib/remoteApps'
 import { bringSandboxToHost } from '../lib/featureChanges'
+import { bridgeError } from '../lib/utils'
 
 // A hover-triggered flyout item for a context menu. Defaults to opening
 // rightward and flips left (nudging up) when it would overflow the viewport.
@@ -45,8 +46,6 @@ function SubMenu({ label, children }: { label: string; children: ReactNode }) {
 export function ContextMenu() {
   const { contextMenu, setContextMenu, sandboxes, updateSandbox, setDeleting, setSandboxes } = useStore()
   const editor = remoteEditor(useStore((s) => s.remoteEditor))
-  const termTheme = useStore((s) => s.termTheme)
-  const setTermTheme = useStore((s) => s.setTermTheme)
   const openPrompt = useStore((s) => s.openPrompt)
   const setActivePage = useStore((s) => s.setActivePage)
   const setLogsSandbox = useStore((s) => s.setLogsSandbox)
@@ -194,11 +193,6 @@ export function ContextMenu() {
     }
   }
 
-  const pickTheme = (id: string) => {
-    setTermTheme(id)
-    setContextMenu({ visible: false })
-  }
-
   // Save the sandbox's current state as a reusable template via `sbx template save`.
   const handleSaveSnapshot = () => {
     setContextMenu({ visible: false })
@@ -238,6 +232,45 @@ export function ContextMenu() {
     }
   }
 
+  // The three "connect" actions all reach main over the preload bridge, and all
+  // three used to report a stale bridge as its raw JS error — `…is not a function`
+  // for an outdated preload, which reads like a bug in the feature rather than
+  // "relaunch the app". bridgeError does that triage; anything it passes through is
+  // a genuine failure (editor not installed, ssh not set up, app missing).
+  //
+  // They report at all because the result used to be discarded (`void …(…)`), which
+  // made every failure indistinguishable from a menu item that does nothing.
+  const callBridge = async (
+    run: () => Promise<{ ok: boolean; canceled?: boolean; error?: string } | undefined>,
+    what: string
+  ) => {
+    // Promise.resolve().then() so a *synchronous* throw — which is exactly what a
+    // missing preload method does — lands in the same catch as a rejection.
+    type Result = { ok: boolean; canceled?: boolean; error?: string } | undefined
+    const r: Result = await Promise.resolve().then(run)
+      .catch((e): Result => ({ ok: false, error: bridgeError(e, what) }))
+    if (r?.ok || r?.canceled) return
+    alert(r?.error?.trim() || bridgeError(null, what))
+  }
+
+  const connectEditor = () =>
+    callBridge(
+      () => window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id),
+      `Connecting ${editor.label}`
+    )
+
+  const connectTerminal = () =>
+    callBridge(() => window.minipit?.openSshTerminal(sandbox.name), 'Opening a terminal')
+
+  // Point Claude Desktop / the ChatGPT app at this sandbox over SSH. main does the
+  // automatable parts and shows the remaining in-app steps; a `canceled` result is
+  // the user backing out of one of its prompts, not a failure.
+  const connectApp = (appId: string, label: string) =>
+    callBridge(
+      () => window.minipit?.openRemoteApp(sandbox.name, appId, sandbox.agent),
+      `Connecting ${label}`
+    )
+
   // Clone-mode "feature" integrate flow lives in a shared helper (also used by
   // the sandbox header). Close the menu first, then run it.
   const bringToHost = (deleteAfter: boolean) => {
@@ -259,22 +292,49 @@ export function ContextMenu() {
       </div>
       <div className="ctx-item" onClick={handleRestart}>Restart <span className="ctx-kbd">⌘R</span></div>
       <div className="ctx-sep" />
+      {/* Lifecycle-adjacent: both are things you reach for while the sandbox is
+          running, so they sit with Start/Restart rather than at the bottom. */}
+      <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs <span className="ctx-kbd">⌘L</span></div>
+      <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleOpenInFinder}>
         Open in Finder <span className="ctx-kbd">⇧⌘F</span>
       </div>
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(sandbox.workspace).catch(() => {}) }}>Copy Path</div>
       <div className="ctx-sep" />
       {/* Remote access over the *.sbx SSH host (sbx v0.37+). The editor opens the
           workspace at the same absolute path it has on the host — that's where
           the sandbox mounts it. One entry, for the editor picked in Settings ▸
-          Runtime, rather than a row per IDE. Not gated on SSH being set up yet:
-          the ssh command is exactly what you'd paste to try it. */}
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id) }}>
-        Open in {editor.label}
+          General ▸ Files & editors, rather than a row per IDE. Not gated on SSH
+          being set up yet: the ssh command is exactly what you'd paste to try it.
+
+          "Connect with", not "Open in": this attaches the editor to the sandbox
+          over SSH, so you're editing files inside the container. "Open in …"
+          would read as a sibling of "Open in Finder" above the separator, which
+          opens the host folder locally — a different thing entirely. */}
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void connectEditor() }}>
+        Connect with {editor.label}
       </div>
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); navigator.clipboard?.writeText(`ssh ${sandbox.name}.sbx`).catch(() => {}) }}>
-        Copy SSH Command
+      {/* Runs the ssh command for you in the chosen terminal. The raw command is
+          still one click away in the Sandboxes menu for anyone who wants to paste
+          it somewhere; it doesn't need to be here too. */}
+      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); void connectTerminal() }}>
+        Connect in Terminal
       </div>
+      {/* Claude Desktop and the ChatGPT app run their agent inside the sandbox over
+          the same SSH host. Both need a connection added from inside their own UI
+          (they have no `--remote` equivalent), so these sit in a submenu rather
+          than alongside the editor entry that opens in one click. */}
+      <SubMenu label="Connect an app">
+        {REMOTE_APPS.map((a) => (
+          <div
+            key={a.id}
+            className="ctx-sub-item"
+            onClick={() => { setContextMenu({ visible: false }); void connectApp(a.id, a.label) }}
+          >
+            {a.label}
+          </div>
+        ))}
+      </SubMenu>
       <div className="ctx-sep" />
       <div
         className="ctx-item"
@@ -324,26 +384,6 @@ export function ContextMenu() {
           </div>
         </SubMenu>
       )}
-      <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
-      <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs <span className="ctx-kbd">⌘L</span></div>
-      <div className="ctx-sep" />
-      <SubMenu label="Terminal theme">
-        {TERM_THEMES.filter((t) => t.id === DEFAULT_TERM_THEME).map((t) => (
-          <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
-            <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
-          </div>
-        ))}
-        {TERM_THEME_GROUPS.map((g) => (
-          <div key={g.mode}>
-            <div className="ctx-sub-label">{g.label}</div>
-            {TERM_THEMES.filter((t) => t.mode === g.mode && t.id !== DEFAULT_TERM_THEME).map((t) => (
-              <div key={t.id} className="ctx-sub-item" onClick={() => pickTheme(t.id)}>
-                <span className="ctx-sub-check">{termTheme === t.id ? '✓' : ''}</span>{t.label}
-              </div>
-            ))}
-          </div>
-        ))}
-      </SubMenu>
       <div className="ctx-sep" />
       <div className="ctx-item destructive" onClick={handleDelete}>
         Delete Sandbox… <span className="ctx-kbd">⌘X</span>

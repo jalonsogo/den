@@ -104,10 +104,14 @@ const api = {
     return () => ipcRenderer.removeListener('minipit:daemon-output', handler)
   },
   skillsImport:  (opts?: { dryRun?: boolean }) => ipcRenderer.invoke('minipit:skills-import', opts),
+  setTerminalApp: (id: string)          => ipcRenderer.invoke('minipit:terminal-app', id),
+  openSshTerminal: (name: string)       => ipcRenderer.invoke('minipit:open-ssh-terminal', name),
   sshStatus:     ()                     => ipcRenderer.invoke('minipit:ssh-status'),
   sshSetup:      ()                     => ipcRenderer.invoke('minipit:ssh-setup'),
   openRemoteEditor: (name: string, workspace: string, editor?: string) =>
     ipcRenderer.invoke('minipit:open-remote-editor', name, workspace, editor),
+  openRemoteApp: (name: string, app: string, agent?: string) =>
+    ipcRenderer.invoke('minipit:open-remote-app', name, app, agent),
   networkPolicy: (name?: string)        => ipcRenderer.invoke('minipit:network-policy', name),
   policyLog:     (name?: string)        => ipcRenderer.invoke('minipit:policy-log', name),
   policyCheck:   (resource: string, name?: string) => ipcRenderer.invoke('minipit:policy-check', resource, name),
@@ -162,6 +166,13 @@ const api = {
     ipcRenderer.on('minipit:policy-block', handler)
     return () => ipcRenderer.removeListener('minipit:policy-block', handler)
   },
+  // A launch that `sbx run` refused (bad workspace, runtime error) — the message
+  // it printed before exiting, so the UI can show it instead of losing it.
+  onSandboxError: (cb: (err: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, err: unknown) => cb(err)
+    ipcRenderer.on('minipit:sandbox-error', handler)
+    return () => ipcRenderer.removeListener('minipit:sandbox-error', handler)
+  },
   onAgentActivity: (cb: (name: string, state: 'working' | 'waiting' | null) => void) => {
     const handler = (_: Electron.IpcRendererEvent, name: string, state: 'working' | 'waiting' | null) => cb(name, state)
     ipcRenderer.on('minipit:agent-activity', handler)
@@ -201,6 +212,16 @@ const api = {
     const handler = () => cb()
     ipcRenderer.on('minipit:stop-active', handler)
     return () => ipcRenderer.removeListener('minipit:stop-active', handler)
+  },
+  // Which sandbox is open, mirrored to main so the Sandboxes menu can mark it and
+  // hang the keyboard accelerators off that sandbox's own items.
+  setActiveSandbox: (name: string | null) => ipcRenderer.invoke('minipit:active-sandbox', name),
+  // A menu action aimed at a NAMED sandbox (not whichever is active). The
+  // renderer runs these because it owns the optimistic status updates.
+  onSandboxAction: (cb: (name: string, action: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string, action: string) => cb(name, action)
+    ipcRenderer.on('minipit:sandbox-action', handler)
+    return () => ipcRenderer.removeListener('minipit:sandbox-action', handler)
   },
 
   agentWrite: (name: string, data: string) => ipcRenderer.invoke('minipit:agent-write', name, data),

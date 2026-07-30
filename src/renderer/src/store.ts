@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { applyTheme, DEFAULT_THEME } from './lib/themes'
-import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, AgentState, PromptConfig, Template, Group } from './types'
+import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, SandboxError, AgentState, PromptConfig, Template, Group } from './types'
 
 type ThemePref = 'light' | 'dark' | 'system'
 const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -47,6 +47,10 @@ interface AppState {
   modal: ModalType
   // ⌘K command palette (search across sandboxes, groups, kits, and actions).
   paletteOpen: boolean
+  // Deep link into Settings: which tab to show and, optionally, which accordion
+  // section to expand and scroll to. Set by the command palette, consumed (and
+  // cleared) by SettingsPage on arrival.
+  settingsTarget: { tab: string; acc?: string } | null
   // Reusable input dialog (openPrompt/closePrompt). Null = closed.
   prompt: PromptConfig | null
   // Template shown in the inspect/details modal. Null = closed.
@@ -94,9 +98,13 @@ interface AppState {
   // Selected color theme id (drives the full palette: surfaces + accent).
   accent: string
   termTheme: string
-  // Which editor "Open in…" launches over the sandbox's SSH host. One choice
-  // rather than an entry per IDE — the menu shouldn't list editors you don't use.
+  // Which editor "Connect with…" attaches to the sandbox over its SSH host. One
+  // choice rather than an entry per IDE — the menu shouldn't list editors you
+  // don't use.
   remoteEditor: string
+  // Which terminal app "Connect in Terminal" opens the ssh session in. 'default'
+  // means whatever the OS has registered for shell scripts, rather than a guess.
+  terminalApp: string
   // Per-sandbox custom icon key (by sandbox name); absent → two-letter initials.
   sandboxIcons: Record<string, string>
   // Per-sandbox custom colour (by name); absent → the default neutral avatar.
@@ -128,6 +136,10 @@ interface AppState {
   policyBlocks: Record<string, PolicyBlock[]>
   blocksSeenAt: Record<string, number>
   toasts: PolicyBlock[]
+  // Last refused launch per sandbox name. Sticky: a failed start leaves no other
+  // trace in the UI (the terminal is replaced by the stopped placeholder), so it
+  // stays until the sandbox starts, is dismissed, or is removed.
+  sandboxErrors: Record<string, SandboxError>
   // Per-sandbox agent state (working / waiting); absent = unknown/stopped.
   agentActivity: Record<string, AgentState>
   // Mixin-kit names auto-added to every new sandbox (marked in the Kits page).
@@ -159,6 +171,7 @@ interface AppState {
   setAccent:          (id: string) => void
   setTermTheme:       (id: string) => void
   setRemoteEditor:    (id: string) => void
+  setTerminalApp:     (id: string) => void
   setSandboxIcon:     (name: string, iconKey: string | null) => void
   setSandboxColor:    (name: string, hex: string | null) => void
   setCustomizeSandbox:(name: string | null) => void
@@ -189,6 +202,7 @@ interface AppState {
   setActiveTab:       (tab: TabType) => void
   setModal:           (modal: ModalType) => void
   setPaletteOpen:     (open: boolean) => void
+  setSettingsTarget:  (target: { tab: string; acc?: string } | null) => void
   openPrompt:         (config: PromptConfig) => void
   closePrompt:        () => void
   setInspectTemplate: (t: Template | null) => void
@@ -198,6 +212,8 @@ interface AppState {
   addPolicyBlock:     (block: PolicyBlock) => void
   ackPolicyBlocks:    (sandboxName: string) => void
   dismissToast:       (block: PolicyBlock) => void
+  setSandboxError:    (err: SandboxError) => void
+  clearSandboxError:  (sandboxName: string) => void
   setAgentActivity:   (name: string, state: AgentState | null) => void
 }
 
@@ -208,6 +224,7 @@ export const useStore = create<AppState>((set) => ({
   activeTab: 'terminal',
   modal: null,
   paletteOpen: false,
+  settingsTarget: null,
   prompt: null,
   inspectTemplate: null,
   contextMenu: { visible: false, x: 0, y: 0, sandboxId: null, workspace: null },
@@ -233,6 +250,7 @@ export const useStore = create<AppState>((set) => ({
   accent: localStorage.getItem('minipit:accent') ?? DEFAULT_THEME,
   termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
   remoteEditor: localStorage.getItem('minipit:remoteEditor') ?? 'code',
+  terminalApp: localStorage.getItem('minipit:terminalApp') ?? 'default',
   sandboxIcons: (() => {
     try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
@@ -259,6 +277,7 @@ export const useStore = create<AppState>((set) => ({
   policyBlocks: {},
   blocksSeenAt: {},
   toasts: [],
+  sandboxErrors: {},
   agentActivity: {},
   highlightSandbox: null,
   logsSandbox: null,
@@ -307,6 +326,12 @@ export const useStore = create<AppState>((set) => ({
     set(() => {
       localStorage.setItem('minipit:remoteEditor', id)
       return { remoteEditor: id }
+    }),
+
+  setTerminalApp: (id) =>
+    set(() => {
+      localStorage.setItem('minipit:terminalApp', id)
+      return { terminalApp: id }
     }),
 
   // Merge this origin's localStorage cache into the durable store (store wins),
@@ -656,6 +681,7 @@ export const useStore = create<AppState>((set) => ({
   setModal: (modal) => set({ modal }),
 
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setSettingsTarget: (settingsTarget) => set({ settingsTarget }),
 
   openPrompt: (config) => set({ prompt: config }),
   closePrompt: () => set({ prompt: null }),
@@ -700,6 +726,17 @@ export const useStore = create<AppState>((set) => ({
         (t) => !(t.sandbox === block.sandbox && t.host === block.host && t.at === block.at)
       )
     })),
+
+  setSandboxError: (err) =>
+    set((state) => (err.sandbox ? { sandboxErrors: { ...state.sandboxErrors, [err.sandbox]: err } } : {})),
+
+  clearSandboxError: (sandboxName) =>
+    set((state) => {
+      if (!(sandboxName in state.sandboxErrors)) return {}
+      const next = { ...state.sandboxErrors }
+      delete next[sandboxName]
+      return { sandboxErrors: next }
+    }),
 
   setAgentActivity: (name, state) =>
     set((s) => {

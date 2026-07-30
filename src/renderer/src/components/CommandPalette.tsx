@@ -5,10 +5,19 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
+import { SETTINGS_INDEX, type SettingsTab } from '../lib/settingsIndex'
 import type { PageType } from '../types'
 
-type Section = 'Actions' | 'Sandboxes' | 'Groups' | 'Kits'
-const SECTION_ORDER: Section[] = ['Actions', 'Sandboxes', 'Groups', 'Kits']
+// Which tab a setting lives on, shown as the row's right-hand hint so two
+// similarly-named settings are still tellable apart.
+const SETTINGS_TAB_LABEL: Record<SettingsTab, string> = {
+  general: 'General', secrets: 'Secrets', skills: 'Skills', runtime: 'Runtime'
+}
+
+type Section = 'Actions' | 'Settings' | 'Sandboxes' | 'Groups' | 'Kits'
+// Settings sits above the data sections: a query like "ssh" or "proxy" is almost
+// always after the setting, not a sandbox that happens to share the word.
+const SECTION_ORDER: Section[] = ['Actions', 'Settings', 'Sandboxes', 'Groups', 'Kits']
 
 interface CmdItem {
   id: string
@@ -103,6 +112,24 @@ export function CommandPalette() {
       out.push({ id: 'act:delete', section: 'Actions', label: `Delete “${active.name}”`, hint: '⌘X', icon: <Trash2 size={15} />, keywords: 'sandbox remove', run: () => { close(); act.del() } })
     }
 
+    // ── Settings (deep link to the tab + section) ──────────────────────────────
+    // Findable by what the setting does, not by which tab it lives on: searching
+    // "ssh" or "proxy" shouldn't require knowing it's under Runtime.
+    for (const entry of SETTINGS_INDEX) {
+      out.push({
+        id: entry.id,
+        section: 'Settings',
+        label: entry.label,
+        hint: SETTINGS_TAB_LABEL[entry.tab],
+        icon: <Settings size={15} />,
+        keywords: `settings preferences ${entry.keywords ?? ''}`,
+        run: () => {
+          s.setSettingsTarget({ tab: entry.tab, acc: entry.acc })
+          go('settings')
+        }
+      })
+    }
+
     // ── Sandboxes (jump to) ────────────────────────────────────────────────────
     for (const sb of sandboxes) {
       const sub = sb.status === 'running' ? 'Running' : sb.status === 'stopped' ? 'Stopped' : sb.status
@@ -183,7 +210,7 @@ export function CommandPalette() {
           <input
             ref={inputRef}
             className="cmdk-input"
-            placeholder="Search sandboxes, groups, kits, actions…"
+            placeholder="Search sandboxes, settings, kits, actions…"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelected(0) }}
           />

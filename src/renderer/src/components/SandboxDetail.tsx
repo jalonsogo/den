@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { MoreVertical, Play, Square, GitBranch, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check } from 'lucide-react'
+import { MoreVertical, Play, Square, GitBranch, RotateCcw, Github, GitCommitHorizontal, ChevronDown, Check, AlertTriangle, X } from 'lucide-react'
 import { useStore } from '../store'
 import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
@@ -13,8 +13,11 @@ import type { FileChange } from '../types'
 type Dock = 'files' | 'info' | 'network' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen, clearSandboxError } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
+  // The last launch this sandbox refused, if it hasn't started since (see the
+  // banner below the header).
+  const startError = useStore((s) => (sandbox ? s.sandboxErrors[sandbox.name] ?? null : null))
   // Agent activity (working / waiting) — the same signal the sidebar and toolbar
   // use, so the header's status dot and text line up with them instead of only
   // reflecting the container lifecycle.
@@ -35,9 +38,6 @@ export function SandboxDetail() {
   // summary that used to live in the (now-removed) sidebar Projects section.
   useEffect(() => { if (sandbox?.workspace) loadGitInfo(sandbox.workspace) }, [sandbox?.workspace, loadGitInfo])
   const [dock, setDock] = useState<Dock>(null)
-  // Remember the last-open panel so the toolbar's right-dock toggle can reopen
-  // whatever was showing rather than a fixed default.
-  const lastDock = useRef<Exclude<Dock, null>>('info')
   // Which sub-tab the Files dock shows (Files browser vs Changes review). Owned
   // here so the terminal's activity rail can highlight and drive both.
   const [filesTab, setFilesTab] = useState<'files' | 'changes'>('files')
@@ -83,18 +83,22 @@ export function SandboxDetail() {
     return () => window.removeEventListener('den:toggle-dock', onToggle)
   }, [])
 
-  // Mirror the dock's open state into the store (so the toolbar can show a
-  // collapse toggle for it) and remember the last-open panel for reopening.
+  // Mirror the dock's open state into the store, so the toolbar can show a
+  // collapse toggle for it.
   useEffect(() => {
     setRightDockOpen(dock !== null)
-    if (dock !== null) lastDock.current = dock
   }, [dock, setRightDockOpen])
   // Clear the flag on unmount (leaving the sandbox page hides the dock).
   useEffect(() => () => setRightDockOpen(false), [setRightDockOpen])
 
-  // The toolbar's right-dock button: close if open, else reopen the last panel.
+  // The toolbar's right-dock button: close if open, else open the Files browser.
+  // Always Files (not whatever was last showing) — it's the panel people reach
+  // for, so the toggle stays predictable instead of reopening a stale Info/Network.
   useEffect(() => {
-    const onToggleRight = () => setDock((d) => (d === null ? lastDock.current : null))
+    const onToggleRight = () => {
+      setFilesTab('files')
+      setDock((d) => (d === null ? 'files' : null))
+    }
     window.addEventListener('den:toggle-right-dock', onToggleRight)
     return () => window.removeEventListener('den:toggle-right-dock', onToggleRight)
   }, [])
@@ -149,10 +153,26 @@ export function SandboxDetail() {
   }
 
   const handleStart = async () => {
+    // Clear any previous failure: this attempt either succeeds or reports its own.
+    clearSandboxError(sandbox.name)
     updateSandbox(sandbox.id, { status: 'starting' })
     try {
       await window.minipit?.runSandbox(sandbox.name)
       // Status will update via log lines and polling
+    } catch (e) {
+      console.error(e)
+      updateSandbox(sandbox.id, { status: 'stopped' })
+    }
+  }
+
+  // Offered by the workspace-missing banner — the sandbox can't run without its
+  // mount, so removing it is the way out sbx itself suggests.
+  const handleRemoveMissing = async () => {
+    if (!confirm(`Remove "${sandbox.name}"?\n\nIts workspace folder is gone, so the sandbox can't start.`)) return
+    updateSandbox(sandbox.id, { status: 'deleting' })
+    try {
+      await window.minipit?.deleteSandbox(sandbox.name)
+      clearSandboxError(sandbox.name)
     } catch (e) {
       console.error(e)
       updateSandbox(sandbox.id, { status: 'stopped' })
@@ -301,6 +321,48 @@ export function SandboxDetail() {
         )
       })()}
 
+      {/* A launch sbx refused. Sticky (not a toast): the sandbox is stopped and
+          stays unstartable until the cause is fixed, and the terminal shows the
+          generic stopped placeholder — so without this the reason lives only in
+          the log file. */}
+      {startError && (
+        <div className="detail-error">
+          <AlertTriangle size={15} className="de-ic" />
+          <div className="de-main">
+            <div className="de-title">
+              {startError.kind === 'workspace-missing' ? 'Workspace folder is missing' : 'Couldn’t start this sandbox'}
+            </div>
+            {startError.kind === 'workspace-missing' ? (
+              <>
+                <div className="de-msg">
+                  This sandbox mounts a folder that no longer exists on your Mac. Restore it to start
+                  the sandbox again, or remove the sandbox.
+                </div>
+                <div className="de-path">{startError.path}</div>
+              </>
+            ) : (
+              <div className="de-msg">{startError.message}</div>
+            )}
+            <div className="de-actions">
+              {startError.kind === 'workspace-missing' && (
+                <button className="btn btn-default btn-sm" onClick={handleRemoveMissing}>
+                  Remove sandbox…
+                </button>
+              )}
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => navigator.clipboard?.writeText(startError.message).catch(() => {})}
+              >
+                Copy error
+              </button>
+            </div>
+          </div>
+          <button className="de-x" onClick={() => clearSandboxError(sandbox.name)} aria-label="Dismiss">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       <div className="detail-body">
         <div className="detail-main">
           <TerminalPanel
@@ -321,8 +383,8 @@ export function SandboxDetail() {
               {dock === 'files'
                 ? <FilesPanel sandbox={sandbox} tab={filesTab} onTabChange={setFilesTab} />
                 : dock === 'network'
-                ? <NetworkPanel sandbox={sandbox} onClose={() => setDock(null)} />
-                : <InfoPanel sandbox={sandbox} onClose={() => setDock(null)} />}
+                ? <NetworkPanel sandbox={sandbox} />
+                : <InfoPanel sandbox={sandbox} />}
             </div>
           </>
         )}

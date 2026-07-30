@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ShieldAlert, X } from 'lucide-react'
+import { ShieldAlert, AlertTriangle, X } from 'lucide-react'
 import { useStore } from '../store'
-import type { PolicyBlock } from '../types'
+import type { PolicyBlock, SandboxError } from '../types'
 
 // Transient alerts for fresh network-policy denials, stacked bottom-right.
 // Each offers a one-click Allow (adds the host to the policy) and a jump to the
@@ -49,11 +49,47 @@ function Toast({ block }: { block: PolicyBlock }) {
   )
 }
 
+// A refused launch. Unlike the block toast this one doesn't auto-dismiss: the
+// sandbox is left stopped and won't start until the cause is fixed, so the alert
+// should survive until it's read. Opening the sandbox shows the full banner.
+function StartErrorToast({ err }: { err: SandboxError }) {
+  const { setActiveSandboxId, clearSandboxError } = useStore()
+  return (
+    <div className="toast">
+      <AlertTriangle size={16} className="toast-ic" />
+      <div className="toast-main">
+        <div className="toast-title">
+          {err.kind === 'workspace-missing' ? 'Workspace folder is missing' : 'Sandbox failed to start'}
+        </div>
+        <div className="toast-sub">
+          <strong>{err.sandbox}</strong>
+          {err.kind === 'workspace-missing' ? ` → ${err.path}` : ''}
+        </div>
+        <div className="toast-actions">
+          <button className="btn btn-default btn-sm" onClick={() => setActiveSandboxId(err.sandbox)}>
+            Open sandbox
+          </button>
+        </div>
+      </div>
+      <button className="toast-x" onClick={() => clearSandboxError(err.sandbox)} aria-label="Dismiss">
+        <X size={13} />
+      </button>
+    </div>
+  )
+}
+
 export function PolicyBlockToaster() {
   const toasts = useStore((s) => s.toasts)
-  if (toasts.length === 0) return null
+  const errors = useStore((s) => s.sandboxErrors)
+  const activeSandboxId = useStore((s) => s.activeSandboxId)
+  const sandboxes = useStore((s) => s.sandboxes)
+  // Don't double up: the sandbox you're looking at already shows the full banner.
+  const activeName = sandboxes.find((s) => s.id === activeSandboxId)?.name
+  const errList = Object.values(errors).filter((e) => e.sandbox !== activeName)
+  if (toasts.length === 0 && errList.length === 0) return null
   return (
     <div className="toaster">
+      {errList.map((e) => <StartErrorToast key={`${e.sandbox}|${e.at}`} err={e} />)}
       {toasts.map((b) => <Toast key={`${b.sandbox}|${b.host}|${b.at}`} block={b} />)}
     </div>
   )
