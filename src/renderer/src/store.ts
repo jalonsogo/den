@@ -131,6 +131,10 @@ interface AppState {
   pickerOpen: boolean
   // Signal for a sandbox's icon picker (the detail-view avatar listens).
   customizeSandbox: string | null
+  // Kit directory that New Sandbox should open pre-loaded with. Set by the
+  // "Create sandbox" CTA on a sandbox kit — which defines the agent itself, so
+  // it seeds a new sandbox rather than being added to an existing one.
+  prefillKit: string | null
   // Network-policy denials, newest-first per sandbox name, with a per-sandbox
   // "seen" watermark so attention badges clear once the user looks.
   policyBlocks: Record<string, PolicyBlock[]>
@@ -206,6 +210,7 @@ interface AppState {
   setLogsReturn:      (id: string | null) => void
   setActiveTab:       (tab: TabType) => void
   setModal:           (modal: ModalType) => void
+  setPrefillKit:      (dir: string | null) => void
   setPaletteOpen:     (open: boolean) => void
   setSettingsTarget:  (target: { tab: string; acc?: string } | null) => void
   openPrompt:         (config: PromptConfig) => void
@@ -281,6 +286,7 @@ export const useStore = create<AppState>((set) => ({
     try { return { ...d, ...JSON.parse(localStorage.getItem('minipit:display') ?? '{}') } } catch { return d }
   })(),
   pickerOpen: false,
+  prefillKit: null,
   customizeSandbox: null,
   policyBlocks: {},
   blocksSeenAt: {},
@@ -701,6 +707,8 @@ export const useStore = create<AppState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setModal: (modal) => set({ modal }),
+
+  setPrefillKit: (prefillKit) => set({ prefillKit }),
 
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setSettingsTarget: (settingsTarget) => set({ settingsTarget }),

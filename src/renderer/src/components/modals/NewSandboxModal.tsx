@@ -45,10 +45,10 @@ function deriveName(agent: string, workspace: string): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup, prefillKit, setPrefillKit } = useStore()
   const feature = newSandboxFeature
   // Feature mode always isolates (a feature is an isolated clone you merge back).
-  const closeModal = () => { setNewSandboxFeature(false); setNewSandboxGroup(null); setModal(null) }
+  const closeModal = () => { setNewSandboxFeature(false); setNewSandboxGroup(null); setPrefillKit(null); setModal(null) }
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -93,6 +93,7 @@ export function NewSandboxModal() {
   const [error, setError]             = useState('')
   const [availKits, setAvailKits]     = useState<{ name: string; dir: string }[]>([])
   const [kitSpecs, setKitSpecs]       = useState<Record<string, ParsedKit>>({})  // dir → parsed spec, for preview
+  const [kitKinds, setKitKinds]       = useState<Record<string, { name: string; kind: string }>>({})
   const [selKits, setSelKits]         = useState<string[]>([])
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
@@ -106,11 +107,16 @@ export function NewSandboxModal() {
     }).catch(() => {})
     // Mixin kits can be stacked onto the new sandbox at creation (--kit).
     window.minipit?.listKits().then((k) => {
-      const mixins = (k ?? []).filter((x) => x.kind === 'mixin').map((x) => ({ name: x.name, dir: x.dir }))
+      const all = k ?? []
+      setKitKinds(Object.fromEntries(all.map((x) => [x.dir, { name: x.name, kind: x.kind }])))
+      const mixins = all.filter((x) => x.kind === 'mixin').map((x) => ({ name: x.name, dir: x.dir }))
       setAvailKits(mixins)
       // Pre-select any kit the user starred as a default in the Kits page.
       const seed = mixins.filter((m) => defaultKits.includes(m.name)).map((m) => m.dir)
-      if (seed.length) setSelKits(seed)
+      // A sandbox kit opened via "Create sandbox" supplies the agent itself, so
+      // it joins the starred mixins rather than replacing them.
+      const withPrefill = prefillKit ? [...new Set([prefillKit, ...seed])] : seed
+      if (withPrefill.length) setSelKits(withPrefill)
       // Load + parse each local kit's spec so we can preview its capabilities.
       Promise.all(mixins.map(async (m) =>
         [m.dir, parseKitSpec((await window.minipit?.readKit(m.dir)) ?? '')] as const
@@ -358,15 +364,21 @@ export function NewSandboxModal() {
             {selKits.length > 0 && (
               <div className="kit-sel-list">
                 {selKits.map((entry) => {
-                  const k = availKits.find((a) => a.dir === entry)
+                  const known = kitKinds[entry]
+                  const k = availKits.find((a) => a.dir === entry) ?? (known ? { name: known.name, dir: entry } : undefined)
                   const remote = !k && entry.includes('/')
+                  // A sandbox kit supplies the image and entrypoint, so label it
+                  // as the base rather than showing mixin capability chips.
+                  const isBase = known?.kind === 'sandbox'
                   return (
                     <div key={entry} className="kit-sel-item">
                       {remote ? <DownloadCloud size={13} /> : <Layers size={13} />}
                       <span className="kit-sel-name">{k?.name ?? entry}</span>
                       {remote
                         ? <span className="kit-sel-tag">remote</span>
-                        : kitSpecs[entry] && <KitCaps p={kitSpecs[entry]} compact />}
+                        : isBase
+                          ? <span className="kit-sel-tag">base agent</span>
+                          : kitSpecs[entry] && <KitCaps p={kitSpecs[entry]} compact />}
                       <button className="kit-sel-rm" title="Remove" onClick={() => setSelKits((s) => s.filter((d) => d !== entry))}>
                         <X size={13} />
                       </button>

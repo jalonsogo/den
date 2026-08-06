@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen } from 'lucide-react'
+import { Plus, Play, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
@@ -86,7 +86,7 @@ function hubRepoUrl(ref: string): string | null {
 }
 
 export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
-  const { modal, setModal, sandboxes, defaultKits, toggleDefaultKit, setEditKit, dockerAccount, activeOrg } = useStore()
+  const { modal, setModal, sandboxes, defaultKits, toggleDefaultKit, setEditKit, setPrefillKit, dockerAccount, activeOrg } = useStore()
   const [kits, setKits] = useState<Kit[]>([])
   const [specs, setSpecs] = useState<Record<string, ReturnType<typeof parseKitSpec>>>({})
   const [addFor, setAddFor] = useState<string | null>(null)
@@ -622,6 +622,18 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                     >
                       <SquarePen size={14} /> Edit
                     </button>
+                    {/* A sandbox kit *is* the agent — image and entrypoint — so
+                        there's nothing to add it to; it seeds a new sandbox.
+                        Only mixins layer onto a running one. */}
+                    {variant === 'sandbox' ? (
+                      <button
+                        className="btn btn-default btn-sm"
+                        title={`Create a sandbox from "${k.name}"`}
+                        onClick={() => { setPrefillKit(k.dir); setModal('new-sandbox') }}
+                      >
+                        <Play size={13} fill="currentColor" strokeWidth={0} /> Create sandbox
+                      </button>
+                    ) : (
                     <div className="kit-add-wrap">
                       <button
                         className="btn btn-default btn-sm"
@@ -657,6 +669,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                         </div>
                       )}
                     </div>
+                    )}
                     <button
                       className={`btn btn-ghost btn-sm tpl-icon-btn kit-more-btn${moreFor === k.dir ? ' active' : ''}`}
                       title="More…"
