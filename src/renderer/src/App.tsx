@@ -11,6 +11,8 @@ import { SettingsPage } from './components/SettingsPage'
 import { LogsPanel } from './components/LogsPanel'
 import { ContextMenu } from './components/ContextMenu'
 import { PolicyBlockToaster } from './components/PolicyBlockToaster'
+import { OutdatedRuntimeBanner } from './components/OutdatedRuntimeBanner'
+import { McpPage } from './components/McpPage'
 import { playFinalizeSound, playAskSound } from './lib/sound'
 import { termTheme as resolveTermTheme } from './lib/termThemes'
 import { NewSandboxModal } from './components/modals/NewSandboxModal'
@@ -251,6 +253,7 @@ export function App() {
   return (
     <div className="app-root" onContextMenu={(e) => e.preventDefault()}>
       <Toolbar />
+      <OutdatedRuntimeBanner />
       <div className="body">
         <Sidebar />
         <div className="content">
@@ -259,6 +262,7 @@ export function App() {
           {activePage === 'templates' && <TemplatesPage />}
           {activePage === 'mixins'    && <KitsPage variant="mixin" />}
           {activePage === 'kits'      && <KitsPage variant="sandbox" />}
+          {activePage === 'mcp'       && <McpPage />}
           {activePage === 'settings'  && <SettingsPage />}
           {activePage === 'logs'      && <LogsPage />}
 

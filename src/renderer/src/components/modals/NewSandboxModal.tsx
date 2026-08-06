@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react'
-import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud } from 'lucide-react'
+import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { KitCaps } from '../KitCaps'
 import { randomName } from '../../lib/names'
+import { mcpIcon } from '../../lib/mcpCatalog'
 import { parseKitSpec, type ParsedKit } from '../../lib/kitSpec'
 import { AGENTS, type AgentType, type Template } from '../../types'
 
@@ -41,14 +42,44 @@ const parsePorts = (raw: string): string[] =>
 // Mirror sbx's default sandbox name: <agent>-<workdir>. Empty when no folder.
 function deriveName(agent: string, workspace: string): string {
   const folder = workspace.split('/').filter(Boolean).pop() ?? ''
-  return folder ? slugify(`${agent}-${folder}`) : ''
+  if (!folder) return ''
+  // An agent kit is often checked out into a folder of the same name, and
+  // "nanoclaw-nanoclaw" reads like a bug.
+  return slugify(agent === folder ? folder : `${agent}-${folder}`)
+}
+
+// The stock agent a sandbox kit is built on, for naming only. A kit's name says
+// what it is but not what it runs, and "claude-nanoclaw" carries both.
+//
+// Two places declare it, neither as an agent id: the entrypoint is a command
+// line (`claude --dangerously-skip-permissions`) and the image is a template
+// tag (`docker/sandbox-templates:shell-docker`). Match either against the
+// canonical agent list and give up quietly when neither says anything — a wrong
+// prefix would be worse than none.
+function baseAgentOfKit(spec: ParsedKit | undefined): string {
+  if (!spec) return ''
+  const ids = AGENTS.map((a) => a.id)
+  const entry = (spec.entrypoint || '').trim().split(/\s+/)[0].split('/').pop() ?? ''
+  if (ids.includes(entry as AgentType)) return entry
+  const tag = (spec.image || '').split(':').pop() ?? ''
+  // Template tags are `<flavor>-docker`, and a flavor is an agent id with an
+  // optional suffix: claude-code-docker, shell-docker, codex-docker.
+  const flavor = tag.replace(/-docker$/, '')
+  return ids.find((id) => flavor === id || flavor.startsWith(`${id}-`)) ?? ''
+}
+
+// The name suggested for a sandbox built from an agent kit: the agent it runs,
+// then the kit. Falls back to the kit alone when the base can't be identified.
+function deriveKitName(kit: string, spec: ParsedKit | undefined): string {
+  const base = baseAgentOfKit(spec)
+  return slugify(base && base !== kit ? `${base}-${kit}` : kit)
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup, prefillKit, setPrefillKit } = useStore()
   const feature = newSandboxFeature
   // Feature mode always isolates (a feature is an isolated clone you merge back).
-  const closeModal = () => { setNewSandboxFeature(false); setNewSandboxGroup(null); setModal(null) }
+  const closeModal = () => { setNewSandboxFeature(false); setNewSandboxGroup(null); setPrefillKit(null); setModal(null) }
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -93,7 +124,34 @@ export function NewSandboxModal() {
   const [error, setError]             = useState('')
   const [availKits, setAvailKits]     = useState<{ name: string; dir: string }[]>([])
   const [kitSpecs, setKitSpecs]       = useState<Record<string, ParsedKit>>({})  // dir → parsed spec, for preview
+  const [kitKinds, setKitKinds]       = useState<Record<string, { name: string; kind: string }>>({})
+  // MCP gateway servers registered on the host (Library > MCP Servers). Picking
+  // any switches this sandbox to STATIC mode (--static-mcp): only those are
+  // pre-loaded. Picking none leaves it DYNAMIC — the agent discovers servers
+  // itself through the gateway's mcp-find tool.
+  const [mcpServers, setMcpServers]   = useState<string[]>([])
+  const [selMcps, setSelMcps]         = useState<string[]>([])
+
   const [selKits, setSelKits]         = useState<string[]>([])
+
+  // An agent kit (den calls it a sandbox kit) supplies the agent itself, and
+  // sbx refuses to pair one with a generic subcommand:
+  //   "agent kit X (kind: agent) cannot be combined with the shell subcommand;
+  //    invoke as `sbx create --kit <kit> X ...` instead"
+  // So when one is selected its NAME becomes the positional, replacing whatever
+  // the agent picker says — which otherwise defaulted to claude and failed.
+  const baseKitDir = selKits.find((d) => kitKinds[d]?.kind === 'sandbox') ?? null
+  const baseKitName = baseKitDir ? kitKinds[baseKitDir].name : null
+  const effAgent = baseKitName ?? agent
+
+  // A sandbox kit names the sandbox after itself and the agent it runs
+  // (claude-nanoclaw); everything else keeps the sbx-style <agent>-<workdir>.
+  // The kit is the more useful half here — the workspace is already visible in
+  // the field right below, and two sandboxes from one kit are told apart by the
+  // uniqueness suffix rather than by a folder that is usually the kit's own.
+  const suggestedName = (): string =>
+    baseKitName ? deriveKitName(baseKitName, baseKitDir ? kitSpecs[baseKitDir] : undefined)
+                : deriveName(effAgent, workspace)
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
   const kitDdRef = useRef<HTMLDivElement>(null)
@@ -105,16 +163,31 @@ export function NewSandboxModal() {
       if (t && t[0]) setTemplate((cur) => cur || `${t[0].repository}:${t[0].tag}`)
     }).catch(() => {})
     // Mixin kits can be stacked onto the new sandbox at creation (--kit).
+    window.minipit?.mcpList?.().then((r) => setMcpServers((r?.servers ?? []).map((m) => m.name))).catch(() => {})
     window.minipit?.listKits().then((k) => {
-      const mixins = (k ?? []).filter((x) => x.kind === 'mixin').map((x) => ({ name: x.name, dir: x.dir }))
+      const all = k ?? []
+      // specName, not the folder name: sbx matches an agent kit by the name it
+      // declares, and an imported kit's folder is named after its repo.
+      setKitKinds(Object.fromEntries(all.map((x) => [x.dir, { name: x.specName || x.name, kind: x.kind }])))
+      const mixins = all.filter((x) => x.kind === 'mixin').map((x) => ({ name: x.name, dir: x.dir }))
       setAvailKits(mixins)
+      // Sandbox kits are parsed too, for the base agent their suggested name
+      // is built from. Mixins get parsed below for the capability preview.
+      Promise.all(all.filter((x) => x.kind === 'sandbox').map(async (x) =>
+        [x.dir, parseKitSpec((await window.minipit?.readKit(x.dir)) ?? '')] as const
+      )).then((entries) => setKitSpecs((cur) => ({ ...cur, ...Object.fromEntries(entries) }))).catch(() => {})
       // Pre-select any kit the user starred as a default in the Kits page.
       const seed = mixins.filter((m) => defaultKits.includes(m.name)).map((m) => m.dir)
-      if (seed.length) setSelKits(seed)
+      // A sandbox kit opened via "Create sandbox" supplies the agent itself, so
+      // it joins the starred mixins rather than replacing them.
+      const withPrefill = prefillKit ? [...new Set([prefillKit, ...seed])] : seed
+      if (withPrefill.length) setSelKits(withPrefill)
       // Load + parse each local kit's spec so we can preview its capabilities.
       Promise.all(mixins.map(async (m) =>
         [m.dir, parseKitSpec((await window.minipit?.readKit(m.dir)) ?? '')] as const
-      )).then((entries) => setKitSpecs(Object.fromEntries(entries))).catch(() => {})
+      // Merge, not replace — the sandbox-kit specs above land in the same map
+      // and whichever of the two settles last would otherwise wipe the other.
+      )).then((entries) => setKitSpecs((cur) => ({ ...cur, ...Object.fromEntries(entries) }))).catch(() => {})
     }).catch(() => {})
   }, [])
 
@@ -165,9 +238,9 @@ export function NewSandboxModal() {
   // this stays off to avoid a loop and the random name is kept.
   useEffect(() => {
     if (nameEdited || (!pinnedWs && !wsEdited)) return
-    const n = deriveName(agent, workspace)
+    const n = suggestedName()
     if (n) setName(n)
-  }, [agent, workspace, nameEdited, pinnedWs, wsEdited])
+  }, [agent, workspace, nameEdited, pinnedWs, wsEdited, baseKitName, kitSpecs])
 
   // --clone clones the host repo, so when it's on, check (debounced) whether the
   // workspace is a Git repo — if not, we offer to initialize one.
@@ -209,7 +282,7 @@ export function NewSandboxModal() {
   // background "creating" row, so the modal can be dismissed while it finishes.
   const handleLaunch = () => {
     if (!workspace) { setError('Workspace is required'); return }
-    const finalName = (name.trim() || deriveName(agent, workspace) || randomName())
+    const finalName = (name.trim() || suggestedName() || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
     localStorage.setItem('minipit:lastWorkspace', workspace)
     setError('')
@@ -217,7 +290,7 @@ export function NewSandboxModal() {
     setCreating(true)
     addCreatingSandbox({
       id: `creating-${finalName}`, name: finalName, status: 'creating',
-      agent, workspace, ports: [], logs: []
+      agent: effAgent as typeof agent, workspace, ports: [], logs: []
     })
     const unsub = window.minipit?.onCreateOutput((chunk) => {
       setProgress((p) => p + chunk)
@@ -228,12 +301,13 @@ export function NewSandboxModal() {
       try {
         await window.minipit?.createSandbox({
           name: finalName,
-          agent,
+          agent: effAgent,
           workspace,
           memory: memValue !== 'default' ? memValue : undefined,
           branch: clone,
           template: source === 'template' && template ? template : undefined,
           kits: selKits,
+          staticMcps: selMcps,
           ports: parsePorts(portsRaw),
           // Only sent when opting out — the store is mounted by default.
           noShareSkills: !shareSkills
@@ -270,7 +344,8 @@ export function NewSandboxModal() {
     ...parsePorts(portsRaw).flatMap((p) => ['-p', p]),
     ...(shareSkills ? [] : ['--no-share-skills']),
     ...selKits.flatMap((entry) => ['--kit', q(entry)]),
-    agent,
+    ...selMcps.flatMap((m) => ['--static-mcp', m]),
+    effAgent,
     q(workspace || '<workspace>')
   ]
 
@@ -308,7 +383,18 @@ export function NewSandboxModal() {
 
           {/* Agent — big dropdown (always shown) */}
           <div className="fg">
-            <label className="flabel">Agent</label>
+          <label className="flabel">
+            Agent
+            {baseKitName && <span className="flabel-hint">from the “{baseKitName}” kit</span>}
+          </label>
+          {baseKitName ? (
+            // An agent kit IS the agent — sbx rejects pairing one with a
+            // generic subcommand, so there is nothing to choose here.
+            <div className="agent-dd-fixed">
+              <Boxes size={16} />
+              <span className="agent-dd-label">{baseKitName}</span>
+            </div>
+          ) : (
             <div className="agent-dd" ref={ddRef}>
               <button className="agent-dd-btn" onClick={() => setDdOpen((v) => !v)}>
                 <AgentIcon agent={agent} size={18} />
@@ -331,6 +417,7 @@ export function NewSandboxModal() {
                 </div>
               )}
             </div>
+          )}
           </div>
 
           {/* Workspace */}
@@ -349,6 +436,35 @@ export function NewSandboxModal() {
             <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
           </div>
 
+          {/* MCP servers from the gateway. Selecting any switches this sandbox
+              to static mode; selecting none leaves the agent free to discover
+              servers itself at runtime. */}
+          {mcpServers.length > 0 && (
+            <div className="fg">
+              <label className="flabel">
+                MCP servers
+                <span className="flabel-hint">
+                  {selMcps.length
+                    ? `static — ${selMcps.length} pre-loaded`
+                    : 'dynamic — the agent discovers them itself'}
+                </span>
+              </label>
+              <div className="mcp-pick">
+                {mcpServers.map((m) => (
+                  <button
+                    key={m}
+                    className={`mcp-pick-item${selMcps.includes(m) ? ' on' : ''}`}
+                    onClick={() => setSelMcps((cur) => cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m])}
+                  >
+                    <img src={mcpIcon(m.toLowerCase())} alt=""
+                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Mixin kits — stacked onto the agent at creation (--kit). Accepts
               local kits and remote OCI references (pulled by sbx at creation). */}
           <div className="fg">
@@ -358,15 +474,21 @@ export function NewSandboxModal() {
             {selKits.length > 0 && (
               <div className="kit-sel-list">
                 {selKits.map((entry) => {
-                  const k = availKits.find((a) => a.dir === entry)
+                  const known = kitKinds[entry]
+                  const k = availKits.find((a) => a.dir === entry) ?? (known ? { name: known.name, dir: entry } : undefined)
                   const remote = !k && entry.includes('/')
+                  // A sandbox kit supplies the image and entrypoint, so label it
+                  // as the base rather than showing mixin capability chips.
+                  const isBase = known?.kind === 'sandbox'
                   return (
                     <div key={entry} className="kit-sel-item">
                       {remote ? <DownloadCloud size={13} /> : <Layers size={13} />}
                       <span className="kit-sel-name">{k?.name ?? entry}</span>
                       {remote
                         ? <span className="kit-sel-tag">remote</span>
-                        : kitSpecs[entry] && <KitCaps p={kitSpecs[entry]} compact />}
+                        : isBase
+                          ? <span className="kit-sel-tag">base agent</span>
+                          : kitSpecs[entry] && <KitCaps p={kitSpecs[entry]} compact />}
                       <button className="kit-sel-rm" title="Remove" onClick={() => setSelKits((s) => s.filter((d) => d !== entry))}>
                         <X size={13} />
                       </button>

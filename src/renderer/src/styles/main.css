@@ -518,7 +518,13 @@ html, body, #root {
 .sb-icon-btn:hover { background: var(--sb-hover); color: var(--sb-fg); }
 
 /* ── Sidebar bottom group (Account + Settings) ── */
-.sb-bottom { padding: 6px 8px 8px; margin-top: auto; }
+/* Settings sits alone between the divider and the footer, so the gaps either
+   side of it should match. The divider's own 10px margin already spaces it
+   above; this block only owes the matching 10px below. (It used to add 6px on
+   top of the divider's 10 and leave 8 under, reading as 16 over / 9 under.)
+   The trailing nav-item margin only exists to separate stacked rows. */
+.sb-bottom { padding: 0 8px 10px; margin-top: auto; }
+.sb-bottom .sb-nav-item { margin-bottom: 0; }
 .sb-acct {
   display: flex; align-items: center; gap: 9px;
   padding: 6px 8px; border-radius: 8px; cursor: pointer;
@@ -2260,6 +2266,10 @@ html, body, #root {
 }
 .page-title { font-size: 13.5px; font-weight: 600; color: var(--t1); letter-spacing: -0.015em; }
 .page-body { flex: 1; overflow-y: auto; padding: 18px; }
+/* .home-empty centres itself with flex:1 + justify-content, which needs a flex
+   parent to mean anything — .page-body is a plain block, so an empty state
+   dropped in it sits at the top. Opt in only where the body holds one. */
+.page-body-center { display: flex; flex-direction: column; }
 
 /* ── Home ── */
 /* Welcome / empty state — hero + two CTAs + feature highlights when there are no sandboxes */
@@ -3033,6 +3043,32 @@ html, body, #root {
    the empty header actions cell vs the wide button cell would push the flexible
    capabilities column to a different width and the columns wouldn't line up. */
 .lib-hdr-kit, .lib-row-kit { grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 232px; }
+/* name+state | target | actions. Without a variant class these rows inherited
+   the 4-column default and left a gap where a fourth cell would have been.
+   Actions is fixed so the flexible target column can absorb the slack. */
+.lib-hdr-mcp, .lib-row-mcp { grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) 116px 240px; }
+/* Authorization gets a column of its own rather than a badge trailing the name:
+   it's the field you scan down the list for, and inline it moved with the
+   name's length. Fixed-width so the badges line up. */
+/* Inspect output den couldn't read as key/value. Kept in the same panel as the
+   parsed rows — a black console block for what is, after all, just text was den
+   showing its plumbing — and copyable, since unrecognised output is the thing
+   worth sending on. */
+/* In-progress authorization: a status line, not a console. The browser has the
+   user's attention; this only has to say den is still waiting. */
+.mcp-authing {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle); font-size: 12px; color: var(--t2);
+}
+.mcp-info-rawwrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 0; }
+.mcp-info-raw {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: 'SF Mono', 'Menlo', monospace; font-size: 11.5px; line-height: 1.55; color: var(--t2);
+}
+.mcp-row-auth { display: flex; align-items: center; min-width: 0; }
+.mcp-row-auth .rt-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Five equal, flexible capability columns, shared by the header labels and the
    KitCaps cells so they align and shrink together. */
 .kit-caps-hdr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
@@ -4136,3 +4172,148 @@ html, body, #root {
 .cmdk-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmdk-item-hint { flex-shrink: 0; color: var(--t3); font-size: 11.5px; }
 .cmdk-item-enter { flex-shrink: 0; color: var(--t3); }
+
+/* Runtime too old for the CLI dialect den speaks — a single app-wide statement
+   instead of the same failure surfacing separately in kits, secrets and policy. */
+.rt-outdated {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
+}
+.rt-outdated-ic { color: var(--yellow); flex-shrink: 0; }
+.rt-outdated-txt { flex: 1; min-width: 0; font-size: 12px; color: var(--t1); }
+.rt-outdated-txt code { font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+.rt-outdated .btn { flex-shrink: 0; }
+
+/* "checked 21:49:51" beside the daemon badge — so a re-check that returns the
+   same verdict still visibly happened. */
+.rt-checked { margin-left: 8px; font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+
+/* ── MCP servers page (the gateway registry) ─────────────────────────────── */
+/* Explanatory line in the subbar, so the fixed-height .page-hdr keeps to a
+   single row of title + actions like every other page. */
+.mcp-subbar-note { font-size: 11.5px; color: var(--t3); }
+
+.mcp-add-form {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); padding: 14px; margin-bottom: 18px;
+}
+.mcp-add-x:hover { color: var(--t1); }
+
+.mcp-pick-search input { flex: 1; border: none; background: none; outline: none; color: var(--t1); font-size: 12px; }
+.mcp-pick-search button { border: none; background: none; cursor: pointer; color: var(--t3); display: flex; }
+
+/* Compact tiles, capped in height: 50+ entries shouldn't push the form off
+   screen, and the list is for scanning rather than reading. */
+.mcp-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px;
+  max-height: 232px; overflow-y: auto; padding-right: 2px;
+}
+/* Labels are buttons, not prose — selecting them on click looked like a bug. */
+.mcp-grid .mcp-card, .mcp-pick-item { user-select: none; }
+.mcp-card.on { opacity: 0.5; cursor: default; border-color: var(--border); }
+.mcp-card.on:hover { background: none; border-color: var(--border); }
+.mcp-card-on { color: var(--green); flex-shrink: 0; }
+.mcp-card-busy { color: var(--t3); font-size: 12px; }
+.mcp-empty { grid-column: 1 / -1; font-size: 12px; color: var(--t3); padding: 8px 2px; }
+
+.mcp-row-ic { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; flex-shrink: 0; }
+.mcp-row-target {
+  min-width: 0;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; color: var(--t3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mcp-row-actions { position: relative; display: flex; gap: 4px; justify-content: flex-end; flex-shrink: 0; }
+.mcp-attach-menu { right: 0; top: calc(100% + 4px); }
+
+.mcp-oauth-toggle {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 8px;
+  background: none; border: none; cursor: pointer; color: var(--t2); font-size: 12px; padding: 2px 0;
+}
+.mcp-oauth-toggle:hover { color: var(--t1); }
+.mcp-skip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--t2); white-space: nowrap; }
+
+/* Empty state — the page's primary content is the registered list, so say so
+   plainly instead of filling the space with a catalog nobody asked for yet. */
+.mcp-zero {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 48px 20px; text-align: center; color: var(--t3);
+}
+
+/* Static-MCP picker in New Sandbox — toggles, not a dropdown: the set is small
+   and which servers are pre-loaded is worth seeing at a glance. */
+.mcp-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcp-pick-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--t2); font-size: 12px; cursor: pointer;
+}
+.mcp-pick-item img { width: 14px; height: 14px; border-radius: 3px; object-fit: contain; }
+.mcp-pick-item:hover { border-color: var(--border-hi); color: var(--t1); }
+.mcp-pick-item.on { border-color: var(--primary); color: var(--t1); box-shadow: 0 0 0 1px var(--primary); }
+/* Page-foot explainer, outside .page-body's scroll so it stays visible. */
+.mcp-foot {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 10px 18px; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--t3); background: var(--bg);
+}
+.mcp-foot svg { flex-shrink: 0; }
+/* Switch row in the Add-an-MCP modal — matches the Settings toggles (.s-toggle)
+   rather than a bare checkbox. */
+.mcp-sw-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 10px; padding: 8px 0;
+}
+.mcp-sw-lbl { font-size: 12.5px; color: var(--t1); }
+.mcp-sw-sub { font-size: 11px; color: var(--t3); margin-top: 1px; }
+/* Inline link inside a settings sub-line (release version → its notes). */
+.rt-relink { color: var(--primary); cursor: pointer; }
+.rt-relink:hover { text-decoration: underline; }
+/* Even vertical rhythm across settings rows — the sections had drifted to
+   different paddings as rows were added over time. */
+.ss-row { padding-top: 11px; padding-bottom: 11px; }
+.ss-row + .ss-row { border-top: 1px solid var(--border); }
+/* The MCP empty state reuses .home-empty; only the mark differs (an icon
+   rather than den's wordmark). */
+/* The mark above an empty-state hero (see EmptyState). Muted so the title, not
+   the icon, is what the eye lands on. */
+.empty-mark { color: var(--t3); opacity: 0.8; display: flex; }
+/* `sbx mcp inspect` rendered as rows. Aligned key column so the values line up
+   the way the CLI's own padding does, without the terminal styling. */
+/* Expanded detail for the row above, inside the table's own frame — so no
+   border or radius of its own: a second box inset within the first is what made
+   the margins read as broken. The tint marks it as expanded, the bottom rule
+   separates it from the next server, and the padding matches .lib-row so the
+   keys line up under the SERVER column. */
+.mcp-info {
+  margin: 0; padding: 2px 12px 6px;
+  background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+}
+/* A server is a row plus whatever it has expanded under it, wrapped together.
+   That wrapper makes each .lib-row its own parent's last child, which the
+   generic `.lib-row:last-child { border-bottom: none }` reads as "last in the
+   table" — so every separator between servers disappeared. Put the rule back
+   here, and strip it from whatever ends the table instead. */
+.mcp-entry > .lib-row { border-bottom: 1px solid var(--border); }
+.lib-tbl > .mcp-entry:last-child > :last-child { border-bottom: none; }
+.mcp-info-row {
+  display: flex; align-items: baseline; gap: 12px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.mcp-info-row:last-child { border-bottom: none; }
+.mcp-info-row.sub { padding-left: 16px; }
+.mcp-info-k { flex-shrink: 0; width: 110px; color: var(--t3); }
+.mcp-info-v { color: var(--t1); font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; overflow-wrap: anywhere; }
+.mcp-info-link {
+  color: var(--primary); cursor: pointer;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; overflow-wrap: anywhere;
+}
+.mcp-info-link:hover { text-decoration: underline; }
+/* Agent field when an agent kit supplies the agent — the same shape as the
+   dropdown button, minus the affordance, since there's nothing to pick. */
+.agent-dd-fixed {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); color: var(--t2);
+}

@@ -182,6 +182,31 @@ Template:
   (`sbx` has no `mount ls`).
 - **Status:** worked around; local state can drift from reality.
 
+### An agent kit must be named by its spec, not its folder
+- **Version:** v0.38.0
+- **Symptom:** creating a sandbox from an imported agent kit fails with
+  `ERROR: agent name "sbx-nanoclaw-kits" does not match agent kit name
+  "nanoclaw" (use "nanoclaw" as the agent name)`.
+- **Cause:** the positional agent name must equal the `name:` declared in the
+  kit's `spec.yaml`. den's kit library keys everything on the *directory* name,
+  which for an imported kit is derived from the repository
+  (`sbx-nanoclaw-kits`), not from the kit (`nanoclaw`). They coincide for kits
+  authored in den, which is why this only shows up after an import.
+- **Fix:** two layers, because the first can only see what's on disk.
+  1. `listKits()` also returns `specName`, read from the first column-0 `name:`
+     in `spec.yaml` (nested `name:` keys exist under MCP servers and
+     credentials, hence the anchor), and the agent positional uses that.
+  2. The error names the correct value — *use "nanoclaw" as the agent name* —
+     so `create-sandbox` parses it and retries once with that name. Anything
+     that makes the two disagree (a folder renamed by hand, a kit edited
+     outside den, a spec shape the reader doesn't recognise) then still works
+     instead of dead-ending on an error carrying its own fix.
+  `src/main/index.ts` → `listKits()`, `minipit:create-sandbox`;
+  `NewSandboxModal.tsx` → `kitKinds`.
+- **Status:** fixed. Worth remembering as a pattern: sbx errors of the form
+  "X does not match Y (use Y)" are machine-readable, and acting on them beats
+  re-deriving the value.
+
 ## Secrets & skills
 
 ### `sbx secret ls` column layout isn't pinned
@@ -203,6 +228,83 @@ Template:
   is always shown.
   `src/main/index.ts` → `parseSkillsImport()`.
 - **Status:** unverified — confirm the real-run wording against a live import.
+
+## MCP gateway
+
+### An authorized server shows no authorization state
+- **Version:** v0.38.0
+- **Symptom:** a server authorized through the browser flow (Vercel) still
+  showed a blank Auth cell — indistinguishable, on screen, from never having
+  been authorized.
+- **Cause:** three separate ways to miss it, and den hit at least one:
+  1. `sbx mcp ls` doesn't reliably carry authorization as a column, and when it
+     does the value can be a bare `yes` / `valid` / `active` — den only looked
+     for words containing *auth*, *token*, *expired*, *pending*.
+  2. `sbx mcp ls --json` can express it as a **boolean** (`"authorized": true`)
+     or a nested object (`"auth": {"status": …}`). den read string fields only,
+     so a boolean `true` was dropped on the floor.
+  3. `sbx mcp auth status <name>` is **docs-derived and unverified**. On a build
+     without that subcommand the call fails, and den treated any failure as
+     "not an OAuth server" → report nothing.
+- **Fix:** probe in cost order and never let "no answer" mean "no". The JSON
+  reader accepts strings, booleans and nested `{status}`; the table reader also
+  matches bare `yes|no|ok|valid|active|none|never`; and when `mcp auth status`
+  fails *specifically because the subcommand is unknown*, den falls back to
+  `sbx mcp inspect <name>`.
+  `src/main/index.ts` → `probeAuth()`, `authFromInspect()`, `withAuthState()`,
+  `parseMcpTable()`; `McpPage.tsx` → `authState()`.
+- **Status:** worked around, but see the next entry — on v0.38 every one of
+  those sources comes back empty, so the real answer is the local record.
+
+### v0.38 doesn't report per-server authorization state anywhere readable
+- **Version:** v0.38.0 (confirmed against the CLI)
+- **Symptom:** an authorized server shows no state, and the obvious fallback
+  makes it worse — reporting *not* authorized for one that is.
+- **Cause:** `sbx mcp inspect <name>` prints, in full:
+
+  ```
+  Name: vercel
+  Type: remote
+  URL: https://mcp.vercel.com
+  Transport: streamable-http
+  OAuth: required
+    Issuer: https://vercel.com
+    Registration: https://api.vercel.com/login/oauth/register
+  ```
+
+  `OAuth: required` is a **capability** — the server requires OAuth — and reads
+  identically before and after you authorize. Scraping the first `auth`-ish key
+  therefore yields `required`, which classifies as "not authorized". There is no
+  state field: not in `inspect`, not as an `mcp ls` column.
+- **Fix:** two parts.
+  1. Never infer a state from a capability word. `authFromInspect()` ignores
+     `required|optional|supported|enabled|disabled` and only accepts a value
+     that names a state (`authorized`, `expired`, `revoked`, `valid`, …).
+     `authState()` in the renderer does the same, so neither layer can guess.
+  2. Record what *is* observable. `sbx mcp auth <name>` ends with
+     `MCP server "x" authorized` and exits 0, so den notes the server and the
+     time in `localStorage` (`minipit:mcp-authorized:v1`) and shows Authorized
+     from that when sbx says nothing. Anything sbx *does* report outranks the
+     note, so a later revocation isn't masked; removing a server clears it.
+     The badge tooltip says the state came from den and when.
+- **Status:** worked around. The note only covers authorizations performed in
+  den — a server authorized from the terminal before this existed shows blank
+  until it's authorized once through the app. Revisit if a later sbx grows a
+  real status field. Still unconfirmed: whether `sbx mcp auth status` exists at
+  all, and what `sbx mcp ls --json` contains.
+
+### `"No MCP servers registered"` parses as a server
+- **Version:** v0.38.0
+- **Symptom:** an empty registry produced one row named `No`, with working
+  Authorize / Add-to-sandbox / Remove buttons.
+- **Cause:** with nothing registered sbx prints a sentence where the table would
+  be, and the column splitter took its first field as a name. `mcp add` / `auth`
+  emit `INFO:` / `ERROR:` lines that hit the same path.
+- **Fix:** skip prose — a row must be multi-column or a bare identifier — and,
+  in the renderer, drop any entry whose name contains whitespace, so a future
+  parse failure can only ever render less rather than a fake server.
+  `src/main/index.ts` → `parseMcpTable()`; `McpPage.tsx` → `isServer()`.
+- **Status:** fixed.
 
 ## Open / unverified
 

@@ -31,6 +31,8 @@ import * as pty from 'node-pty'
 
 // Name the app early (before whenReady) so menus, the About panel and the dock
 // label read "den" instead of "Electron" in dev. Packaged builds use productName.
+declare const __BUILD_ID__: string
+
 app.setName('den')
 
 const store = new Store()
@@ -208,17 +210,25 @@ function readSbxKeychain(account: string): Promise<string | null> {
 // `sandboxes-auth` service: `docker/auth/metadata/hub/default` holds
 // {username, email}, and `docker/auth/hub/<username>` holds the OAuth tokens.
 // Returns null when signed out (sbx logout removes the entries) or off-macOS.
-async function sbxSession(): Promise<{ username: string; email?: string; accessToken?: string } | null> {
+//
+// Each entry read costs the user a macOS keychain prompt (they belong to the
+// sbx binary, not den), so the token entry is opt-in: it is only useful for
+// enriching the profile from the Hub API, which currently rejects it — see
+// resolveDockerAccount. Reading it by default meant two password prompts per
+// launch to obtain something unusable.
+async function sbxSession(withToken = false): Promise<{ username: string; email?: string; accessToken?: string } | null> {
   if (process.platform !== 'darwin') return null
   const metaRaw = await readSbxKeychain('docker/auth/metadata/hub/default')
   if (!metaRaw) return null
   try {
     const meta = JSON.parse(metaRaw) as { username?: string; email?: string }
     if (!meta.username) return null
-    const tokRaw = await readSbxKeychain(`docker/auth/hub/${meta.username}`)
     let accessToken: string | undefined
-    if (tokRaw) {
-      try { accessToken = (JSON.parse(tokRaw) as { access_token?: string }).access_token } catch { /* tokens absent → metadata-only */ }
+    if (withToken) {
+      const tokRaw = await readSbxKeychain(`docker/auth/hub/${meta.username}`)
+      if (tokRaw) {
+        try { accessToken = (JSON.parse(tokRaw) as { access_token?: string }).access_token } catch { /* tokens absent → metadata-only */ }
+      }
     }
     return { username: meta.username, email: meta.email || undefined, accessToken }
   } catch { return null }
@@ -716,6 +726,110 @@ function parsePolicyLs(out: string) {
 // value-style callers (a version, a JSON blob), but it silently corrupts any
 // format where leading whitespace on the first line is significant — see
 // gitStatus, where a trimmed " M path" loses a character off the filename.
+// A registered MCP server as den shows it. Fields are best-effort: which of
+// url/command/transport/auth a given sbx build reports isn't pinned.
+interface McpServerEntry {
+  name: string
+  url: string
+  command: string
+  transport: string
+  auth: string
+}
+
+// Fallback for `sbx mcp ls` without --json: a column-aligned table. Take the
+// first field as the name and classify the rest by shape rather than by column
+// position, which has moved before in other sbx tables.
+// `sbx mcp ls` doesn't report whether a server is authorized — `sbx mcp auth
+// status` does. Ask it per server so an authorized server actually reads as
+// one; the list is short, and a server whose status can't be read keeps
+// whatever `ls` said rather than being mislabelled.
+// Pull an authorization state out of `sbx mcp inspect` output. Only a value
+// that actually names a state counts: v0.38 prints `OAuth: required`, which
+// says the server *needs* OAuth, not that you haven't done it — reading that as
+// a state reports an authorized server as unauthorized, which is worse than
+// reporting nothing. Capability words are therefore ignored, not guessed at.
+const AUTH_KEY_RE = /auth|token|credential/i
+const AUTH_CAPABILITY_RE = /^(required|optional|supported|unsupported|enabled|disabled)$/i
+const AUTH_STATE_RE = /authori[sz]ed|expired|revoked|valid|invalid|active|logged[ -]?(in|out)/i
+function authFromInspect(raw: string): string {
+  for (const line of raw.split('\n')) {
+    const m = /^\s*([^:]{1,40}):\s*(.+?)\s*$/.exec(line)
+    if (!m || !AUTH_KEY_RE.test(m[1])) continue
+    const v = m[2].trim()
+    // A bare heading ("OAuth:") carries no state — its children don't either.
+    if (!v || AUTH_CAPABILITY_RE.test(v)) continue
+    if (/^(true|yes)$/i.test(v)) return 'authorized'
+    if (/^(false|no|none|never)$/i.test(v)) return 'not authorized'
+    if (AUTH_STATE_RE.test(v)) return v
+  }
+  return ''
+}
+
+// sbx reports authorization differently across builds: `mcp ls` may carry a
+// column, `mcp auth status` may or may not exist, and `mcp inspect` always has
+// something. Try them in cost order and only give up at the end — reporting
+// nothing is indistinguishable, on screen, from "not authorized".
+// Set once this build is found not to have `mcp auth status`, so the failing
+// spawn isn't repeated for every server on every refresh.
+let mcpAuthStatusMissing = false
+
+async function probeAuth(name: string): Promise<string> {
+  if (!mcpAuthStatusMissing) {
+    try {
+      const raw = await sbx(['mcp', 'auth', 'status', name], { timeout: 10000 })
+      const last = raw.trim().split('\n').filter(Boolean).pop() ?? ''
+      if (last) return last
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // A build that has no such subcommand says so; that's not a verdict on
+      // the server, so keep looking. Anything else is the server's own answer.
+      if (/unknown (command|subcommand|flag)|unknown shorthand|usage:|invalid argument|help for/i.test(msg)) {
+        mcpAuthStatusMissing = true
+      } else {
+        return /expired|unauthor|not authorized|required/i.test(msg) ? 'not authorized' : ''
+      }
+    }
+  }
+  try {
+    return authFromInspect(await sbx(['mcp', 'inspect', name], { timeout: 10000 }))
+  } catch {
+    return ''
+  }
+}
+
+async function withAuthState(servers: McpServerEntry[]): Promise<McpServerEntry[]> {
+  return Promise.all(servers.map(async (m) => (m.auth ? m : { ...m, auth: await probeAuth(m.name) })))
+}
+
+function parseMcpTable(out: string): McpServerEntry[] {
+  const rows: McpServerEntry[] = []
+  for (const line of out.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    const cols = t.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+    if (cols.length < 1) continue
+    // Skip the header row, whatever it's called.
+    if (/^(name|server)\b/i.test(cols[0])) continue
+    // Skip prose. With nothing registered sbx prints a sentence ("No MCP
+    // servers registered"), and add/auth emit INFO/ERROR lines; taking the
+    // first field of those produced a phantom server complete with action
+    // buttons. A real row is either multi-column or a bare identifier.
+    if (/^(no|none|error|info|warn|warning|usage|failed)\b/i.test(cols[0])) continue
+    if (cols.length === 1 && /\s/.test(cols[0])) continue
+    const rest = cols.slice(1)
+    rows.push({
+      name: cols[0],
+      url: rest.find((c) => /^https?:\/\//i.test(c)) ?? '',
+      command: rest.find((c) => !/^https?:\/\//i.test(c) && /\s|\//.test(c)) ?? '',
+      transport: rest.find((c) => /^(http|sse|stdio|local|remote)$/i.test(c)) ?? '',
+      // Widened past the obvious words: a column can just as well read "yes",
+      // "valid" or "active", and missing it shows an authorized server as blank.
+      auth: rest.find((c) => /^(yes|no|ok|valid|active|none|never)$/i.test(c) || /auth|token|expired|pending/i.test(c)) ?? ''
+    })
+  }
+  return rows
+}
+
 function sbx(args: string[], opts?: { timeout?: number; raw?: boolean }): Promise<string> {
   const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {
@@ -1012,7 +1126,7 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         const data = (await resp.json()) as { access_token?: string }
         if (!data.access_token) throw new Error('no access_token in token response')
         // Store via stdin so the token never appears in argv / shell history.
-        await sbxWithInput(['secret', 'set', '-g', 'anthropic'], data.access_token + '\n')
+        await sbxWithInput(['secret', 'set', 'anthropic'], data.access_token + '\n')
         resolve({ ok: true })
       } catch (err) {
         reject(err)
@@ -1042,8 +1156,11 @@ function anthropicOAuth(): Promise<{ ok: true }> {
 
 // Translate a scope value from the renderer into `sbx secret set/rm` args:
 // global → ['-g']; anything else is a sandbox name passed positionally.
+// v0.38 made secrets global by default and moved sandbox scope onto a flag. The
+// old spellings — a bare positional sandbox name, and `-g` for global — are
+// deprecated and warn. Global is now simply the absence of a scope.
 function secretScopeArgs(scope?: string): string[] {
-  return !scope || scope === '(global)' ? ['-g'] : [scope]
+  return !scope || scope === '(global)' ? [] : ['--sandbox', scope]
 }
 
 // Parse the `sbx secret ls` table (columns separated by 2+ spaces). No `-g`, so
@@ -1103,7 +1220,7 @@ async function listTemplates() {
 
 // Authored kits under <userData>/kits/<name>/ (spec.yaml). `kind` distinguishes
 // mixin kits from sandbox kits. Shared by the list-kits IPC and the app menu.
-function listKits(): { name: string; kind: string; dir: string; hasZip: boolean }[] {
+function listKits(): { name: string; specName: string; kind: string; dir: string; hasZip: boolean }[] {
   const fs = require('fs')
   const base = kitsRoot()
   try {
@@ -1112,18 +1229,27 @@ function listKits(): { name: string; kind: string; dir: string; hasZip: boolean 
       .map((d) => {
         const dir = join(base, d.name)
         let kind = 'mixin'
+        let specName = ''
         try {
           const spec = fs.readFileSync(join(dir, 'spec.yaml'), 'utf8') as string
           const m = spec.match(/kind:\s*(\w+)/)
           // sbx spells full-agent kits `agent`; den's library splits kits into
           // `mixin` vs `sandbox`, so treat `agent` as a sandbox kit for display.
           if (m) kind = m[1] === 'agent' ? 'sandbox' : m[1]
+          // The name the kit calls itself, which is NOT always the folder it
+          // landed in: an import names the folder after the repo. sbx matches
+          // an agent kit by its declared name and rejects anything else, so
+          // this is the name that has to reach the CLI.
+          // Anchored to column 0 — `name:` also appears nested under MCP
+          // servers, credentials and so on.
+          const n = /^name:[ \t]*["']?([^"'\s#]+)/m.exec(spec)
+          if (n) specName = n[1]
         } catch {
           return null
         }
-        return { name: d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
+        return { name: d.name, specName: specName || d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
       })
-      .filter(Boolean) as { name: string; kind: string; dir: string; hasZip: boolean }[]
+      .filter(Boolean) as { name: string; specName: string; kind: string; dir: string; hasZip: boolean }[]
   } catch {
     return []
   }
@@ -2293,8 +2419,8 @@ function showMainWindow(): void {
 
 // Show the window (recreating it if it was closed) and deliver a tray-driven
 // navigation event once the renderer has finished loading.
-// Stop then start sandboxd. Shared by the Runtime IPC handler and the menu-bar
-// item, so both stream into the same Diagnostics output box.
+// Restart sandboxd (`sbx daemon restart`, v0.38). Shared by the Runtime IPC
+// handler and the menu-bar item, so both stream into the same output box.
 async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
   const send = (chunk: string) =>
     mainWindow?.webContents.send('minipit:daemon-output', chunk)
@@ -2304,9 +2430,10 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
     return code
   }
   try {
-    await step(['daemon', 'stop'])          // best-effort — ignore its exit code
-    const code = await step(['daemon', 'start', '-d'])
-    if (code !== 0) return { ok: false, error: `sbx daemon start exited ${code}` }
+    // v0.38 added a first-class `daemon restart`; it supersedes the old
+    // stop-then-start pair, which raced when the daemon was slow to exit.
+    const code = await step(['daemon', 'restart'])
+    if (code !== 0) return { ok: false, error: `sbx daemon restart exited ${code}` }
     send('\nDaemon restarted.\n')
     return { ok: true }
   } catch (err) {
@@ -2317,6 +2444,23 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
 // sbx version for the menu bar. Cached because the tray menu is rebuilt
 // synchronously (and often); refreshed in the background on each rebuild so a
 // runtime update shows up without restarting den.
+// den speaks the v0.38 CLI dialect only: `daemon restart`, `secret set
+// --sandbox`, `--static-mcp`, `--deny-network` and kit spec v2 all arrived
+// there, and the pre-0.38 spellings it replaced are deprecated. Rather than
+// carry two code paths, den states the floor and shows a banner below it —
+// otherwise an old runtime fails as a stream of opaque "unknown flag" errors.
+export const MIN_SBX_VERSION = '0.38.0'
+
+/** True when `a` is an older release than `b`. Non-numeric suffixes ignored. */
+function semverLt(a: string, b: string): boolean {
+  const parts = (s: string) => (s.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1, 4) ?? []).map(Number)
+  const [a1 = 0, a2 = 0, a3 = 0] = parts(a)
+  const [b1 = 0, b2 = 0, b3 = 0] = parts(b)
+  if (a1 !== b1) return a1 < b1
+  if (a2 !== b2) return a2 < b2
+  return a3 < b3
+}
+
 let cachedSbxVersion = ''
 // Both menus retry the read while the version is still unknown (a down runtime
 // never fills it), so keep one probe in flight rather than stacking an exec per
@@ -2855,6 +2999,7 @@ function setupIPC(): void {
     name?: string
     template?: string
     kits?: string[]
+    staticMcps?: string[]
     ports?: string[]
     noShareSkills?: boolean
   }) => {
@@ -2862,43 +3007,73 @@ function setupIPC(): void {
     // won't have been created yet (no-op for existing project/clone folders).
     try { require('fs').mkdirSync(config.workspace, { recursive: true }) }
     catch (err) { console.error('could not create workspace folder:', err) }
-    const args = ['create']
-    if (config.name) args.push('--name', config.name)
-    if (config.memory) args.push('-m', config.memory)
-    if (config.branch) args.push('--clone')
-    if (config.template) args.push('-t', config.template)
-    // -p is honoured at creation only (sbx v0.37+); re-attaching ignores it, so
-    // later changes go through `sbx ports` (see port-publish below).
-    for (const spec of config.ports ?? []) args.push('-p', spec)
-    // The shared skills store is mounted by default, so only the opt-out is ever
-    // passed. Hidden from `sbx create --help` in v0.37.0 but accepted.
-    if (config.noShareSkills) args.push('--no-share-skills')
-    // --kit can only be passed at creation; stack one flag per kit directory.
-    for (const dir of config.kits ?? []) args.push('--kit', dir)
-    args.push(config.agent, config.workspace)
+    const buildArgs = (agent: string): string[] => {
+      const args = ['create']
+      if (config.name) args.push('--name', config.name)
+      if (config.memory) args.push('-m', config.memory)
+      if (config.branch) args.push('--clone')
+      if (config.template) args.push('-t', config.template)
+      // -p is honoured at creation only (sbx v0.37+); re-attaching ignores it, so
+      // later changes go through `sbx ports` (see port-publish below).
+      for (const spec of config.ports ?? []) args.push('-p', spec)
+      // The shared skills store is mounted by default, so only the opt-out is ever
+      // passed. Hidden from `sbx create --help` in v0.37.0 but accepted.
+      if (config.noShareSkills) args.push('--no-share-skills')
+      // --kit can only be passed at creation; stack one flag per kit directory.
+      for (const dir of config.kits ?? []) args.push('--kit', dir)
+      // Static MCP mode: pre-load these registered servers. Passing none leaves the
+      // agent in dynamic mode, discovering servers itself via the gateway.
+      for (const m of config.staticMcps ?? []) args.push('--static-mcp', m)
+      args.push(agent, config.workspace)
+      return args
+    }
     // Stream output so the New Sandbox modal can show live progress (image pull,
     // kit injection, startup) instead of a silent "Creating…" spinner.
     const send = (chunk: string) => mainWindow?.webContents.send('minipit:create-output', chunk)
-    send(`$ sbx ${args.join(' ')}\n`)
-    const out = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(getSbxPath(), args, { env: guiEnv() })
-      let buf = ''
-      let err = ''
-      proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
-      proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
-      proc.on('error', (e) => reject(e))
-      const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx create timed out')) }, 120000)
-      proc.on('close', (code) => {
-        clearTimeout(timer)
-        if (code === 0) resolve(buf.trim())
-        else reject(new Error(err.trim() || buf.trim() || `sbx create exited ${code}`))
+    const run = (args: string[]): Promise<string> => {
+      send(`$ sbx ${args.join(' ')}\n`)
+      return new Promise<string>((resolve, reject) => {
+        const proc = spawn(getSbxPath(), args, { env: guiEnv() })
+        let buf = ''
+        let err = ''
+        proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
+        proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
+        proc.on('error', (e) => reject(e))
+        const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx create timed out')) }, 120000)
+        proc.on('close', (code) => {
+          clearTimeout(timer)
+          if (code === 0) resolve(buf.trim())
+          else reject(new Error(err.trim() || buf.trim() || `sbx create exited ${code}`))
+        })
       })
-    })
+    }
+
+    let agent = config.agent
+    let out: string
+    try {
+      out = await run(buildArgs(agent))
+    } catch (err) {
+      // An agent kit must be named by the `name:` in its spec.yaml, which is not
+      // always the folder den keeps it in — an import names that after the repo.
+      // sbx doesn't just reject this, it names the right one:
+      //   agent name "sbx-nanoclaw-kits" does not match agent kit name
+      //   "nanoclaw" (use "nanoclaw" as the agent name)
+      // Take it at its word and retry once. den resolves the name up front too,
+      // but that reads spec.yaml from disk; this covers every other way the two
+      // can disagree (a renamed folder, a kit edited outside den) rather than
+      // dead-ending on an error that carries its own fix.
+      const msg = err instanceof Error ? err.message : String(err)
+      const suggested = /use ["']([^"']+)["'] as the agent name/i.exec(msg)?.[1]
+      if (!suggested || suggested === agent) throw err
+      send(`\nThe kit calls itself "${suggested}" — retrying with that name.\n`)
+      agent = suggested
+      out = await run(buildArgs(agent))
+    }
     // `sbx create` prints e.g. "✓ Created sandbox 'claude-foo'" plus extra lines,
     // so parse the quoted name rather than using the whole message.
     const match = out.match(/sandbox ['"]([^'"]+)['"]/i)
     const sandboxName =
-      config.name ?? match?.[1] ?? `${config.agent}-${config.workspace.split('/').pop()}`
+      config.name ?? match?.[1] ?? `${agent}-${config.workspace.split('/').pop()}`
     recordKits(sandboxName, config.kits ?? [])
     recordIsolation(sandboxName, !!config.branch)
     // Brand-new sandbox: its first agent session must start fresh, never
@@ -2982,6 +3157,170 @@ function setupIPC(): void {
     } catch (err) {
       const error = (err instanceof Error ? err.message : String(err)).trim()
       return { ok: false, error, netError: isNetworkError(error) }
+    }
+  })
+
+  // Is the installed runtime new enough? `known: false` means the probe hasn't
+  // answered yet (or the daemon is down) — the UI shows nothing rather than
+  // accusing a runtime it couldn't read.
+  // The build this main process was started from. The renderer compares it with
+  // its own: they differ whenever main has been rebuilt but not restarted, which
+  // presents as new UI wired to old handlers.
+  ipcMain.handle('minipit:build-id', () => __BUILD_ID__)
+
+  ipcMain.handle('minipit:sbx-version-check', async () => {
+    if (!cachedSbxVersion) refreshSbxVersion()
+    const version = cachedSbxVersion
+    return {
+      version,
+      min: MIN_SBX_VERSION,
+      known: !!version,
+      outdated: !!version && semverLt(version, MIN_SBX_VERSION)
+    }
+  })
+
+  // ── MCP gateway (sbx v0.38) ────────────────────────────────────────────────
+  // Servers are registered once on the host and reused across sandboxes; OAuth
+  // tokens stay on the host, which is why den drives this through the CLI rather
+  // than doing anything itself.
+  //
+  // The output shape isn't pinned, so prefer `--json` and fall back to parsing
+  // the table — the same defensive approach `sbx secret ls` and `policy log`
+  // needed. An unrecognised row is skipped, never guessed at.
+  ipcMain.handle('minipit:mcp-list', async () => {
+    const fromJson = (raw: string): McpServerEntry[] | null => {
+      try {
+        const data = JSON.parse(raw) as unknown
+        const rows = (Array.isArray(data) ? data : (data as { servers?: unknown })?.servers) as
+          Array<Record<string, unknown>> | undefined
+        if (!Array.isArray(rows)) return null
+        return rows.map((r) => {
+          const pick = (...keys: string[]): string => {
+            for (const k of keys) { const v = r[k]; if (typeof v === 'string' && v.trim()) return v.trim() }
+            return ''
+          }
+          // Authorization is the one field whose shape varies: a string on some
+          // builds, a bare boolean or a nested {status} object on others. A
+          // string-only read silently dropped `"authorized": true`, so an
+          // authorized server looked unauthorized.
+          const authOf = (): string => {
+            const say = (v: unknown): string => {
+              if (typeof v === 'string' && v.trim()) return v.trim()
+              if (typeof v === 'boolean') return v ? 'authorized' : 'not authorized'
+              return ''
+            }
+            for (const k of ['auth', 'authStatus', 'auth_status', 'authorization', 'status', 'state']) {
+              const direct = say(r[k])
+              if (direct) return direct
+              const nested = r[k]
+              if (nested && typeof nested === 'object') {
+                for (const kk of ['status', 'state', 'authorized', 'valid']) {
+                  const inner = say((nested as Record<string, unknown>)[kk])
+                  if (inner) return inner
+                }
+              }
+            }
+            for (const k of ['authorized', 'isAuthorized', 'hasToken', 'tokenValid']) {
+              const v = r[k]
+              if (typeof v === 'boolean') return v ? 'authorized' : 'not authorized'
+            }
+            return ''
+          }
+          return {
+            name: pick('name', 'id', 'server'),
+            url: pick('url', 'endpoint'),
+            command: pick('command', 'cmd'),
+            transport: pick('transport', 'type'),
+            auth: authOf()
+          }
+        }).filter((m) => m.name)
+      } catch { return null }
+    }
+    try {
+      const raw = await sbx(['mcp', 'ls', '--json'], { timeout: 15000 })
+      const parsed = fromJson(raw) ?? parseMcpTable(raw)
+      return { ok: true, servers: await withAuthState(parsed) }
+    } catch {
+      // No --json on this build (or it errored) — try the plain table.
+      try {
+        const raw = await sbx(['mcp', 'ls'], { timeout: 15000 })
+        return { ok: true, servers: await withAuthState(parseMcpTable(raw)) }
+      } catch (err) {
+        return { ok: false, servers: [], error: (err instanceof Error ? err.message : String(err)).trim() }
+      }
+    }
+  })
+
+  ipcMain.handle('minipit:mcp-add', async (_, cfg: {
+    name: string; url?: string; command?: string; args?: string; local?: boolean
+    scopes?: string; clientId?: string; skipAuth?: boolean
+  }) => {
+    const name = (cfg.name || '').trim()
+    if (!name) return { ok: false, error: 'A server name is required.' }
+    const args = ['mcp', 'add', name]
+    if (cfg.local) args.push('--local')
+    if (cfg.url?.trim()) args.push('--url', cfg.url.trim())
+    if (cfg.command?.trim()) args.push('--command', cfg.command.trim())
+    // `--args` takes the rest of the child command line; split on whitespace so
+    // "npx @playwright/mcp@latest" reaches sbx as separate argv entries.
+    for (const a of (cfg.args ?? '').trim().split(/\s+/).filter(Boolean)) args.push('--args', a)
+    // OAuth scopes recorded with the registration; repeatable, one flag each.
+    for (const sc of (cfg.scopes ?? '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)) args.push('--scope', sc)
+    if (cfg.clientId?.trim()) args.push('--client-id', cfg.clientId.trim())
+    // Register without kicking off a browser flow — useful when authorizing later.
+    if (cfg.skipAuth) args.push('--skip_auth')
+    if (!cfg.url?.trim() && !cfg.command?.trim()) {
+      return { ok: false, error: 'Give either a URL (remote) or a command (local).' }
+    }
+    try {
+      const output = await sbx(args, { timeout: 60000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  ipcMain.handle('minipit:mcp-remove', async (_, name: string) => {
+    try {
+      const output = await sbx(['mcp', 'rm', name], { timeout: 30000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Attach a registered server to a sandbox that's already running. Creation-time
+  // attachment is a different flag (`--static-mcp`, passed to `sbx run`).
+  ipcMain.handle('minipit:mcp-load', async (_, name: string, sandbox: string) => {
+    try {
+      const output = await sbx(['mcp', 'load', name, '--sandbox', sandbox], { timeout: 60000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  ipcMain.handle('minipit:mcp-inspect', async (_, name: string) => {
+    try {
+      return { ok: true, raw: await sbx(['mcp', 'inspect', name], { timeout: 20000 }) }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Authorization opens a browser on the HOST and can prompt, so it streams
+  // through a PTY like `sbx login` rather than being captured — the user needs
+  // to see the URL and any code it prints.
+  ipcMain.handle('minipit:mcp-auth', async (_, name: string) => {
+    const send = (chunk: string) => mainWindow?.webContents.send('minipit:mcp-auth-output', chunk)
+    try {
+      // No command echo: the stream feeds a progress line and the authorization
+      // link, not a console. Showing "$ sbx mcp auth …" was den narrating its
+      // own plumbing at the one moment the user is waiting on a browser.
+      const { code, output } = await ptyRun(['mcp', 'auth', name], send, 300000)
+      return code === 0 ? { ok: true, output } : { ok: false, error: `sbx mcp auth exited ${code}` }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
@@ -3146,12 +3485,12 @@ function setupIPC(): void {
     if (session) {
       username = session.username
       email = session.email
-      // The sbx access token is an auth0 session token that the Hub API
-      // currently rejects (401 both direct and via /v2/auth/token exchange),
-      // so enrichment usually degrades to the keychain username+email here.
-      // Still worth trying: it lights up automatically if Docker ever issues
-      // Hub-compatible tokens.
-      secret = session.accessToken
+      // No token read here on purpose. The sbx access token is an auth0 session
+      // token the Hub API rejects (401 both direct and via /v2/auth/token
+      // exchange), so it never enriched anything — but it lives in a second
+      // keychain entry, and reading it made macOS ask for the login password a
+      // second time on every launch. Username + email from the metadata entry
+      // is what actually reaches the UI.
     } else {
       try {
         const fs = require('fs')
@@ -3299,11 +3638,9 @@ function setupIPC(): void {
     }
   )
 
-  // Restart the sbx daemon: `sbx daemon stop` then `sbx daemon start -d`. Runs
-  // the two steps in sequence and streams to its OWN channel so the output can
-  // render under the Restart daemon button, separate from the diagnostics box.
-  // The first step is best-effort — if the daemon is already down, `stop` may
-  // exit non-zero, which shouldn't block the restart.
+  // Restart the sbx daemon (`sbx daemon restart`, v0.38 — supersedes the old
+  // stop-then-start pair). Streams to its OWN channel so the output renders
+  // under the Restart daemon button, separate from the diagnostics box.
   ipcMain.handle('minipit:daemon-restart', () => restartDaemon())
 
   // Daemon health for the Diagnostics status indicator: `sbx daemon status`
@@ -3881,13 +4218,25 @@ function setupIPC(): void {
   // Debug traces for agent API failures — where the file is, how much is in it,
   // and a way to get at it. See docs/errors.md for how to read one.
   ipcMain.handle('minipit:api-traces', () => ({ path: traceFile(), count: traceCount() }))
-  ipcMain.handle('minipit:reveal-api-traces', () => {
+  ipcMain.handle('minipit:reveal-api-traces', async () => {
     const fs = require('fs')
     const file = traceFile()
-    // Nothing recorded yet: reveal the folder rather than no-op on a missing file.
-    if (!fs.existsSync(file)) { void shell.openPath(traceDir()); return { ok: true, empty: true } }
-    shell.showItemInFolder(file)
-    return { ok: true, empty: false }
+    if (fs.existsSync(file)) {
+      shell.showItemInFolder(file)
+      return { ok: true, empty: false }
+    }
+    // No trace recorded yet. The folder is created lazily on the first write, so
+    // it doesn't exist either — and `openPath` on a missing path fails silently,
+    // which is what made this button look dead in the common "None recorded"
+    // case. Create it, so Reveal always shows where traces will appear.
+    try {
+      fs.mkdirSync(traceDir(), { recursive: true })
+    } catch (err) {
+      return { ok: false, empty: true, error: (err instanceof Error ? err.message : String(err)) }
+    }
+    // openPath resolves to '' on success, or a message explaining the refusal.
+    const problem = await shell.openPath(traceDir())
+    return { ok: !problem, empty: true, error: problem || undefined }
   })
 
   // Open the built-in file editor in its own window.
@@ -4003,7 +4352,7 @@ function setupIPC(): void {
 
   // sbx has a built-in OAuth flow for OpenAI (opens the browser, stores tokens).
   ipcMain.handle('minipit:oauth-secret', (_, service: string) => new Promise((resolve, reject) => {
-    const proc = spawn(getSbxPath(), ['secret', 'set', '-g', service, '--oauth'])
+    const proc = spawn(getSbxPath(), ['secret', 'set', service, '--oauth'])
     let err = ''
     proc.stderr?.on('data', (d) => (err += d))
     proc.on('error', reject)

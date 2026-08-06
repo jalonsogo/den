@@ -29,9 +29,9 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'shell',          label: 'Shell' }
 ]
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
-export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings' | 'logs'
+export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'mcp' | 'settings' | 'logs'
 export type TabType = 'terminal' | 'info'
-export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
+export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | 'new-mcp' | null
 
 // A named collection of sandboxes. Groups carry only a name (no folder, colour,
 // or icon); a sandbox belongs to at most one group.
@@ -243,6 +243,16 @@ export interface ApiErrorTrace {
   probe?: { daemon: 'ok' | 'failed'; detail?: string; ms: number }
 }
 
+// A server registered with the sbx MCP gateway. Which fields a given sbx build
+// reports isn't pinned, so all but `name` may be empty.
+export interface McpServerEntry {
+  name: string
+  url: string
+  command: string
+  transport: string
+  auth: string
+}
+
 // A launch `sbx run` refused. `kind` picks the remedy the UI offers:
 // `workspace-missing` means the host folder behind the workspace mount is gone
 // (`path` holds it) and the sandbox can't start until it's restored or removed.
@@ -421,7 +431,10 @@ declare global {
       templatePush(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       createKit(name: string, spec: string, files?: KitFile[]): Promise<{ dir: string; zip: string; output: string }>
       pickFiles(): Promise<string[]>
-      listKits(): Promise<{ name: string; kind: string; dir: string; hasZip: boolean }[]>
+      // `name` is the folder in den's library; `specName` is what the kit calls
+      // itself in spec.yaml. They differ for an imported kit, and sbx only
+      // accepts the latter as an agent kit's name.
+      listKits(): Promise<{ name: string; specName: string; kind: string; dir: string; hasZip: boolean }[]>
       kitAdd(sandbox: string, dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
       appliedKits(sandbox: string): Promise<string[]>
       readKit(dir: string): Promise<string>
@@ -514,8 +527,18 @@ declare global {
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
       onApiError(cb: (trace: ApiErrorTrace) => void): () => void
+      // known=false while the probe is still running or the daemon is down.
+      mainBuildId(): Promise<string>
+      sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
+      mcpList(): Promise<{ ok: boolean; servers: McpServerEntry[]; error?: string }>
+      mcpAdd(cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean; scopes?: string; clientId?: string; skipAuth?: boolean }): Promise<{ ok: boolean; output?: string; error?: string }>
+      mcpRemove(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      mcpLoad(name: string, sandbox: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      mcpInspect(name: string): Promise<{ ok: boolean; raw?: string; error?: string }>
+      mcpAuth(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      onMcpAuthOutput(cb: (chunk: string) => void): () => void
       apiTraces(): Promise<{ path: string; count: number }>
-      revealApiTraces(): Promise<{ ok: boolean; empty: boolean }>
+      revealApiTraces(): Promise<{ ok: boolean; empty: boolean; error?: string }>
       onSandboxError(cb: (err: SandboxError) => void): () => void
       onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
       onAgentAttention(cb: (name: string) => void): () => void

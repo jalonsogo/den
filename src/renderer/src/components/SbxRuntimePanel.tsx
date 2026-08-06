@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
-import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check, ChevronDown, ChevronRight } from 'lucide-react'
+import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { AccordionSection } from './AccordionSection'
 import { bridgeError } from '../lib/utils'
@@ -205,7 +205,6 @@ export function SbxRuntimePanel({
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<null | 'update' | 'redownload'>(null)
   const [output, setOutput] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
   const [verify, setVerify] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
   const [install, setInstall] = useState<import('../types').SbxInstallInfo | null>(null)
   const [account, setAccount] = useState<{ loggedIn: boolean; username?: string } | null>(null)
@@ -227,7 +226,7 @@ export function SbxRuntimePanel({
   // hidden until a diagnostics run has completed at least once — they only make
   // sense once you've actually run the probe.
   const [diagRan, setDiagRan] = useState(false)
-  // Daemon restart (`sbx daemon stop` + `sbx daemon start -d`) — its own output
+  // Daemon restart (`sbx daemon restart`) — its own output
   // box, rendered under the Restart daemon button.
   const [daemonBusy, setDaemonBusy] = useState(false)
   const [daemonOut, setDaemonOut] = useState('')
@@ -238,6 +237,7 @@ export function SbxRuntimePanel({
   // whether or not anyone is looking — the failure is intermittent, so the count
   // here is usually the first sign one happened.
   const [traces, setTraces] = useState<{ path: string; count: number } | null>(null)
+  const [traceErr, setTraceErr] = useState<string | null>(null)
   useEffect(() => {
     const load = () => { void window.minipit?.apiTraces?.().then(setTraces).catch(() => {}) }
     load()
@@ -247,6 +247,8 @@ export function SbxRuntimePanel({
 
   // Daemon health + log level (`sbx daemon status` / `log-level`).
   const [daemonStatus, setDaemonStatus] = useState<{ running: boolean; raw?: string } | null>(null)
+  const [daemonChecking, setDaemonChecking] = useState(false)
+  const [daemonCheckedAt, setDaemonCheckedAt] = useState<number | null>(null)
   const [logLevel, setLogLevel] = useState<string>('')
   const [logLevelBusy, setLogLevelBusy] = useState(false)
 
@@ -268,7 +270,6 @@ export function SbxRuntimePanel({
   const [resetBusy, setResetBusy] = useState(false)
   const [resetMsg, setResetMsg] = useState<{ ok: boolean; text: string } | null>(null)
   // The changelog sits (collapsed) under the update button as an accordion.
-  const [changelogOpen, setChangelogOpen] = useState(false)
   // The destructive "Reset everything" button only turns red once the user has
   // typed the confirmation word; until then it's a neutral, disabled button.
   const canReset = resetConfirm.trim().toLowerCase() === 'reset'
@@ -344,10 +345,16 @@ export function SbxRuntimePanel({
     setTimeout(() => setVerify('idle'), 2500)
   }
 
-  const loadDaemonStatus = () =>
-    window.minipit?.daemonStatus()
+  // `sbx daemon status` spawns a process, and a re-check that returns the same
+  // answer leaves the row byte-identical — so without an explicit in-flight state
+  // and a checked-at stamp, a working button is indistinguishable from a dead one.
+  const loadDaemonStatus = () => {
+    setDaemonChecking(true)
+    return window.minipit?.daemonStatus()
       .then((s) => setDaemonStatus(s?.ok ? { running: s.running, raw: s.raw } : { running: false, raw: s?.error }))
       .catch(() => setDaemonStatus(null))
+      .finally(() => { setDaemonChecking(false); setDaemonCheckedAt(Date.now()) })
+  }
 
   useEffect(() => {
     loadVersion()
@@ -608,7 +615,18 @@ export function SbxRuntimePanel({
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Latest release</div>
-            <div className="ss-sub">{loading ? 'Checking GitHub…' : latest ? `${latest} · ${fmtDate(releases[0]?.date)}` : 'Unavailable'}</div>
+            <div className="ss-sub">
+              {loading ? 'Checking GitHub…' : latest ? (
+                <>
+                  {/* The version name is the link to its notes — one affordance,
+                      instead of a collapsible changelog that cost a whole row of
+                      vertical space while nobody opened it. */}
+                  <a className="rt-relink" onClick={() => releases[0] && window.minipit?.openPath(releases[0].url)}>{latest}</a>
+                  {' · '}{fmtDate(releases[0]?.date)}
+                  {updateAvailable && <> · <a className="rt-relink" onClick={() => releases[0] && window.minipit?.openPath(releases[0].url)}>What’s new</a></>}
+                </>
+              ) : 'Unavailable'}
+            </div>
           </div>
           {install && !install.canAutoUpdate ? (
             <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(install.releasesUrl)}>
@@ -646,42 +664,56 @@ export function SbxRuntimePanel({
           </div>
         )}
 
-        {/* Changelog — collapsed by default, tucked under the update controls. */}
-        <div className="ss-acc">
-          <div className="ss-acc-hd" onClick={() => setChangelogOpen((o) => !o)}>
-            {changelogOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <span className="ss-acc-title">Latest changes</span>
-            {latest && <span className="ss-acc-note">{latest}</span>}
+        {/* Daemon lifecycle belongs with the runtime it runs, not under
+            Diagnostics — restarting it is routine, not an investigation. */}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">
+              Daemon status
+              {daemonStatus && (
+                <span
+                  className={`rt-badge ${daemonStatus.running ? 'rt-badge-ok' : 'rt-badge-update'}`}
+                  style={{ marginLeft: 8 }}
+                  title={daemonStatus.raw || ''}
+                >
+                  {daemonStatus.running ? 'Running' : 'Stopped'}
+                </span>
+              )}
+              {daemonCheckedAt && !daemonChecking && (
+                <span className="rt-checked">checked {new Date(daemonCheckedAt).toLocaleTimeString()}</span>
+              )}
+            </div>
+            <div className="ss-sub">
+              Restart the sbx daemon (<code>sbx daemon restart</code>) — try this if you hit connection errors
+              (<code>ECONNREFUSED</code>/<code>ECONNRESET</code>).
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 7 }}>
             <button
               className="btn btn-ghost btn-sm"
-              style={{ marginLeft: 'auto' }}
-              onClick={(e) => { e.stopPropagation(); releases[0] && window.minipit?.openPath(releases[0].url) }}
+              onClick={loadDaemonStatus}
+              disabled={daemonBusy || daemonChecking}
+              title="Re-run `sbx daemon status`"
             >
-              View on GitHub
+              <RotateCw size={13} className={daemonChecking ? 'spin' : undefined} />
+              {daemonChecking ? 'Checking…' : 'Check status'}
+            </button>
+            <button
+              className="btn btn-default btn-sm"
+              onClick={restartDaemon}
+              disabled={diagBusy !== null || daemonBusy}
+            >
+              <RotateCw size={13} /> {daemonBusy ? 'Restarting…' : 'Restart daemon'}
             </button>
           </div>
-          {changelogOpen && (
-            loading ? (
-              <div className="ss-row"><div className="ss-sub">Loading release notes…</div></div>
-            ) : releases.length === 0 ? (
-              <div className="ss-row"><div className="ss-sub">Could not fetch release notes (offline?).</div></div>
-            ) : (
-              releases.map((r) => (
-                <div className="rt-rel" key={r.version}>
-                  <div className="rt-rel-hdr" onClick={() => setExpanded((e) => (e === r.version ? null : r.version))}>
-                    <span className="rt-rel-ver">{r.version}</span>
-                    {r.prerelease && <span className="rt-badge rt-badge-pre">pre-release</span>}
-                    <span className="rt-rel-date">{fmtDate(r.date)}</span>
-                    <span className="rt-rel-chevron">{expanded === r.version ? '▾' : '▸'}</span>
-                  </div>
-                  {expanded === r.version && (
-                    <pre className="rt-rel-body">{r.body?.trim() || 'No release notes.'}</pre>
-                  )}
-                </div>
-              ))
-            )
-          )}
         </div>
+        {daemonOut && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className="rt-output" ref={daemonRef}>
+              <pre className="logs-pre">{terminalNodes(daemonOut)}</pre>
+            </div>
+          </div>
+        )}
       </AccordionSection>
 
       <AccordionSection id="runtime-settings" title="Runtime settings" defaultOpen>
@@ -872,46 +904,6 @@ export function SbxRuntimePanel({
         <div className="ss-row">
           <div>
             <div className="ss-lbl">
-              Daemon status
-              {daemonStatus && (
-                <span
-                  className={`rt-badge ${daemonStatus.running ? 'rt-badge-ok' : 'rt-badge-update'}`}
-                  style={{ marginLeft: 8 }}
-                  title={daemonStatus.raw || ''}
-                >
-                  {daemonStatus.running ? 'Running' : 'Stopped'}
-                </span>
-              )}
-            </div>
-            <div className="ss-sub">
-              Stop and restart the sbx daemon (<code>sbx daemon stop</code> then{' '}
-              <code>sbx daemon start -d</code>) — try this if you hit connection errors
-              (<code>ECONNREFUSED</code>/<code>ECONNRESET</code>).
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 7 }}>
-            <button className="btn btn-ghost btn-sm" onClick={loadDaemonStatus} disabled={daemonBusy} title="Check status">
-              <RotateCw size={13} /> Check status
-            </button>
-            <button
-              className="btn btn-default btn-sm"
-              onClick={restartDaemon}
-              disabled={diagBusy !== null || daemonBusy}
-            >
-              <RotateCw size={13} /> {daemonBusy ? 'Restarting…' : 'Restart daemon'}
-            </button>
-          </div>
-        </div>
-        {daemonOut && (
-          <div className="ss-row" style={{ paddingTop: 0 }}>
-            <div className="rt-output" ref={daemonRef}>
-              <pre className="logs-pre">{terminalNodes(daemonOut)}</pre>
-            </div>
-          </div>
-        )}
-        <div className="ss-row">
-          <div>
-            <div className="ss-lbl">
               API failure traces
               {!!traces?.count && <span className="rt-badge rt-badge-update" style={{ marginLeft: 8 }}>{traces.count}</span>}
             </div>
@@ -923,13 +915,18 @@ export function SbxRuntimePanel({
               long the request had been running and whether this Mac had just woken or changed network.
               That’s what tells a connection-lifetime cap apart from a whole-path reset.
             </div>
+            {traceErr && <div className="ss-sub" style={{ color: 'var(--destruct)' }}>{traceErr}</div>}
           </div>
           <button
             className="btn btn-default btn-sm"
-            onClick={() => window.minipit?.revealApiTraces?.()}
+            onClick={async () => {
+              const r = await window.minipit?.revealApiTraces?.().catch(() => null)
+              // Don't fail silently: if the folder can't be opened, say why.
+              setTraceErr(r && !r.ok ? (r.error || 'Could not open the traces folder.') : null)
+            }}
             title={traces?.path}
           >
-            <Bug size={13} /> Reveal
+            <Bug size={13} /> {traces?.count ? 'Reveal' : 'Show folder'}
           </button>
         </div>
         <div className="ss-row">

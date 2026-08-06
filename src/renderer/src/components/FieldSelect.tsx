@@ -59,15 +59,23 @@ export function FieldSelect({
       setOpen(false)
     }
     // Close on scroll/resize rather than trying to keep the fixed menu glued to
-    // a moving trigger (matches native <select> behavior).
+    // a moving trigger (matches native <select> behavior). The scroll listener
+    // has to capture to see scrolls in any container behind the menu, which
+    // also catches the menu's own overflow — so exclude it, or a long list
+    // dismisses itself on the first wheel tick instead of scrolling.
     const close = () => setOpen(false)
+    const onScroll = (e: Event) => {
+      const t = e.target as Node | null
+      if (t && menuRef.current?.contains(t)) return
+      setOpen(false)
+    }
     document.addEventListener('mousedown', onDown)
     window.addEventListener('resize', close)
-    window.addEventListener('scroll', close, true)
+    window.addEventListener('scroll', onScroll, true)
     return () => {
       document.removeEventListener('mousedown', onDown)
       window.removeEventListener('resize', close)
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
     }
   }, [open])
 

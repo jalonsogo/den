@@ -22,7 +22,8 @@ export interface FileRow { src?: string; target: 'home' | 'workspace'; dest: str
 
 export interface EnvRow { key: string; value: string }
 
-// The four-block credential pattern as one editable record — see buildSpec.
+// One credential per service. v2 models this natively (credentials[].apiKey);
+// v1 spread the same thing across four blocks — see parseKitSpec.
 export interface CredRow {
   service: string
   domains: string[]
@@ -38,7 +39,7 @@ export interface KitForm {
   description: string
   image: string
   entrypoint: string
-  aiFilename: string        // sandbox.aiFilename — the profile file the kit owns
+  aiFilename: string        // agentInstructions.filename — the profile file the kit owns
   mcps: string[]            // catalog ids (Remote MCP primitive)
   customMcps: { name: string; url: string }[]
   installCmds: CmdRow[]
@@ -49,8 +50,8 @@ export interface KitForm {
   creds: CredRow[]
   agentContext: string
   files: FileRow[]
-  // commands.initFiles — files written at startup with runtime values. Authored
-  // in the spec, not in the editor; carried so saving doesn't drop them.
+  // setup.files — files written at startup with runtime values. Authored in
+  // the spec, not in the editor; carried so saving doesn't drop them.
   initFiles: KitInitFile[]
 }
 
@@ -98,7 +99,9 @@ export function kitDomains(f: KitForm): { allowed: string[]; derived: Set<string
 export function buildSpec(f: KitForm): string {
   // YAML double-quoted scalars: backslash first, then the quote itself.
   const q = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-  const lines: string[] = ['schemaVersion: "1"', `kind: ${f.kind}`, `name: ${f.name || 'my-kit'}`]
+  // Kit spec v2 (sbx v0.38+). v1 kits still load through sbx's legacy path, so
+  // nothing on disk breaks, but everything den authors from here is v2.
+  const lines: string[] = ['schemaVersion: "2"', `kind: ${f.kind}`, `name: ${f.name || 'my-kit'}`]
   if (f.displayName.trim()) lines.push(`displayName: ${f.displayName.trim()}`)
   if (f.description.trim()) lines.push(`description: ${f.description.trim()}`)
 
@@ -106,10 +109,9 @@ export function buildSpec(f: KitForm): string {
     const run = (f.entrypoint.trim() || 'bash').split(/\s+/).filter(Boolean).map(q).join(', ')
     lines.push('sandbox:')
     lines.push(`  image: ${q(f.image.trim() || 'docker/sandbox-templates:claude-code-docker')}`)
-    // The profile file the kit's agentContext is rendered into (CLAUDE.md,
-    // AGENTS.md…). Only sandbox kits own one; mixins append to the agent's.
-    if (f.aiFilename.trim()) lines.push(`  aiFilename: ${f.aiFilename.trim()}`)
-    lines.push('  entrypoint:', `    run: [${run}]`)
+    // v2 flattened entrypoint: a bare list, no `run:` wrapper. aiFilename moved
+    // out to agentInstructions.filename, emitted with the instructions below.
+    lines.push(`  entrypoint: [${run}]`)
   }
 
   const creds = f.creds
@@ -122,54 +124,44 @@ export function buildSpec(f: KitForm): string {
     .filter((c) => c.service)
   const { allowed } = kitDomains(f)
   const denied = f.deniedDomains.map((s) => s.trim()).filter(Boolean)
-  const serviceDomains = creds.flatMap((c) => c.domains.map((d) => [d, c.service] as const))
-  const withAuth = creds.filter((c) => c.headerName.trim())
 
-  if (allowed.length || denied.length || serviceDomains.length || withAuth.length) {
-    lines.push('network:')
-    if (serviceDomains.length) {
-      // Host → service. Only the hosts that need injection: an over-broad map
-      // rewrites headers on unrelated downloads and breaks them.
-      lines.push('  serviceDomains:')
-      serviceDomains.forEach(([host, svc]) => lines.push(`    ${q(host)}: ${svc}`))
-    }
-    if (withAuth.length) {
-      lines.push('  serviceAuth:')
-      withAuth.forEach((c) => {
-        lines.push(`    ${c.service}:`)
-        lines.push(`      headerName: ${c.headerName.trim()}`)
-        lines.push(`      valueFormat: ${q(c.valueFormat.trim() || '%s')}`)
-      })
-    }
-    if (allowed.length) { lines.push('  allowedDomains:'); allowed.forEach((d) => lines.push(`    - ${q(d)}`)) }
-    if (denied.length) { lines.push('  deniedDomains:'); denied.forEach((d) => lines.push(`    - ${q(d)}`)) }
+  // v2: network rules live under `permissions`.
+  if (allowed.length || denied.length) {
+    lines.push('permissions:', '  network:')
+    if (allowed.length) { lines.push('    allow:'); allowed.forEach((d) => lines.push(`      - ${q(d)}`)) }
+    if (denied.length) { lines.push('    deny:'); denied.forEach((d) => lines.push(`      - ${q(d)}`)) }
   }
 
-  // Where the real secret comes from on the host.
-  const credEnvs = creds.filter((c) => c.envVars.length)
+  // v2 collapses v1's four blocks — network.serviceDomains + network.serviceAuth
+  // + credentials.sources + environment.proxyManaged — into one record per
+  // service. Only the hosts that need injection are listed: an over-broad map
+  // rewrites headers on unrelated downloads and breaks them.
+  const credEnvs = creds.filter((c) => c.envVars.length || c.domains.length)
   if (credEnvs.length) {
-    lines.push('credentials:', '  sources:')
+    lines.push('credentials:')
     credEnvs.forEach((c) => {
-      lines.push(`    ${c.service}:`, '      env:')
-      c.envVars.forEach((e) => lines.push(`        - ${e}`))
+      lines.push(`  - service: ${c.service}`)
+      lines.push('    apiKey:')
+      if (c.envVars[0]) lines.push(`      name: ${c.envVars[0]}`)
+      // The container sees a sentinel; the proxy swaps in the real value.
+      lines.push('      proxyManaged: true')
+      if (c.domains.length) {
+        lines.push('      inject:')
+        c.domains.forEach((d) => {
+          lines.push(`        - domain: ${q(d)}`)
+          if (c.headerName.trim()) lines.push(`          header: ${c.headerName.trim()}`)
+          lines.push(`          format: ${q(c.valueFormat.trim() || '%s')}`)
+        })
+      }
     })
   }
 
   const envs = f.envVars
     .map((e) => ({ key: e.key.trim(), value: e.value }))
     .filter((e) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(e.key))
-  // The container sees a sentinel for these; the proxy swaps in the real value.
-  const proxyManaged = [...new Set(credEnvs.flatMap((c) => c.envVars))]
-  if (envs.length || proxyManaged.length) {
-    lines.push('environment:')
-    if (envs.length) {
-      lines.push('  variables:')
-      envs.forEach((e) => lines.push(`    ${e.key}: ${q(e.value.trim())}`))
-    }
-    if (proxyManaged.length) {
-      lines.push('  proxyManaged:')
-      proxyManaged.forEach((e) => lines.push(`    - ${e}`))
-    }
+  if (envs.length) {
+    lines.push('environment:', '  variables:')
+    envs.forEach((e) => lines.push(`    ${e.key}: ${q(e.value.trim())}`))
   }
 
   const installCmds = f.installCmds.filter((c) => c.cmd.trim())
@@ -178,8 +170,9 @@ export function buildSpec(f: KitForm): string {
     ...f.startupCmds.filter((c) => c.cmd.trim()),
     ...mcpStartupCmds(f).map((cmd) => ({ cmd, asAgent: true }))
   ]
+  // v2: `commands` -> `setup`, and `initFiles` -> `files`.
   if (installCmds.length || startupCmds.length || f.initFiles.length) {
-    lines.push('commands:')
+    lines.push('setup:')
     if (installCmds.length) {
       // install takes a shell string — sbx runs it through `sh -c`.
       lines.push('  install:')
@@ -205,7 +198,7 @@ export function buildSpec(f: KitForm): string {
       })
     }
     if (f.initFiles.length) {
-      lines.push('  initFiles:')
+      lines.push('  files:')
       f.initFiles.forEach((x) => {
         lines.push(`    - path: ${x.path}`)
         lines.push(`      content: ${q(x.content)}`)
@@ -214,9 +207,15 @@ export function buildSpec(f: KitForm): string {
     }
   }
 
-  if (f.agentContext.trim()) {
-    lines.push('agentContext: |')
-    f.agentContext.trim().split('\n').forEach((l) => lines.push(`  ${l}`))
+  // v2: agentContext + sandbox.aiFilename merged into one block. `filename` is
+  // a sandbox-kit concept — a mixin's instructions get their own file per kit.
+  if (f.agentContext.trim() || (f.kind === 'sandbox' && f.aiFilename.trim())) {
+    lines.push('agentInstructions:')
+    if (f.kind === 'sandbox' && f.aiFilename.trim()) lines.push(`  filename: ${f.aiFilename.trim()}`)
+    if (f.agentContext.trim()) {
+      lines.push('  content: |')
+      f.agentContext.trim().split('\n').forEach((l) => lines.push(`    ${l}`))
+    }
   }
   return lines.join('\n') + '\n'
 }
