@@ -518,7 +518,13 @@ html, body, #root {
 .sb-icon-btn:hover { background: var(--sb-hover); color: var(--sb-fg); }
 
 /* ── Sidebar bottom group (Account + Settings) ── */
-.sb-bottom { padding: 6px 8px 8px; margin-top: auto; }
+/* Settings sits alone between the divider and the footer, so the gaps either
+   side of it should match. The divider's own 10px margin already spaces it
+   above; this block only owes the matching 10px below. (It used to add 6px on
+   top of the divider's 10 and leave 8 under, reading as 16 over / 9 under.)
+   The trailing nav-item margin only exists to separate stacked rows. */
+.sb-bottom { padding: 0 8px 10px; margin-top: auto; }
+.sb-bottom .sb-nav-item { margin-bottom: 0; }
 .sb-acct {
   display: flex; align-items: center; gap: 9px;
   padding: 6px 8px; border-radius: 8px; cursor: pointer;
