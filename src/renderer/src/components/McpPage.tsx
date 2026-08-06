@@ -49,11 +49,14 @@ const isServer = (s: McpServerEntry): boolean => !!s.name && !/\s/.test(s.name)
 function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
   const t = (s || '').toLowerCase()
   if (!t) return { label: '', tone: 'none' }
+  // "required" on its own is a capability — `sbx mcp inspect` prints
+  // `OAuth: required` for a server whether or not you've authorized it.
+  if (/^(required|optional|supported|enabled|disabled)$/.test(t)) return { label: '', tone: 'none' }
   if (/expired|invalid|fail|revoked/.test(t)) return { label: 'Reauthorize', tone: 'warn' }
   // Negatives first: "not authorized" and "unauthorized" both contain
   // "authorized", so the positive test below would otherwise claim success for
   // a server that has none.
-  if (/not authorized|unauthori[sz]ed|pending|required|needs|^(no|none|never)$/.test(t)) {
+  if (/not authorized|unauthori[sz]ed|pending|auth(orization)? required|needs|^(no|none|never)$/.test(t)) {
     return { label: 'Not authorized', tone: 'warn' }
   }
   if (/\b(ok|yes)\b|valid|authorized|active|connected/.test(t)) return { label: 'Authorized', tone: 'ok' }
@@ -61,6 +64,18 @@ function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
   // Silence is what made an authorized server look like it had never been
   // authorized, so an odd-looking badge is the better failure.
   return { label: s.length > 24 ? `${s.slice(0, 23)}…` : s, tone: 'none' }
+}
+
+// sbx v0.38 reports authorization nowhere den can read it back: `mcp ls` has no
+// column for it and `mcp inspect` only says whether the server *requires* OAuth
+// (`OAuth: required`). The one moment the truth is observable is the end of a
+// successful `sbx mcp auth`, which prints `MCP server "x" authorized` — so den
+// records that and uses it when sbx offers nothing. Anything sbx does say wins
+// over this, so a later revocation isn't masked by a stale note.
+const AUTH_RECORD_KEY = 'minipit:mcp-authorized:v1'
+type AuthRecord = Record<string, string>
+function readAuthRecord(): AuthRecord {
+  try { return JSON.parse(localStorage.getItem(AUTH_RECORD_KEY) || '{}') as AuthRecord } catch { return {} }
 }
 
 export function McpPage() {
@@ -83,6 +98,15 @@ export function McpPage() {
   // so it streams rather than being swallowed.
   const [authOut, setAuthOut] = useState('')
   const [authFor, setAuthFor] = useState<string | null>(null)
+  const [authRec, setAuthRec] = useState<AuthRecord>(readAuthRecord)
+
+  const rememberAuth = (name: string, on: boolean) => {
+    const next = { ...readAuthRecord() }
+    if (on) next[name] = new Date().toISOString()
+    else delete next[name]
+    localStorage.setItem(AUTH_RECORD_KEY, JSON.stringify(next))
+    setAuthRec(next)
+  }
 
   // Row "⋮" menu — same mechanism as the kit and template rows.
   const [moreFor, setMoreFor] = useState<string | null>(null)
@@ -142,6 +166,7 @@ export function McpPage() {
     setBusy(name); setMsg(null)
     const r = await window.minipit?.mcpRemove(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Remove server') }))
     setBusy(null)
+    if (r?.ok) rememberAuth(name, false)
     setMsg(r?.ok ? { ok: true, text: `Removed "${name}".` } : { ok: false, text: r?.error || 'Remove failed.' })
     load()
   }
@@ -150,6 +175,8 @@ export function McpPage() {
     setAuthFor(name); setAuthOut(''); setBusy(name); setMsg(null)
     const r = await window.minipit?.mcpAuth(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Authorize') }))
     setBusy(null)
+    if (r?.ok) rememberAuth(name, true)
+    setAuthFor(null)
     setMsg(r?.ok
       ? { ok: true, text: `Authorized "${name}".` }
       : { ok: false, text: r?.error || `Authorization for "${name}" did not complete.` })
@@ -256,7 +283,16 @@ export function McpPage() {
             <span />
           </div>
         {servers.map((s) => {
-          const st = authState(s.auth)
+          // What sbx says wins; den's own record of a successful authorization
+          // only fills the silence it leaves behind.
+          const reported = authState(s.auth)
+          const noted = authRec[s.name]
+          const st = reported.label ? reported
+            : noted ? { label: 'Authorized', tone: 'ok' as const }
+            : { label: '', tone: 'none' as const }
+          const stTitle = reported.label ? s.auth
+            : noted ? `Authorized from den on ${new Date(noted).toLocaleString()} — sbx doesn't report live authorization state`
+            : ''
           const local = !s.url && !!s.command
           // Only offer Finder for a command that is an actual path on this Mac.
           // `npx @playwright/mcp@latest` has no folder to open.
@@ -275,7 +311,7 @@ export function McpPage() {
                     // The raw string sits in the tooltip: when sbx words it in
                     // some way den doesn't know, the badge is still checkable.
                     ? <span className={`rt-badge ${st.tone === 'ok' ? 'rt-badge-ok' : st.tone === 'warn' ? 'rt-badge-update' : ''}`}
-                            title={s.auth}>{st.label}</span>
+                            title={stTitle}>{st.label}</span>
                     : <span className="lib-muted">—</span>}
                 </span>
                 <div className="mcp-row-actions">
@@ -376,11 +412,23 @@ export function McpPage() {
                   })()}
                 </div>
               )}
-              {authFor === s.name && authOut && (
-                <div className="rt-output" style={{ margin: '2px 0 10px' }}>
-                  <pre className="logs-pre">{authOut}</pre>
-                </div>
-              )}
+              {/* Authorization happens in a browser on the host. What matters
+                  while it runs is that den is waiting and where the page is —
+                  not the transcript of the command producing it. */}
+              {authFor === s.name && (() => {
+                const url = /(https?:\/\/\S+)/.exec(authOut.replace(/\s+/g, ' '))?.[1]
+                return (
+                  <div className="mcp-authing">
+                    <RefreshCw size={13} className="spin" />
+                    <span>Waiting for you to authorize <strong>{s.name}</strong> in your browser…</span>
+                    {url && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => window.minipit?.openPath(url)}>
+                        Open the page again
+                      </button>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )
         })}

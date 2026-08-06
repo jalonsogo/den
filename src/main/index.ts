@@ -735,21 +735,24 @@ interface McpServerEntry {
 // status` does. Ask it per server so an authorized server actually reads as
 // one; the list is short, and a server whose status can't be read keeps
 // whatever `ls` said rather than being mislabelled.
-// Pull an authorization state out of `sbx mcp inspect` output — the one place
-// it is always written down. Any key mentioning auth/token/credential counts,
-// because the field name varies by build and a wrong guess reads to the user as
-// "den thinks I never authorized this".
+// Pull an authorization state out of `sbx mcp inspect` output. Only a value
+// that actually names a state counts: v0.38 prints `OAuth: required`, which
+// says the server *needs* OAuth, not that you haven't done it — reading that as
+// a state reports an authorized server as unauthorized, which is worse than
+// reporting nothing. Capability words are therefore ignored, not guessed at.
 const AUTH_KEY_RE = /auth|token|credential/i
+const AUTH_CAPABILITY_RE = /^(required|optional|supported|unsupported|enabled|disabled)$/i
+const AUTH_STATE_RE = /authori[sz]ed|expired|revoked|valid|invalid|active|logged[ -]?(in|out)/i
 function authFromInspect(raw: string): string {
   for (const line of raw.split('\n')) {
     const m = /^\s*([^:]{1,40}):\s*(.+?)\s*$/.exec(line)
     if (!m || !AUTH_KEY_RE.test(m[1])) continue
-    // A bare "OAuth:" heading carries no state — its children do.
     const v = m[2].trim()
-    if (!v) continue
+    // A bare heading ("OAuth:") carries no state — its children don't either.
+    if (!v || AUTH_CAPABILITY_RE.test(v)) continue
     if (/^(true|yes)$/i.test(v)) return 'authorized'
     if (/^(false|no|none|never)$/i.test(v)) return 'not authorized'
-    return v
+    if (AUTH_STATE_RE.test(v)) return v
   }
   return ''
 }
@@ -758,17 +761,25 @@ function authFromInspect(raw: string): string {
 // column, `mcp auth status` may or may not exist, and `mcp inspect` always has
 // something. Try them in cost order and only give up at the end — reporting
 // nothing is indistinguishable, on screen, from "not authorized".
+// Set once this build is found not to have `mcp auth status`, so the failing
+// spawn isn't repeated for every server on every refresh.
+let mcpAuthStatusMissing = false
+
 async function probeAuth(name: string): Promise<string> {
-  try {
-    const raw = await sbx(['mcp', 'auth', 'status', name], { timeout: 10000 })
-    const last = raw.trim().split('\n').filter(Boolean).pop() ?? ''
-    if (last) return last
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    // A build that has no such subcommand says so; that's not a verdict on the
-    // server, so keep looking. Anything else is the server's actual answer.
-    if (!/unknown (command|subcommand|flag)|unknown shorthand|usage:|invalid argument|help for/i.test(msg)) {
-      return /expired|unauthor|not authorized|required/i.test(msg) ? 'not authorized' : ''
+  if (!mcpAuthStatusMissing) {
+    try {
+      const raw = await sbx(['mcp', 'auth', 'status', name], { timeout: 10000 })
+      const last = raw.trim().split('\n').filter(Boolean).pop() ?? ''
+      if (last) return last
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // A build that has no such subcommand says so; that's not a verdict on
+      // the server, so keep looking. Anything else is the server's own answer.
+      if (/unknown (command|subcommand|flag)|unknown shorthand|usage:|invalid argument|help for/i.test(msg)) {
+        mcpAuthStatusMissing = true
+      } else {
+        return /expired|unauthor|not authorized|required/i.test(msg) ? 'not authorized' : ''
+      }
     }
   }
   try {
@@ -3259,7 +3270,9 @@ function setupIPC(): void {
   ipcMain.handle('minipit:mcp-auth', async (_, name: string) => {
     const send = (chunk: string) => mainWindow?.webContents.send('minipit:mcp-auth-output', chunk)
     try {
-      send(`$ sbx mcp auth ${name}\r\n`)
+      // No command echo: the stream feeds a progress line and the authorization
+      // link, not a console. Showing "$ sbx mcp auth …" was den narrating its
+      // own plumbing at the one moment the user is waiting on a browser.
       const { code, output } = await ptyRun(['mcp', 'auth', name], send, 300000)
       return code === 0 ? { ok: true, output } : { ok: false, error: `sbx mcp auth exited ${code}` }
     } catch (err) {

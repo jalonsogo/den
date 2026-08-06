@@ -225,15 +225,48 @@ Template:
   reader accepts strings, booleans and nested `{status}`; the table reader also
   matches bare `yes|no|ok|valid|active|none|never`; and when `mcp auth status`
   fails *specifically because the subcommand is unknown*, den falls back to
-  `sbx mcp inspect <name>` and takes any key matching `/auth|token|credential/`.
-  A value den can't classify is now rendered verbatim as the badge (raw text in
-  the tooltip) rather than swallowed.
+  `sbx mcp inspect <name>`.
   `src/main/index.ts` → `probeAuth()`, `authFromInspect()`, `withAuthState()`,
   `parseMcpTable()`; `McpPage.tsx` → `authState()`.
-- **Status:** worked around — the fallback chain is version-proof, but the
-  actual wording of `mcp auth status` (and whether it exists) is still
-  unconfirmed. Capture `sbx mcp auth status <name>` and `sbx mcp ls --json`
-  against a live authorized server and pin the real shape.
+- **Status:** worked around, but see the next entry — on v0.38 every one of
+  those sources comes back empty, so the real answer is the local record.
+
+### v0.38 doesn't report per-server authorization state anywhere readable
+- **Version:** v0.38.0 (confirmed against the CLI)
+- **Symptom:** an authorized server shows no state, and the obvious fallback
+  makes it worse — reporting *not* authorized for one that is.
+- **Cause:** `sbx mcp inspect <name>` prints, in full:
+
+  ```
+  Name: vercel
+  Type: remote
+  URL: https://mcp.vercel.com
+  Transport: streamable-http
+  OAuth: required
+    Issuer: https://vercel.com
+    Registration: https://api.vercel.com/login/oauth/register
+  ```
+
+  `OAuth: required` is a **capability** — the server requires OAuth — and reads
+  identically before and after you authorize. Scraping the first `auth`-ish key
+  therefore yields `required`, which classifies as "not authorized". There is no
+  state field: not in `inspect`, not as an `mcp ls` column.
+- **Fix:** two parts.
+  1. Never infer a state from a capability word. `authFromInspect()` ignores
+     `required|optional|supported|enabled|disabled` and only accepts a value
+     that names a state (`authorized`, `expired`, `revoked`, `valid`, …).
+     `authState()` in the renderer does the same, so neither layer can guess.
+  2. Record what *is* observable. `sbx mcp auth <name>` ends with
+     `MCP server "x" authorized` and exits 0, so den notes the server and the
+     time in `localStorage` (`minipit:mcp-authorized:v1`) and shows Authorized
+     from that when sbx says nothing. Anything sbx *does* report outranks the
+     note, so a later revocation isn't masked; removing a server clears it.
+     The badge tooltip says the state came from den and when.
+- **Status:** worked around. The note only covers authorizations performed in
+  den — a server authorized from the terminal before this existed shows blank
+  until it's authorized once through the app. Revisit if a later sbx grows a
+  real status field. Still unconfirmed: whether `sbx mcp auth status` exists at
+  all, and what `sbx mcp ls --json` contains.
 
 ### `"No MCP servers registered"` parses as a server
 - **Version:** v0.38.0
