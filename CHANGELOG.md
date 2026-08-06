@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-07
+
 ### Added
 - **The kit composer covers the whole spec.** New capability blocks for **Setup** (install commands that run once at create, startup commands that run on every start, each with an "agent vs root" and a "background" flag), **Files** (static files packed with the kit, targeted at `files/home/` → `/home/agent/` or `files/workspace/` → the workspace, with an editable destination path), **Environment** (name/value pairs), **Credential** (writes the four-block proxy-injection pattern — `network.serviceDomains` + `serviceAuth`, `credentials.sources`, `environment.proxyManaged` — so the secret stays on the host and the container only sees `proxy-managed`), and **Agent instructions** (with the profile filename the kit owns, `sandbox.aiFilename`). The kit list gains a Credentials column, and its Setup column now counts startup commands too.
 - Editing a kit no longer strips the parts the form doesn't show: a command's `description`, `commands.initFiles` and `network.deniedDomains` are parsed and re-emitted, and the two spec-authored ones are listed read-only so they aren't invisible. Files already packed into a kit are listed when you re-open it, and can be deleted from there.
@@ -268,7 +270,9 @@ Initial release — the first automated, cross-platform build (macOS + Windows).
 - Theme submenu and den branding.
 - GitHub Actions release pipeline that builds and publishes macOS (`.dmg`/`.zip`) and Windows (NSIS `.exe`) installers on each `v*` tag.
 
-[Unreleased]: https://github.com/jalonsogo/den/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/jalonsogo/den/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/jalonsogo/den/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/jalonsogo/den/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/jalonsogo/den/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jalonsogo/den/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/jalonsogo/den/compare/v0.6.1...v0.6.2
