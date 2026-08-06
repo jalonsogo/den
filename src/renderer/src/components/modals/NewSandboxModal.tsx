@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react'
-import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud } from 'lucide-react'
+import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { KitCaps } from '../KitCaps'
@@ -101,7 +101,17 @@ export function NewSandboxModal() {
   // itself through the gateway's mcp-find tool.
   const [mcpServers, setMcpServers]   = useState<string[]>([])
   const [selMcps, setSelMcps]         = useState<string[]>([])
+
   const [selKits, setSelKits]         = useState<string[]>([])
+
+  // An agent kit (den calls it a sandbox kit) supplies the agent itself, and
+  // sbx refuses to pair one with a generic subcommand:
+  //   "agent kit X (kind: agent) cannot be combined with the shell subcommand;
+  //    invoke as `sbx create --kit <kit> X ...` instead"
+  // So when one is selected its NAME becomes the positional, replacing whatever
+  // the agent picker says — which otherwise defaulted to claude and failed.
+  const baseKitName = selKits.map((d) => kitKinds[d]).find((k) => k?.kind === 'sandbox')?.name ?? null
+  const effAgent = baseKitName ?? agent
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
   const kitDdRef = useRef<HTMLDivElement>(null)
@@ -179,7 +189,7 @@ export function NewSandboxModal() {
   // this stays off to avoid a loop and the random name is kept.
   useEffect(() => {
     if (nameEdited || (!pinnedWs && !wsEdited)) return
-    const n = deriveName(agent, workspace)
+    const n = deriveName(effAgent, workspace)
     if (n) setName(n)
   }, [agent, workspace, nameEdited, pinnedWs, wsEdited])
 
@@ -223,7 +233,7 @@ export function NewSandboxModal() {
   // background "creating" row, so the modal can be dismissed while it finishes.
   const handleLaunch = () => {
     if (!workspace) { setError('Workspace is required'); return }
-    const finalName = (name.trim() || deriveName(agent, workspace) || randomName())
+    const finalName = (name.trim() || deriveName(effAgent, workspace) || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
     localStorage.setItem('minipit:lastWorkspace', workspace)
     setError('')
@@ -231,7 +241,7 @@ export function NewSandboxModal() {
     setCreating(true)
     addCreatingSandbox({
       id: `creating-${finalName}`, name: finalName, status: 'creating',
-      agent, workspace, ports: [], logs: []
+      agent: effAgent as typeof agent, workspace, ports: [], logs: []
     })
     const unsub = window.minipit?.onCreateOutput((chunk) => {
       setProgress((p) => p + chunk)
@@ -242,7 +252,7 @@ export function NewSandboxModal() {
       try {
         await window.minipit?.createSandbox({
           name: finalName,
-          agent,
+          agent: effAgent,
           workspace,
           memory: memValue !== 'default' ? memValue : undefined,
           branch: clone,
@@ -286,7 +296,7 @@ export function NewSandboxModal() {
     ...(shareSkills ? [] : ['--no-share-skills']),
     ...selKits.flatMap((entry) => ['--kit', q(entry)]),
     ...selMcps.flatMap((m) => ['--static-mcp', m]),
-    agent,
+    effAgent,
     q(workspace || '<workspace>')
   ]
 
@@ -324,7 +334,18 @@ export function NewSandboxModal() {
 
           {/* Agent — big dropdown (always shown) */}
           <div className="fg">
-            <label className="flabel">Agent</label>
+          <label className="flabel">
+            Agent
+            {baseKitName && <span className="flabel-hint">from the “{baseKitName}” kit</span>}
+          </label>
+          {baseKitName ? (
+            // An agent kit IS the agent — sbx rejects pairing one with a
+            // generic subcommand, so there is nothing to choose here.
+            <div className="agent-dd-fixed">
+              <Boxes size={16} />
+              <span className="agent-dd-label">{baseKitName}</span>
+            </div>
+          ) : (
             <div className="agent-dd" ref={ddRef}>
               <button className="agent-dd-btn" onClick={() => setDdOpen((v) => !v)}>
                 <AgentIcon agent={agent} size={18} />
@@ -347,6 +368,7 @@ export function NewSandboxModal() {
                 </div>
               )}
             </div>
+          )}
           </div>
 
           {/* Workspace */}

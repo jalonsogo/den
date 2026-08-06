@@ -4264,3 +4264,10 @@ html, body, #root {
   font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; overflow-wrap: anywhere;
 }
 .mcp-info-link:hover { text-decoration: underline; }
+/* Agent field when an agent kit supplies the agent — the same shape as the
+   dropdown button, minus the affordance, since there's nothing to pick. */
+.agent-dd-fixed {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); color: var(--t2);
+}
