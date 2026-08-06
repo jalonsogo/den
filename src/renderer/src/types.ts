@@ -29,7 +29,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'shell',          label: 'Shell' }
 ]
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
-export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'settings' | 'logs'
+export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'mcp' | 'settings' | 'logs'
 export type TabType = 'terminal' | 'info'
 export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
 
@@ -241,6 +241,16 @@ export interface ApiErrorTrace {
   sinceNetChangeMs: number | null
   net: string
   probe?: { daemon: 'ok' | 'failed'; detail?: string; ms: number }
+}
+
+// A server registered with the sbx MCP gateway. Which fields a given sbx build
+// reports isn't pinned, so all but `name` may be empty.
+export interface McpServerEntry {
+  name: string
+  url: string
+  command: string
+  transport: string
+  auth: string
 }
 
 // A launch `sbx run` refused. `kind` picks the remedy the UI offers:
@@ -516,6 +526,12 @@ declare global {
       onApiError(cb: (trace: ApiErrorTrace) => void): () => void
       // known=false while the probe is still running or the daemon is down.
       sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
+      mcpList(): Promise<{ ok: boolean; servers: McpServerEntry[]; error?: string }>
+      mcpAdd(cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean }): Promise<{ ok: boolean; output?: string; error?: string }>
+      mcpRemove(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      mcpInspect(name: string): Promise<{ ok: boolean; raw?: string; error?: string }>
+      mcpAuth(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      onMcpAuthOutput(cb: (chunk: string) => void): () => void
       apiTraces(): Promise<{ path: string; count: number }>
       revealApiTraces(): Promise<{ ok: boolean; empty: boolean; error?: string }>
       onSandboxError(cb: (err: SandboxError) => void): () => void

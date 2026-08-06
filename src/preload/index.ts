@@ -180,6 +180,18 @@ const api = {
   },
   // Is the installed sbx new enough for the CLI dialect den speaks?
   sbxVersionCheck: ()  => ipcRenderer.invoke('minipit:sbx-version-check'),
+  // MCP gateway (sbx v0.38): servers registered once on the host, reused by
+  // sandboxes. OAuth stays host-side, so den only drives the CLI.
+  mcpList:    ()                    => ipcRenderer.invoke('minipit:mcp-list'),
+  mcpAdd:     (cfg: unknown)        => ipcRenderer.invoke('minipit:mcp-add', cfg),
+  mcpRemove:  (name: string)        => ipcRenderer.invoke('minipit:mcp-remove', name),
+  mcpInspect: (name: string)        => ipcRenderer.invoke('minipit:mcp-inspect', name),
+  mcpAuth:    (name: string)        => ipcRenderer.invoke('minipit:mcp-auth', name),
+  onMcpAuthOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:mcp-auth-output', handler)
+    return () => ipcRenderer.removeListener('minipit:mcp-auth-output', handler)
+  },
   apiTraces:       ()  => ipcRenderer.invoke('minipit:api-traces'),
   revealApiTraces: ()  => ipcRenderer.invoke('minipit:reveal-api-traces'),
   // A launch that `sbx run` refused (bad workspace, runtime error) — the message

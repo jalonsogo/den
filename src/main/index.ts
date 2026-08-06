@@ -716,6 +716,40 @@ function parsePolicyLs(out: string) {
 // value-style callers (a version, a JSON blob), but it silently corrupts any
 // format where leading whitespace on the first line is significant — see
 // gitStatus, where a trimmed " M path" loses a character off the filename.
+// A registered MCP server as den shows it. Fields are best-effort: which of
+// url/command/transport/auth a given sbx build reports isn't pinned.
+interface McpServerEntry {
+  name: string
+  url: string
+  command: string
+  transport: string
+  auth: string
+}
+
+// Fallback for `sbx mcp ls` without --json: a column-aligned table. Take the
+// first field as the name and classify the rest by shape rather than by column
+// position, which has moved before in other sbx tables.
+function parseMcpTable(out: string): McpServerEntry[] {
+  const rows: McpServerEntry[] = []
+  for (const line of out.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    const cols = t.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+    if (cols.length < 1) continue
+    // Skip the header row, whatever it's called.
+    if (/^(name|server)\b/i.test(cols[0])) continue
+    const rest = cols.slice(1)
+    rows.push({
+      name: cols[0],
+      url: rest.find((c) => /^https?:\/\//i.test(c)) ?? '',
+      command: rest.find((c) => !/^https?:\/\//i.test(c) && /\s|\//.test(c)) ?? '',
+      transport: rest.find((c) => /^(http|sse|stdio|local|remote)$/i.test(c)) ?? '',
+      auth: rest.find((c) => /auth|token|expired|ok|none|pending/i.test(c)) ?? ''
+    })
+  }
+  return rows
+}
+
 function sbx(args: string[], opts?: { timeout?: number; raw?: boolean }): Promise<string> {
   const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {
@@ -3017,6 +3051,106 @@ function setupIPC(): void {
       min: MIN_SBX_VERSION,
       known: !!version,
       outdated: !!version && semverLt(version, MIN_SBX_VERSION)
+    }
+  })
+
+  // ── MCP gateway (sbx v0.38) ────────────────────────────────────────────────
+  // Servers are registered once on the host and reused across sandboxes; OAuth
+  // tokens stay on the host, which is why den drives this through the CLI rather
+  // than doing anything itself.
+  //
+  // The output shape isn't pinned, so prefer `--json` and fall back to parsing
+  // the table — the same defensive approach `sbx secret ls` and `policy log`
+  // needed. An unrecognised row is skipped, never guessed at.
+  ipcMain.handle('minipit:mcp-list', async () => {
+    const fromJson = (raw: string): McpServerEntry[] | null => {
+      try {
+        const data = JSON.parse(raw) as unknown
+        const rows = (Array.isArray(data) ? data : (data as { servers?: unknown })?.servers) as
+          Array<Record<string, unknown>> | undefined
+        if (!Array.isArray(rows)) return null
+        return rows.map((r) => {
+          const pick = (...keys: string[]): string => {
+            for (const k of keys) { const v = r[k]; if (typeof v === 'string' && v.trim()) return v.trim() }
+            return ''
+          }
+          return {
+            name: pick('name', 'id', 'server'),
+            url: pick('url', 'endpoint'),
+            command: pick('command', 'cmd'),
+            transport: pick('transport', 'type'),
+            auth: pick('auth', 'authStatus', 'auth_status', 'status')
+          }
+        }).filter((m) => m.name)
+      } catch { return null }
+    }
+    try {
+      const raw = await sbx(['mcp', 'ls', '--json'], { timeout: 15000 })
+      const parsed = fromJson(raw)
+      if (parsed) return { ok: true, servers: parsed }
+      return { ok: true, servers: parseMcpTable(raw) }
+    } catch {
+      // No --json on this build (or it errored) — try the plain table.
+      try {
+        const raw = await sbx(['mcp', 'ls'], { timeout: 15000 })
+        return { ok: true, servers: parseMcpTable(raw) }
+      } catch (err) {
+        return { ok: false, servers: [], error: (err instanceof Error ? err.message : String(err)).trim() }
+      }
+    }
+  })
+
+  ipcMain.handle('minipit:mcp-add', async (_, cfg: {
+    name: string; url?: string; command?: string; args?: string; local?: boolean
+  }) => {
+    const name = (cfg.name || '').trim()
+    if (!name) return { ok: false, error: 'A server name is required.' }
+    const args = ['mcp', 'add', name]
+    if (cfg.local) args.push('--local')
+    if (cfg.url?.trim()) args.push('--url', cfg.url.trim())
+    if (cfg.command?.trim()) args.push('--command', cfg.command.trim())
+    // `--args` takes the rest of the child command line; split on whitespace so
+    // "npx @playwright/mcp@latest" reaches sbx as separate argv entries.
+    for (const a of (cfg.args ?? '').trim().split(/\s+/).filter(Boolean)) args.push('--args', a)
+    if (!cfg.url?.trim() && !cfg.command?.trim()) {
+      return { ok: false, error: 'Give either a URL (remote) or a command (local).' }
+    }
+    try {
+      const output = await sbx(args, { timeout: 60000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  ipcMain.handle('minipit:mcp-remove', async (_, name: string) => {
+    try {
+      const output = await sbx(['mcp', 'rm', name], { timeout: 30000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  ipcMain.handle('minipit:mcp-inspect', async (_, name: string) => {
+    try {
+      return { ok: true, raw: await sbx(['mcp', 'inspect', name], { timeout: 20000 }) }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Authorization opens a browser on the HOST and can prompt, so it streams
+  // through a PTY like `sbx login` rather than being captured — the user needs
+  // to see the URL and any code it prints.
+  ipcMain.handle('minipit:mcp-auth', async (_, name: string) => {
+    const send = (chunk: string) => mainWindow?.webContents.send('minipit:mcp-auth-output', chunk)
+    try {
+      send(`$ sbx mcp auth ${name}\r\n`)
+      const { code, output } = await ptyRun(['mcp', 'auth', name], send, 300000)
+      return code === 0 ? { ok: true, output } : { ok: false, error: `sbx mcp auth exited ${code}` }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 

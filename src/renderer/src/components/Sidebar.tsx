@@ -652,6 +652,7 @@ export function Sidebar() {
             {navItem('templates', 'Templates', <LayoutGrid size={16} />)}
             {navItem('mixins', 'Mixin Kits', <Layers size={16} />)}
             {navItem('kits', 'Sandbox Kits', <Package size={16} />)}
+            {navItem('mcp', 'MCP Servers', <Plug size={16} />)}
           </>
         )}
       </div>

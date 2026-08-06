@@ -4153,3 +4153,31 @@ html, body, #root {
 /* "checked 21:49:51" beside the daemon badge — so a re-check that returns the
    same verdict still visibly happened. */
 .rt-checked { margin-left: 8px; font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+
+/* ── MCP servers page (the gateway registry) ───────────────────────────────── */
+.mcp-add-form {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); padding: 12px; margin-bottom: 16px;
+}
+.mcp-row-ic { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; flex-shrink: 0; }
+/* The URL/command a server points at — secondary to its name, and long enough
+   to need truncating rather than wrapping the row. */
+.mcp-row-target {
+  flex: 1; min-width: 0; margin: 0 12px;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; color: var(--t3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mcp-search {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; background: var(--bg);
+}
+.mcp-search input { border: none; background: none; outline: none; color: var(--t1); font-size: 12px; width: 150px; }
+.mcp-search button { border: none; background: none; cursor: pointer; color: var(--t3); display: flex; }
+.mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+/* An already-registered card is disabled, so dim it and drop the hover cue —
+   it's a state, not an action. */
+.mcp-card.on { opacity: 0.55; cursor: default; border-color: var(--border); }
+.mcp-card.on:hover { background: none; border-color: var(--border); }
+.mcp-card-on { color: var(--green); flex-shrink: 0; }
+.mcp-card-busy { color: var(--t3); font-size: 12px; }
+.mcp-empty { grid-column: 1 / -1; font-size: 12px; color: var(--t3); padding: 8px 2px; }
