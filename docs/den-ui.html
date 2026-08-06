@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  den — interactive UI capture (self-contained).
+  den — interactive UI capture (self-contained). Current as of den v0.9.0.
 
   A faithful, dependency-free replica of the den app UI for embedding in other
   pages. Generated from the app's real stylesheet (src/renderer/src/styles/main.css,
@@ -12,14 +12,28 @@
     · Files dock (browsable tree, Changes tab) and Info dock (accordion sections,
       network policy) per sandbox
     · Mixin Kits & Sandbox Kits with the Browse-contrib marketplace
+    · MCP Servers — the v0.38 gateway: registered servers as a table with an
+      Auth column, per-row ⋮ menu, Info (inspect) rows, the browser-authorization
+      wait, and the welcome screen the page shows with nothing registered
     · right-click context menus (sandbox, group, file rows)
     · New Sandbox modal with a streaming creation-log flow
     · Settings: light/dark/system, full-interface color themes, density
 
+  Keeping it current: the stylesheet is a verbatim copy, so re-embed it whenever
+  main.css moves — replace everything between the "den application stylesheet"
+  marker and the first </style>, leaving the capture-specific section after it
+  alone. The mock data and renderers below are hand-maintained; when a page gains
+  a column or an action, mirror it here or the capture quietly drifts.
+
   Theming:
     · follows prefers-color-scheme automatically
     · force with  ?theme=light | ?theme=dark  in the URL
+    · ?color=<theme id> picks one of the full-interface color themes
     · or postMessage({ denTheme: 'dark' }) from the embedding page
+
+  Deep links:  ?page=mcp | kits | mixins | templates | settings | sandboxes
+               ?mcp=empty            the gateway's welcome screen
+  Focused crops (no app chrome):  ?embed=mcp | kit | network
 
   Embed:  <iframe src="den-ui.html" style="width:100%;height:720px;border:0"></iframe>
 -->
@@ -58,6 +72,10 @@
   --sb-active:   rgba(0,0,0,0.07);
   --sb-active-fg:#09090b;
   --spinner-track: rgba(0,0,0,0.15);
+  /* Width of the terminal's right-hand icon rail. A layout constant, not a
+     colour, so it lives outside the light/dark override below — the sandbox
+     header's trailing icon button uses it to sit on the rail's icon axis. */
+  --rail-w:      46px;
 }
 
 [data-theme="dark"] {
@@ -101,7 +119,11 @@ html, body, #root {
 .app-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* 100% of #root, not 100vh: at a fractional UI-density zoom Chromium can
+     resolve vh a rounded pixel taller than the viewport actually is, and that
+     pixel comes off the bottom of whatever sits last in the column (the
+     terminal). Percentages chain off html/body, which measure the real thing. */
+  height: 100%;
   overflow: hidden;
 }
 
@@ -241,6 +263,15 @@ html, body, #root {
   padding: 7px 8px; border-radius: 5px; cursor: pointer;
 }
 .tb-acct-item:hover { background: var(--bg-subtle); }
+/* Namespace list: show 5 rows (29px each: 15px text + 14px padding) plus a
+   sliver of the 6th as a scroll hint; longer org lists scroll (header +
+   sign-out stay pinned outside the scroller). */
+.tb-acct-scroll { max-height: 158px; overflow-y: auto; }
+.tb-acct-item-tag {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
+  color: var(--t3); background: var(--bg-subtle);
+  padding: 1px 5px; border-radius: 4px;
+}
 .tb-acct-divider { height: 1px; background: var(--border); margin: 5px 0; }
 /* Segmented control (e.g. Light / Dark / Computer) */
 .seg {
@@ -379,9 +410,13 @@ html, body, #root {
   50% { opacity: 0.45; transform: scale(0.78); }
 }
 .sb-item-sub.is-working { color: var(--yellow); }
-/* Dim (but don't grayscale) stopped avatars, so the project color still reads —
-   the grey status dot + muted name already signal "stopped". */
-.sb-item.is-stopped .sbx-avatar { opacity: 0.7; }
+/* Stopped: drain the square to a faded neutral and mute its glyph — but only the
+   square. The status dot and agent badge (corner overlays) stay full-strength so
+   state + agent remain legible. Applied to the square/glyph directly rather than
+   the container, so opacity never bleeds onto those overlays. */
+.sbx-avatar-stopped { background: color-mix(in srgb, var(--sb-active) 50%, transparent); }
+.sbx-avatar-stopped > .sbx-avatar-txt,
+.sbx-avatar-stopped > svg { color: var(--t3); opacity: 0.5; }
 
 .sb-item.is-stopped .sb-item-name { color: var(--sb-muted); }
 .sb-item.is-deleting { pointer-events: none; opacity: 0.7; }
@@ -529,7 +564,13 @@ html, body, #root {
 .sb-icon-btn:hover { background: var(--sb-hover); color: var(--sb-fg); }
 
 /* ── Sidebar bottom group (Account + Settings) ── */
-.sb-bottom { padding: 6px 8px 8px; margin-top: auto; }
+/* Settings sits alone between the divider and the footer, so the gaps either
+   side of it should match. The divider's own 10px margin already spaces it
+   above; this block only owes the matching 10px below. (It used to add 6px on
+   top of the divider's 10 and leave 8 under, reading as 16 over / 9 under.)
+   The trailing nav-item margin only exists to separate stacked rows. */
+.sb-bottom { padding: 0 8px 10px; margin-top: auto; }
+.sb-bottom .sb-nav-item { margin-bottom: 0; }
 .sb-acct {
   display: flex; align-items: center; gap: 9px;
   padding: 6px 8px; border-radius: 8px; cursor: pointer;
@@ -601,6 +642,19 @@ html, body, #root {
   word-break: break-all;
 }
 .sb-tip-arrow { fill: var(--t1); }
+
+/* Rail hover preview: title + one-line description (the rail hides labels). */
+.term-tip {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--t1);
+  padding: 6px 10px;
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
+  user-select: none; z-index: 300;
+  max-width: 240px;
+}
+.term-tip-title { color: var(--bg); font-size: 12px; font-weight: 600; }
+.term-tip-sub { color: color-mix(in srgb, var(--bg) 62%, var(--t1)); font-size: 11px; }
 
 /* Collapsed project hover popover */
 .sb-proj-pop {
@@ -993,6 +1047,22 @@ html, body, #root {
   padding: 0 16px;
   gap: 9px;
 }
+
+/* The header's trailing "More actions" button sits directly above the terminal's
+   icon rail, so it's centred on that rail's icon axis instead of on the header's
+   own 16px inset — otherwise the kebab reads as 10px out of line with every icon
+   below it. Same 34px box and radius as .term-rail-btn; its centre would sit
+   16px (inset) + 17px (half-width) = 33px from the right edge, and the rail's
+   icon axis is half a rail in, so pull it right by the difference. Holds in the
+   default layout; with a side dock open the rail moves inward and this stays by
+   the window edge, which is where a header action belongs. */
+.btn.d-menu-btn {
+  width: 34px; height: 34px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  margin-right: calc(var(--rail-w) / 2 - 33px);
+}
+
 /* Segmented action button (e.g. Stop | Restart) — two joined segments. */
 /* Clone-mode "Changes" button + dropdown in the sandbox header. */
 .d-feature-btn {
@@ -1037,6 +1107,33 @@ html, body, #root {
   font-size: 11.5px; color: var(--t3);
 }
 .detail-subhdr > svg { flex-shrink: 0; }
+
+/* Refused-launch banner — sits between the header and the terminal, since a
+   stopped sandbox shows a generic placeholder that can't carry the reason. */
+.detail-error {
+  flex-shrink: 0; position: relative;
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 10px 16px 0; padding: 11px 12px;
+  background: color-mix(in srgb, var(--destruct) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destruct) 28%, var(--border));
+  border-radius: 8px;
+}
+.de-ic { color: var(--destruct); flex-shrink: 0; margin-top: 1px; }
+.de-main { flex: 1; min-width: 0; padding-right: 16px; }
+.de-title { font-size: 12.5px; font-weight: 600; color: var(--destruct); }
+.de-msg { font-size: 11.5px; color: var(--t2); line-height: 1.45; margin-top: 3px; }
+.de-path {
+  font-size: 11px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace;
+  margin-top: 5px; word-break: break-all;
+}
+.de-actions { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+.de-x {
+  position: absolute; right: 6px; top: 6px;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 5px; border: none; background: none;
+  color: var(--t3); cursor: pointer;
+}
+.de-x:hover { background: var(--bg-subtle); color: var(--t1); }
 .ds-folder { color: var(--t2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Clickable workspace folder — opens it in Finder; icon opens on hover. */
 .ds-folder-btn {
@@ -1058,6 +1155,14 @@ html, body, #root {
   font-size: 12px; color: var(--t2); background: var(--bg-subtle);
 }
 .files-local:hover { background: var(--bg-muted); }
+/* Trailing "Reveal in Finder" affordance, pinned right; brightens with the bar. */
+.files-local-action {
+  margin-left: auto; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; color: var(--t3);
+}
+.files-local-action svg { opacity: 0.8; }
+.files-local:hover .files-local-action { color: var(--t1); }
 .ds-branch { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .ds-branch > svg { opacity: 0.7; }
 .ds-changes-wrap { position: relative; flex-shrink: 0; }
@@ -1181,10 +1286,60 @@ html, body, #root {
 /* --tbg / --tfg are set inline from the active terminal theme so the chrome
    (bar, padding, segments) matches the picked theme instead of staying black. */
 .term {
-  flex: 1; display: flex; flex-direction: column;
+  flex: 1; display: flex; flex-direction: row;
   background: var(--tbg, #0a0a0a);
   --tline: color-mix(in srgb, var(--tfg, #fff) 10%, transparent);
   overflow: hidden; position: relative;
+}
+
+/* Terminal content column (holds the always-mounted Agent + Shell terminals),
+   left of the activity rail. */
+.term-main {
+  flex: 1; min-width: 0; position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* Vertical activity rail docked to the right edge: the terminal content switch
+   (Agent / Shell), then the docked panels (Info / Network / Files / Changes).
+   Icon-only, grouped by a thin separator. --rail-w is shared with the sandbox
+   header's trailing icon button, which aligns to this rail's icon axis. */
+.term-rail {
+  width: var(--rail-w); flex-shrink: 0;
+  background: var(--tbg, #111);
+  /* Divider as an inset shadow, not a border: a left border would shrink the
+     content box (border-box), so the flex-centered icons would sit off from the
+     rail's true visual centre. box-shadow keeps the full width for centering. */
+  box-shadow: inset 1px 0 0 var(--tline);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0; gap: 3px;
+}
+.term-rail-btn {
+  position: relative;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: none; cursor: pointer;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--tfg, #fff) 52%, transparent);
+  transition: color 0.12s, background 0.12s;
+}
+.term-rail-btn:hover { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 8%, transparent); }
+/* Active is signalled by full-strength icon colour only — no background box, so
+   an active dock + active terminal tab don't read as "two selected" chips. */
+.term-rail-btn.active { color: var(--tfg, #fff); }
+/* Full-opacity red so the block warning reads clearly (not faded). */
+.term-rail-btn.warn { color: var(--destruct); }
+.term-rail-btn.warn:hover { background: color-mix(in srgb, var(--destruct) 14%, transparent); }
+.term-rail-sep {
+  width: 22px; height: 1px; flex-shrink: 0;
+  background: var(--tline); margin: 5px 0;
+}
+.term-rail-badge {
+  position: absolute; top: 1px; right: 1px;
+  min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; line-height: 1;
+  border-radius: 8px;
+  color: #fff; background: var(--primary);
 }
 
 /* Drag-and-drop overlay shown while dragging a file over the agent terminal */
@@ -1204,77 +1359,41 @@ html, body, #root {
   background: color-mix(in srgb, var(--primary) 16%, var(--tbg, #111));
 }
 
-.term-bar {
-  height: 40px;
-  background: var(--tbg, #111);
-  border-bottom: 1px solid var(--tline);
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  gap: 8px;
-  flex-shrink: 0;
+/* xterm switches to the arrow cursor while a TUI has mouse tracking on. den
+   hands plain left-drags back to the emulator (see TerminalPanel), so the text
+   cursor is the honest one. */
+.term .xterm.enable-mouse-events {
+  cursor: text;
 }
 
-.term-seg {
-  display: flex;
-  gap: 1px;
-  background: color-mix(in srgb, var(--tfg, #fff) 7%, transparent);
-  border-radius: 5px;
-  padding: 2px;
+/* Terminal right-click Copy/Paste menu. Themed off the terminal fg/bg vars so
+   it reads on any term theme (light or dark). */
+.term-ctx {
+  z-index: 10;
+  min-width: 132px;
+  padding: 4px;
+  display: flex; flex-direction: column;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tfg, #fff) 8%, var(--tbg, #111));
+  border: 1px solid color-mix(in srgb, var(--tfg, #fff) 14%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
-.term-seg-item {
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--tfg, #fff) 42%, transparent);
-  cursor: pointer;
-  transition: all 0.12s;
-  user-select: none;
-}
-.term-seg-item.active {
-  background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
-  color: var(--tfg, #fff);
-}
-
-.term-actions { margin-left: auto; display: flex; align-items: center; gap: 5px; }
-
-.term-right { margin-left: auto; display: flex; align-items: center; gap: 3px; }
-.term-files {
-  display: flex; align-items: center; gap: 5px;
-  padding: 4px 9px; border-radius: 5px;
-  font-size: 11.5px; font-weight: 500;
-  color: color-mix(in srgb, var(--tfg, #fff) 55%, transparent);
-  background: none; border: none; cursor: pointer;
-}
-.term-files:hover { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 8%, transparent); }
-.term-files.active { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent); }
-/* Full-opacity red so the warning reads clearly (not faded like the others). */
-.term-warn { color: var(--destruct); padding: 4px 6px; }
-.term-warn:hover { color: var(--destruct); background: color-mix(in srgb, var(--destruct) 14%, transparent); }
-
-.term-theme-select {
+.term-ctx-item {
   appearance: none;
-  -webkit-appearance: none;
-  background-color: color-mix(in srgb, var(--tfg, #fff) 7%, transparent);
-  color: color-mix(in srgb, var(--tfg, #fff) 72%, transparent);
-  border: 1px solid color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
+  text-align: left;
+  background: transparent;
+  border: 0;
   border-radius: 5px;
-  font-size: 11.5px;
+  padding: 6px 10px;
+  font-size: 12.5px;
   font-weight: 500;
-  padding: 3px 22px 3px 9px;
+  color: color-mix(in srgb, var(--tfg, #fff) 85%, transparent);
   cursor: pointer;
-  outline: none;
-  /* neutral-gray chevron reads on both light and dark themes */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='gray' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 7px center;
 }
-.term-theme-select:hover {
-  color: var(--tfg, #fff);
-  border-color: color-mix(in srgb, var(--tfg, #fff) 22%, transparent);
+.term-ctx-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
 }
-.term-theme-select option { background: var(--tbg, #1a1a1a); color: var(--tfg, #e0e0e0); }
+.term-ctx-item:disabled { opacity: 0.4; cursor: default; }
 
 .t-btn {
   padding: 4px 10px;
@@ -1329,13 +1448,6 @@ html, body, #root {
   padding: 0 10px 0 14px; border-bottom: 1px solid var(--border);
 }
 .info-dock-title { font-size: 12.5px; font-weight: 600; color: var(--t1); }
-.info-dock-x {
-  margin-left: auto; display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; border-radius: 6px;
-  background: none; border: none; color: var(--t3); cursor: pointer;
-}
-.info-dock-x:hover { background: var(--bg-subtle); color: var(--t1); }
-
 .info-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; }
 
 /* Compact label/value rows (replaces the bulky stat cards) */
@@ -1450,7 +1562,7 @@ html, body, #root {
 .np-add-input:focus { border-color: var(--border-hi); }
 /* Default-preset control — sits above the rules, shown as a segmented picker.
    A bottom border separates it from the rule cards below. */
-.np-preset { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.np-preset { margin-bottom: 16px; }
 .np-preset-lbl {
   display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.4px; color: var(--t3); margin-bottom: 7px;
@@ -1517,6 +1629,44 @@ html, body, #root {
 }
 .np-banner-txt { flex: 1; }
 .np-banner .btn { flex-shrink: 0; }
+/* Governance support message under a denial — the org's own text, so it gets its
+   own line and a quieter weight than the decision it explains. Wraps: it can be
+   a sentence with a contact or ticket link in it. */
+.np-banner-support {
+  display: block;
+  margin-top: 5px;
+  color: var(--t2);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Shared agent skills (Settings ▸ Skills) — skill names as compact chips, so a
+   couple of dozen fit without becoming a scrolling list. */
+.skl-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 6px;
+}
+.skl-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--t1);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+}
+/* An import that replaces something already in the store. */
+.skl-chip.warn {
+  color: var(--t1);
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  border-color: color-mix(in srgb, var(--yellow) 32%, var(--border));
+}
+.skl-skips { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.skl-skip {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--t2);
+}
+.skl-skip code { color: var(--t1); }
+
 .np-banner.ok   { color: var(--t1); background: var(--green-dim); border-color: color-mix(in srgb, var(--green) 30%, var(--border)); }
 .np-banner.err  { color: var(--t1); background: color-mix(in srgb, var(--destruct) 10%, transparent); border-color: color-mix(in srgb, var(--destruct) 30%, var(--border)); }
 .np-banner.warn { color: var(--t2); background: color-mix(in srgb, var(--yellow) 12%, transparent); border-color: color-mix(in srgb, var(--yellow) 32%, var(--border)); }
@@ -1538,10 +1688,8 @@ html, body, #root {
 }
 .ports-list { display: flex; flex-direction: column; }
 .port-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 0; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
 }
-.port-row:last-of-type { border-bottom: none; }
 .p-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--t4); flex-shrink: 0; }
 .p-dot.on { background: var(--green); }
 .port-map { font-size: 12.5px; color: var(--t1); font-family: 'SF Mono','Menlo',monospace; }
@@ -1708,21 +1856,25 @@ html, body, #root {
   background: color-mix(in srgb, var(--primary) 16%, var(--bg));
 }
 .files-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 32px 16px; }
+/* Workspace read-failure card — shows the path + the real sbx error + a retry. */
+.files-error {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 7px;
+  margin: 16px; padding: 12px 14px;
+  background: color-mix(in srgb, var(--destruct) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destruct) 28%, var(--border));
+  border-radius: 8px;
+}
+.files-error-hd { font-size: 12.5px; font-weight: 600; color: var(--destruct); }
+.files-error-path {
+  font-size: 11px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace;
+  word-break: break-all; max-width: 100%;
+}
+.files-error-msg {
+  font-size: 11.5px; color: var(--t2); line-height: 1.4;
+  word-break: break-word; max-width: 100%;
+}
 
 /* Files | Changes tab bar */
-.files-tabs { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.files-tab {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 500; font-family: inherit;
-  padding: 4px 10px; border: none; border-radius: 6px; background: none; color: var(--t3); cursor: pointer;
-}
-.files-tab:hover { color: var(--t1); background: var(--bg-subtle); }
-.files-tab.on { color: var(--t1); background: var(--bg-subtle); }
-.files-tab-badge {
-  font-size: 10px; font-weight: 600; color: var(--t2);
-  background: var(--bg-muted); border-radius: 100px; padding: 0 6px; min-width: 16px; text-align: center;
-}
-
 /* Changes list (Files-panel tab + subheader dropdown) */
 .files-changes { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .changes-list { display: flex; flex-direction: column; }
@@ -1743,7 +1895,12 @@ html, body, #root {
 .changes-check:hover { border-color: var(--t2); }
 .changes-check.on { background: var(--primary); border-color: var(--primary); }
 .changes-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 55%; }
-.changes-dir { font-size: 11px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 1; min-width: 0; }
+.changes-dir { font-size: 11px; color: var(--t3); white-space: nowrap; display: flex; flex: 1; min-width: 0; }
+/* Leading segments give way first (high flex-shrink), so the deepest directory
+   stays readable; both halves render left-to-right, unlike a `direction: rtl`
+   truncation, which garbles dotfile and nested paths. */
+.changes-dir-head { flex-shrink: 999; overflow: hidden; text-overflow: ellipsis; }
+.changes-dir-tail { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
 .changes-tag { font-size: 10px; font-weight: 700; font-family: 'SF Mono','Menlo',monospace; flex-shrink: 0; margin-left: auto; }
 .changes-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 28px 16px; }
 .changes-stat { font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; flex-shrink: 0; white-space: nowrap; }
@@ -1759,17 +1916,25 @@ html, body, #root {
   border-bottom: 1px solid var(--border); background: var(--bg);
   display: flex; flex-direction: column;
 }
-/* Single toolbar row — same height as the Files-tab bar (.files-bar). */
-.ca-bar {
-  height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 8px;
-  padding: 0 10px; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px;
+/* Two-row header: a summary line (branch · stat · refresh) above an action row,
+   so nothing is crammed onto a single line in the narrow dock. */
+.ca-summary {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px 0; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px;
+}
+.ca-stat { display: inline-flex; align-items: center; gap: 6px; }
+.ca-actions {
+  flex-shrink: 0; display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px 10px;
 }
 .ca-bar-spacer { flex: 1; }
 .ca-branch {
+  display: inline-flex; align-items: center; gap: 4px;
   font-family: 'SF Mono','Menlo',monospace; font-size: 10.5px; color: var(--t2);
   background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px;
-  padding: 1px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;
+  padding: 2px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;
 }
+.ca-branch svg { flex-shrink: 0; opacity: 0.7; }
 .ca-delete { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--t2); cursor: pointer; white-space: nowrap; }
 .ca-prform { display: flex; flex-direction: column; gap: 5px; padding: 4px 10px 10px; }
 .ca-prform .flabel { margin-bottom: 0; }
@@ -1824,7 +1989,7 @@ html, body, #root {
 .frow-badge-count { border-radius: 100px; min-width: 16px; padding: 0 5px; }
 
 /* File editor window (#/editor) */
-.few { display: flex; flex-direction: column; height: 100vh; background: var(--bg); }
+.few { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
 .few-bar {
   display: flex; align-items: center; gap: 10px; padding: 10px 14px;
   border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -2147,6 +2312,10 @@ html, body, #root {
 }
 .page-title { font-size: 13.5px; font-weight: 600; color: var(--t1); letter-spacing: -0.015em; }
 .page-body { flex: 1; overflow-y: auto; padding: 18px; }
+/* .home-empty centres itself with flex:1 + justify-content, which needs a flex
+   parent to mean anything — .page-body is a plain block, so an empty state
+   dropped in it sits at the top. Opt in only where the body holds one. */
+.page-body-center { display: flex; flex-direction: column; }
 
 /* ── Home ── */
 /* Welcome / empty state — hero + two CTAs + feature highlights when there are no sandboxes */
@@ -2239,11 +2408,80 @@ html, body, #root {
 .home-stat-n { font-size: 26px; font-weight: 600; color: var(--t1); line-height: 1; }
 .sbx-row-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .home-stat-l { font-size: 12px; color: var(--t3); margin-top: 6px; }
-.home-row { display: flex; align-items: center; gap: 9px; padding: 9px 2px; cursor: pointer; border-radius: 6px; }
+/* Always-visible filter bar (home list) — mirrors the sidebar filter popover
+   but laid out horizontally and inline. Wraps on narrow windows. */
+.home-filter {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 10px 0 4px;
+}
+.home-filter-search {
+  display: flex; align-items: center; gap: 6px; flex: 1 1 200px; min-width: 160px; max-width: 340px;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 7px; padding: 0 8px;
+}
+.home-filter-search-ic { color: var(--t3); flex-shrink: 0; }
+.home-filter-search input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none;
+  font: inherit; font-size: 12.5px; color: var(--t1); padding: 7px 0;
+}
+.home-filter-search input::placeholder { color: var(--t3); }
+.home-filter-search-x {
+  display: flex; align-items: center; background: none; border: none; cursor: pointer;
+  color: var(--t3); flex-shrink: 0; padding: 0;
+}
+.home-filter-search-x:hover { color: var(--t1); }
+/* Reuse the sidebar segmented-button look, but size to content (not stretched). */
+.home-filter-seg { display: flex; gap: 3px; padding: 2px; background: var(--bg-subtle); border-radius: 7px; }
+.home-filter-seg .sb-filter-seg-btn { flex: 0 0 auto; padding: 4px 10px; }
+.home-filter-seg .sb-filter-seg-btn:not(.active) { background: none; }
+.home-filter-agent { flex: 0 0 auto; min-width: 130px; }
+/* Overlay the agent dropdown instead of pushing the bar taller. */
+.home-filter-agent .sb-filter-menu {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.home-filter-clear {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  font-size: 12px; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  background: none; border: 1px solid transparent; color: var(--t2);
+}
+.home-filter-clear:hover { color: var(--t1); background: var(--bg-subtle); }
+.home-filter-empty { font-size: 12.5px; color: var(--t3); padding: 18px 4px; }
+
+.home-row { display: flex; align-items: center; gap: 9px; padding: 9px 6px 9px 2px; cursor: pointer; border-radius: 6px; }
 .home-row:hover { background: var(--bg-subtle); }
-.home-row-name { font-size: 13px; color: var(--t1); font-weight: 500; }
+.home-row-name { font-size: 13px; color: var(--t1); font-weight: 500; flex-shrink: 0; }
 .home-row-sub { font-size: 11.5px; color: var(--t3); }
-.home-row-up { margin-left: auto; font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+/* Status line: a dot + activity/lifecycle word. */
+.home-row-status {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  font-size: 11.5px; color: var(--t3);
+}
+.home-row-status.is-working { color: var(--green); }
+.home-row-status.is-waiting { color: var(--yellow); }
+.home-row-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-hi); flex-shrink: 0; }
+.home-row-dot.on { background: var(--green); }
+.home-row-status.is-waiting .home-row-dot { background: var(--yellow); }
+.home-row-agent { font-size: 11.5px; color: var(--t3); flex-shrink: 0; }
+/* Metadata chips take the middle, pushing uptime + menu to the right edge. */
+.home-row-meta { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.home-row-chip {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  font-size: 10.5px; color: var(--t3);
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 100px;
+  padding: 1px 8px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-row-chip > svg { flex-shrink: 0; opacity: 0.75; }
+.home-row-chip-chg { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 35%, var(--border)); }
+.home-row-up { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+/* Three-dot menu — revealed on row hover (and always while its menu is open). */
+.home-row-menu {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 6px;
+  background: none; border: none; color: var(--t3); cursor: pointer;
+  opacity: 0; transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.home-row:hover .home-row-menu { opacity: 1; }
+.home-row-menu:hover { background: var(--bg-muted); color: var(--t1); }
 
 /* Running-now tree: project header + indented sandbox rows under it */
 .home-tree { margin-top: 6px; }
@@ -2261,7 +2499,6 @@ html, body, #root {
 }
 .home-tree-row { margin-left: 9px; padding-left: 12px; border-left: 1px solid var(--border); border-radius: 0 6px 6px 0; }
 /* Dim stopped rows (keep the avatar hue, mirroring the sidebar). */
-.home-tree-row.is-stopped .sbx-avatar { opacity: 0.7; }
 .home-tree-row.is-stopped .home-row-name { color: var(--t2); }
 .home-row-stop {
   display: flex; align-items: center; justify-content: center;
@@ -2292,6 +2529,9 @@ html, body, #root {
 
 /* Sandbox info — collapsible sections */
 .info-acc { border-top: 1px solid var(--border); }
+/* The first section sits directly under the dock header's border — no need for
+   a second line right beneath it. */
+.info-panel > .info-acc:first-child { border-top: none; }
 .info-acc-hd {
   display: flex; align-items: center; gap: 7px; width: 100%;
   padding: 11px 2px; background: none; border: none; cursor: pointer; text-align: left;
@@ -2331,36 +2571,82 @@ html, body, #root {
   background: var(--destruct); color: #fff; font-variant-numeric: tabular-nums;
 }
 
-/* Recent network-policy blocks inside the info panel */
-.np-blocks { margin-top: 12px; }
+/* Blocked requests, at the top of the Network policy section. One card per
+   host: neutral surface with a red edge marker — the whole list used to be a
+   red slab, which shouted without making any single row easier to act on. */
+.np-blocks { margin: 2px 0 14px; }
 .np-blocks-hd {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px; margin-bottom: 7px;
   font-size: 11.5px; font-weight: 600; color: var(--t2);
 }
-.np-blocks-ic { color: var(--destruct); }
+.np-blocks-ic { color: var(--destruct); flex-shrink: 0; }
+.np-blocks-count {
+  font-size: 10.5px; font-weight: 600; color: #fff; background: var(--destruct);
+  min-width: 17px; height: 17px; padding: 0 5px; border-radius: 100px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
 .np-block {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 4px;
-  border: 1px solid var(--border); border-radius: 7px; background: var(--bg-subtle);
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 9px 7px 10px; margin-bottom: 5px; overflow: hidden;
+  border: 1px solid var(--border); border-left: 2px solid var(--destruct);
+  border-radius: 7px; background: var(--bg-subtle);
+  max-height: 90px;
 }
-.np-block-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.np-block-host { font-size: 12.5px; color: var(--t1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-block-meta { font-size: 10.5px; color: var(--t3); }
+/* min-width:0 alone doesn't stop a long unbroken hostname: it overflowed the
+   body and painted across the Allow button, which is what made the button look
+   (and in places behave) unclickable. */
+.np-block-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.np-block-host {
+  font-size: 12.5px; color: var(--t1); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.np-block-meta {
+  font-size: 10.5px; color: var(--t3); line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.np-block-btn { flex-shrink: 0; }
+.np-block-ok {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; font-weight: 600; color: var(--green);
+}
+.np-block.busy { opacity: 0.7; }
+.np-block.err { border-left-color: var(--yellow); }
+/* Allowed → confirm in place, then collapse away. Timing is mirrored by
+   BLOCK_FADE_MS in NetworkPanel.tsx, which drops the row from the store. */
+.np-block.done {
+  border-left-color: var(--green);
+  background: var(--green-dim);
+  animation: np-block-out 1.6s ease forwards;
+}
+@keyframes np-block-out {
+  0%, 62% { opacity: 1; max-height: 90px; }
+  100% {
+    opacity: 0; max-height: 0; transform: translateX(8px);
+    margin-bottom: 0; padding-top: 0; padding-bottom: 0; border-top-width: 0; border-bottom-width: 0;
+  }
+}
+.np-blocks-more { font-size: 11px; color: var(--t3); padding: 2px 2px 0; }
 
-/* Recent blocks pinned at the top of the info panel — red-ish so they read as
-   an alert that needs attention. */
-.np-blocks-top {
-  margin: 12px 14px 2px;
-  padding: 10px 10px 6px;
-  border: 1px solid color-mix(in srgb, var(--destruct) 35%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--destruct) 7%, var(--bg));
+/* Docked "your change isn't live yet" footer — see the note in NetworkPanel. */
+.np-restart {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-top: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
 }
-.np-blocks-top .np-blocks-hd { color: var(--destruct); }
-.np-blocks-top .np-block {
-  border-color: color-mix(in srgb, var(--destruct) 28%, var(--border));
-  background: color-mix(in srgb, var(--destruct) 6%, var(--bg));
+.np-restart-ic { color: var(--yellow); flex-shrink: 0; }
+.np-restart-main { flex: 1; min-width: 0; }
+.np-restart-title { font-size: 12px; font-weight: 600; color: var(--t1); }
+.np-restart-sub {
+  font-size: 11px; color: var(--t2); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.np-blocks-top .np-block-host { color: var(--destruct); }
+.np-restart .btn { flex-shrink: 0; }
+.np-restart.ok {
+  border-top-color: color-mix(in srgb, var(--green) 40%, var(--border));
+  background: var(--green-dim);
+}
+.np-restart.ok .np-restart-ic { color: var(--green); }
 
 /* Toaster — transient policy-block alerts, bottom-right */
 .toaster {
@@ -2549,13 +2835,28 @@ html, body, #root {
 }
 .kit-card-hd { display: flex; align-items: center; gap: 8px; }
 .kit-card-hd > svg { color: var(--t3); flex-shrink: 0; }
-.kit-card-name { font-size: 13.5px; font-weight: 600; color: var(--t1); flex: 1; }
+.kit-card-logo { flex-shrink: 0; border-radius: 4px; object-fit: contain; }
+.kit-card-name { font-size: 13.5px; font-weight: 600; color: var(--t1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-card-verified { color: var(--blue, var(--primary)); flex-shrink: 0; }
 .kit-card-has {
-  display: inline-flex; align-items: center; gap: 3px;
+  display: inline-flex; align-items: center; gap: 3px; margin-left: auto;
   font-size: 10px; font-weight: 600; color: var(--t3);
   background: var(--bg-subtle); border-radius: 100px; padding: 2px 7px; flex-shrink: 0;
 }
+/* Publisher + pull/star counts under the title. */
+.kit-card-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--t3); margin-top: -2px; }
+.kit-card-pub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-card-pulls, .kit-card-stars { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.kit-card-pulls > svg, .kit-card-stars > svg { opacity: 0.8; }
 .kit-card-desc { font-size: 12px; color: var(--t2); line-height: 1.45; margin: 0; }
+/* Base image chip (sandbox kits). */
+.kit-card-image {
+  display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; max-width: 100%;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11px; color: var(--t2);
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kit-card-image > svg { flex-shrink: 0; opacity: 0.7; }
 .kit-card-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
 .kit-card-link {
   display: inline-flex; align-items: center; gap: 4px; margin-right: auto;
@@ -2697,6 +2998,18 @@ html, body, #root {
   background: none; border: none; cursor: pointer; color: var(--t2); font-size: 12.5px; padding: 4px 0;
 }
 .kit-info-toggle:hover, .kit-info-toggle.on { color: var(--t1); }
+/* Summary / Code sit side by side under the capability blocks; either one opens
+   the panel below, and clicking the open one closes it. */
+.kit-info-bar { display: flex; gap: 16px; }
+/* The spec.yaml the form will write — read-only, so it reads as output rather
+   than an editor (no focus ring, no text cursor), unlike .kit-spec-area. */
+.kit-code-preview {
+  margin-top: 8px; max-height: 320px; overflow: auto;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 12px; line-height: 1.55;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; color: var(--t2); tab-size: 2;
+  white-space: pre; user-select: text;
+}
 .kit-summary {
   margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-subtle); padding: 4px 12px;
@@ -2771,10 +3084,57 @@ html, body, #root {
 .lib-hdr-tpl, .lib-row-tpl {
   grid-template-columns: minmax(140px, 1.8fr) 1.2fr 1fr 76px;
 }
-.lib-hdr-kit, .lib-row-kit { grid-template-columns: minmax(140px, 1fr) 1.4fr auto; }
-/* Column headers for the capability cells — same fixed grid as .kit-caps so each
-   label sits directly above its column. */
-.kit-caps-hdr { display: grid; grid-template-columns: 132px 104px 108px 116px 96px; justify-content: start; }
+/* name | capabilities | actions. Actions is a FIXED width (not `auto`) so the
+   header grid and the row grids resolve to identical track widths — otherwise
+   the empty header actions cell vs the wide button cell would push the flexible
+   capabilities column to a different width and the columns wouldn't line up. */
+.lib-hdr-kit, .lib-row-kit { grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 232px; }
+/* name+state | target | actions. Without a variant class these rows inherited
+   the 4-column default and left a gap where a fourth cell would have been.
+   Actions is fixed so the flexible target column can absorb the slack. */
+.lib-hdr-mcp, .lib-row-mcp { grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) 116px 240px; }
+/* Authorization gets a column of its own rather than a badge trailing the name:
+   it's the field you scan down the list for, and inline it moved with the
+   name's length. Fixed-width so the badges line up. */
+/* Inspect output den couldn't read as key/value. Kept in the same panel as the
+   parsed rows — a black console block for what is, after all, just text was den
+   showing its plumbing — and copyable, since unrecognised output is the thing
+   worth sending on. */
+/* In-progress authorization: a status line, not a console. The browser has the
+   user's attention; this only has to say den is still waiting. */
+.mcp-authing {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle); font-size: 12px; color: var(--t2);
+}
+.mcp-info-rawwrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 0; }
+.mcp-info-raw {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: 'SF Mono', 'Menlo', monospace; font-size: 11.5px; line-height: 1.55; color: var(--t2);
+}
+.mcp-row-auth { display: flex; align-items: center; min-width: 0; }
+.mcp-row-auth .rt-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Five equal, flexible capability columns, shared by the header labels and the
+   KitCaps cells so they align and shrink together. */
+.kit-caps-hdr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+.kit-caps-hdr > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-row-kit .kit-caps:not(.compact) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.lib-row-kit .kit-caps:not(.compact) .kit-cap-ic { padding: 0 8px 0 0; min-width: 0; overflow: hidden; }
+.lib-row-kit .kit-cap-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Progressive shrink as the table narrows. Drop the per-cell text label *first*
+   — before it can truncate to "Comma…"/"Remote…" — since the column header
+   already names each cell; keep the icon + count. Then at the very narrow end
+   drop the icon too, leaving a count-only cell that still reads via the header.
+   (Wide tables keep the full label; the community-gallery cards, which have no
+   header row, always keep theirs.) */
+.lib-tbl { container-type: inline-size; }
+@container (max-width: 1024px) {
+  .lib-row-kit .kit-cap-lbl { display: none; }
+}
+@container (max-width: 760px) {
+  .lib-row-kit .kit-cap-ic > svg { display: none; }
+}
 .kit-unpacked {
   font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
   color: var(--t3); background: var(--bg-subtle); border: 1px solid var(--border);
@@ -2785,7 +3145,7 @@ html, body, #root {
    same column across every row, table-style, even when a kit lacks some. */
 .kit-caps:not(.compact) {
   display: grid;
-  grid-template-columns: 132px 104px 108px 116px 96px;
+  grid-template-columns: 132px 104px 108px 100px 116px 96px;
   justify-content: start;
 }
 .kit-caps:not(.compact) .kit-cap-ic { padding: 0 12px 0 0; border-left: none; }
@@ -2847,6 +3207,24 @@ html, body, #root {
 .kit-more-item.danger:hover { background: rgba(239,68,68,0.10); }
 .kit-more-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 
+/* Import-kit source dropdown (OCI / Git / Zip / Folder). */
+.kit-import-menu {
+  position: fixed; z-index: 200; min-width: 236px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.kit-import-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: none; border-radius: 6px; padding: 7px 9px; cursor: pointer;
+}
+.kit-import-item > svg { color: var(--t3); flex-shrink: 0; }
+.kit-import-item span { display: flex; flex-direction: column; min-width: 0; }
+.kit-import-item b { font-size: 12.5px; font-weight: 500; color: var(--t1); }
+.kit-import-item small { font-size: 11px; color: var(--t3); }
+.kit-import-item:hover { background: var(--bg-subtle); }
+.kit-import-busy { color: var(--t3); font-size: 12.5px; }
+
 /* Generic row "⋮" dropdown (templates, and reusable elsewhere). */
 .more-menu {
   position: fixed; z-index: 200; min-width: 190px;
@@ -2882,6 +3260,29 @@ html, body, #root {
   padding: 12px 14px 14px; margin-bottom: 12px;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-subtle);
 }
+
+/* Which kit to take, when a cloned repo holds more than one. */
+.repo-pick { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg); }
+.repo-pick-hd {
+  padding: 7px 11px; border-bottom: 1px solid var(--border); background: var(--bg-subtle);
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--t3);
+}
+.repo-pick-item {
+  display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left;
+  padding: 8px 11px; border: none; background: none; cursor: pointer; font: inherit;
+  border-top: 1px solid var(--border);
+}
+.repo-pick-item:first-of-type { border-top: none; }
+.repo-pick-item:hover:not(:disabled) { background: var(--bg-subtle); }
+.repo-pick-item:disabled { opacity: 0.5; cursor: default; }
+.repo-pick-name { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--t1); }
+.repo-pick-kind {
+  font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  color: var(--t3); background: var(--bg-muted); border-radius: 100px; padding: 1px 6px;
+}
+.repo-pick-kind.sandbox { color: var(--accent, var(--primary)); background: color-mix(in srgb, var(--accent, var(--primary)) 12%, transparent); }
+.repo-pick-dir { font-size: 10.5px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace; }
+.repo-pick-desc { font-size: 11.5px; color: var(--t2); }
 
 /* Post-upload share CTA */
 .kit-share-cta {
@@ -2961,6 +3362,51 @@ html, body, #root {
 .kit-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-file-rm { display: flex; background: none; border: none; cursor: pointer; color: var(--t3); padding: 0; }
 .kit-file-rm:hover { color: var(--destruct); }
+
+/* Explanatory line at the top of a capability block — what the primitive is and
+   what the spec does with it. */
+.cap-note { font-size: 11.5px; line-height: 1.55; color: var(--t2); margin-bottom: 10px; }
+.cap-note code, .fhint code { background: var(--bg-muted); padding: 1px 4px; border-radius: 4px; font-size: 10.5px; }
+
+/* Command rows (install / startup) — the input plus its spec flags. */
+.kit-cmd-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.kit-cmd-row .finput { flex: 1; min-width: 0; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+.kit-cmd-flag {
+  flex-shrink: 0; padding: 4px 8px; border-radius: 100px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-subtle); color: var(--t3);
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.2px;
+}
+.kit-cmd-flag:hover { color: var(--t1); border-color: var(--border-hi); }
+.kit-cmd-flag.on {
+  color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg-subtle));
+}
+
+/* File rows — target folder + destination path inside it. */
+.kit-file-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.kit-file-row .finput { flex: 1; min-width: 0; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+.kit-file-target {
+  flex-shrink: 0; padding: 6px 7px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-subtle); color: var(--t2);
+  font-size: 11.5px; font-family: 'SF Mono','Menlo',monospace; cursor: pointer;
+}
+.kit-file-target:disabled { opacity: 0.6; cursor: default; }
+.kit-file-tag {
+  flex-shrink: 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; color: var(--t3);
+}
+
+/* Environment variable rows — name + value. */
+.kit-env-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.kit-env-row .finput { font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; min-width: 0; }
+.kit-env-key { flex: 0 0 40%; }
+.kit-env-val { flex: 1; }
+
+/* Credential card — one authenticated service. */
+.kit-cred { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin-bottom: 8px; }
+.kit-cred-hd { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.kit-cred-hd svg { color: var(--t3); flex-shrink: 0; }
+.kit-cred-name { flex: 1; min-width: 0; font-weight: 500; }
 .lib-hdr {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
   color: var(--t3); background: var(--bg-muted); border-bottom: 1px solid var(--border);
@@ -3154,6 +3600,30 @@ html, body, #root {
   font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
   color: var(--t3); margin-bottom: 6px; padding: 0 2px;
 }
+/* Settings — sections are collapsible accordions (info-acc) divided by thin
+   lines, no cards. The first accordion in a page-body sits under the tab bar,
+   so it needs no separator line above it. The Danger zone keeps its own tinted
+   card and is not an accordion. */
+.settings-page .page-body > .info-acc:first-child { border-top: none; }
+.settings-page .info-acc-body .ss-row:first-child { padding-top: 4px; }
+/* Danger zone — a tinted, red-bordered card so destructive actions read as set
+   apart from ordinary settings. */
+.ss-danger {
+  background: color-mix(in srgb, var(--destruct) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destruct) 32%, var(--border));
+  border-radius: 10px;
+  padding: 8px 16px 14px;
+}
+.ss-danger .ss-row:first-of-type { padding-top: 6px; }
+/* Collapsible changelog under the update controls. */
+.ss-acc { border-top: 1px solid var(--border); margin-top: 6px; }
+.ss-acc-hd {
+  display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
+  padding: 11px 2px;
+}
+.ss-acc-hd > svg { color: var(--t3); flex-shrink: 0; }
+.ss-acc-title { font-size: 13px; font-weight: 500; color: var(--t1); }
+.ss-acc-note { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .ss-row {
   display: flex;
   align-items: center;
@@ -3520,11 +3990,14 @@ html, body, #root {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 8px 28px rgba(0,0,0,0.18); padding: 4px;
-  max-height: 184px; overflow-y: auto;
+  max-height: 260px; overflow-y: auto;
 }
+/* Rows are <button>s: without the reset they keep the UA border/background and
+   shrink-wrap their label, so the menu renders as a column of little pills. */
 .agent-dd-item {
-  display: flex; align-items: center; gap: 9px;
-  padding: 5px 9px; border-radius: 5px; cursor: pointer;
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 6px 9px; border: none; background: none; font: inherit;
+  border-radius: 5px; cursor: pointer;
   font-size: 12.5px; color: var(--t1);
 }
 .agent-dd-item:hover { background: var(--bg-subtle); }
@@ -3725,7 +4198,19 @@ html, body, #root {
   padding: 8px 10px; border: none; border-radius: 8px; background: none;
   text-align: left; cursor: pointer; color: var(--t1); font-size: 13.5px; font-family: inherit;
 }
-.cmdk-item.sel { background: var(--bg-subtle); }
+/* Selected row. `--bg-subtle` alone was too weak to read as a selection: the
+   palette sits on `--bg`, and in the light themes those are #fff vs #f4f4f5 —
+   a ~2% step, so the only real cue was the ↵ glyph. Tint with the theme accent
+   and add an inset ring, then lift the icon, hint and label with it, so the
+   selection is unmistakable in both light and dark without shifting the row. */
+.cmdk-item.sel {
+  background: color-mix(in srgb, var(--accent, var(--primary)) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--primary)) 38%, transparent);
+}
+.cmdk-item.sel .cmdk-item-label { font-weight: 550; }
+.cmdk-item.sel .cmdk-item-ic,
+.cmdk-item.sel .cmdk-item-enter { color: var(--accent, var(--primary)); }
+.cmdk-item.sel .cmdk-item-hint { color: var(--t2); }
 .cmdk-item-ic {
   width: 20px; height: 18px; flex-shrink: 0; color: var(--t2);
   display: inline-flex; align-items: center; justify-content: center;
@@ -3734,9 +4219,159 @@ html, body, #root {
 .cmdk-item-hint { flex-shrink: 0; color: var(--t3); font-size: 11.5px; }
 .cmdk-item-enter { flex-shrink: 0; color: var(--t3); }
 
+/* Runtime too old for the CLI dialect den speaks — a single app-wide statement
+   instead of the same failure surfacing separately in kits, secrets and policy. */
+.rt-outdated {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
+}
+.rt-outdated-ic { color: var(--yellow); flex-shrink: 0; }
+.rt-outdated-txt { flex: 1; min-width: 0; font-size: 12px; color: var(--t1); }
+.rt-outdated-txt code { font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+.rt-outdated .btn { flex-shrink: 0; }
+
+/* "checked 21:49:51" beside the daemon badge — so a re-check that returns the
+   same verdict still visibly happened. */
+.rt-checked { margin-left: 8px; font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+
+/* ── MCP servers page (the gateway registry) ─────────────────────────────── */
+/* Explanatory line in the subbar, so the fixed-height .page-hdr keeps to a
+   single row of title + actions like every other page. */
+.mcp-subbar-note { font-size: 11.5px; color: var(--t3); }
+
+.mcp-add-form {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); padding: 14px; margin-bottom: 18px;
+}
+.mcp-add-x:hover { color: var(--t1); }
+
+.mcp-pick-search input { flex: 1; border: none; background: none; outline: none; color: var(--t1); font-size: 12px; }
+.mcp-pick-search button { border: none; background: none; cursor: pointer; color: var(--t3); display: flex; }
+
+/* Compact tiles, capped in height: 50+ entries shouldn't push the form off
+   screen, and the list is for scanning rather than reading. */
+.mcp-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px;
+  max-height: 232px; overflow-y: auto; padding-right: 2px;
+}
+/* Labels are buttons, not prose — selecting them on click looked like a bug. */
+.mcp-grid .mcp-card, .mcp-pick-item { user-select: none; }
+.mcp-card.on { opacity: 0.5; cursor: default; border-color: var(--border); }
+.mcp-card.on:hover { background: none; border-color: var(--border); }
+.mcp-card-on { color: var(--green); flex-shrink: 0; }
+.mcp-card-busy { color: var(--t3); font-size: 12px; }
+.mcp-empty { grid-column: 1 / -1; font-size: 12px; color: var(--t3); padding: 8px 2px; }
+
+.mcp-row-ic { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; flex-shrink: 0; }
+.mcp-row-target {
+  min-width: 0;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; color: var(--t3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mcp-row-actions { position: relative; display: flex; gap: 4px; justify-content: flex-end; flex-shrink: 0; }
+.mcp-attach-menu { right: 0; top: calc(100% + 4px); }
+
+.mcp-oauth-toggle {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 8px;
+  background: none; border: none; cursor: pointer; color: var(--t2); font-size: 12px; padding: 2px 0;
+}
+.mcp-oauth-toggle:hover { color: var(--t1); }
+.mcp-skip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--t2); white-space: nowrap; }
+
+/* Empty state — the page's primary content is the registered list, so say so
+   plainly instead of filling the space with a catalog nobody asked for yet. */
+.mcp-zero {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 48px 20px; text-align: center; color: var(--t3);
+}
+
+/* Static-MCP picker in New Sandbox — toggles, not a dropdown: the set is small
+   and which servers are pre-loaded is worth seeing at a glance. */
+.mcp-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcp-pick-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--t2); font-size: 12px; cursor: pointer;
+}
+.mcp-pick-item img { width: 14px; height: 14px; border-radius: 3px; object-fit: contain; }
+.mcp-pick-item:hover { border-color: var(--border-hi); color: var(--t1); }
+.mcp-pick-item.on { border-color: var(--primary); color: var(--t1); box-shadow: 0 0 0 1px var(--primary); }
+/* Page-foot explainer, outside .page-body's scroll so it stays visible. */
+.mcp-foot {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 10px 18px; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--t3); background: var(--bg);
+}
+.mcp-foot svg { flex-shrink: 0; }
+/* Switch row in the Add-an-MCP modal — matches the Settings toggles (.s-toggle)
+   rather than a bare checkbox. */
+.mcp-sw-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 10px; padding: 8px 0;
+}
+.mcp-sw-lbl { font-size: 12.5px; color: var(--t1); }
+.mcp-sw-sub { font-size: 11px; color: var(--t3); margin-top: 1px; }
+/* Inline link inside a settings sub-line (release version → its notes). */
+.rt-relink { color: var(--primary); cursor: pointer; }
+.rt-relink:hover { text-decoration: underline; }
+/* Even vertical rhythm across settings rows — the sections had drifted to
+   different paddings as rows were added over time. */
+.ss-row { padding-top: 11px; padding-bottom: 11px; }
+.ss-row + .ss-row { border-top: 1px solid var(--border); }
+/* The MCP empty state reuses .home-empty; only the mark differs (an icon
+   rather than den's wordmark). */
+/* The mark above an empty-state hero (see EmptyState). Muted so the title, not
+   the icon, is what the eye lands on. */
+.empty-mark { color: var(--t3); opacity: 0.8; display: flex; }
+/* `sbx mcp inspect` rendered as rows. Aligned key column so the values line up
+   the way the CLI's own padding does, without the terminal styling. */
+/* Expanded detail for the row above, inside the table's own frame — so no
+   border or radius of its own: a second box inset within the first is what made
+   the margins read as broken. The tint marks it as expanded, the bottom rule
+   separates it from the next server, and the padding matches .lib-row so the
+   keys line up under the SERVER column. */
+.mcp-info {
+  margin: 0; padding: 2px 12px 6px;
+  background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+}
+/* A server is a row plus whatever it has expanded under it, wrapped together.
+   That wrapper makes each .lib-row its own parent's last child, which the
+   generic `.lib-row:last-child { border-bottom: none }` reads as "last in the
+   table" — so every separator between servers disappeared. Put the rule back
+   here, and strip it from whatever ends the table instead. */
+.mcp-entry > .lib-row { border-bottom: 1px solid var(--border); }
+.lib-tbl > .mcp-entry:last-child > :last-child { border-bottom: none; }
+.mcp-info-row {
+  display: flex; align-items: baseline; gap: 12px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.mcp-info-row:last-child { border-bottom: none; }
+.mcp-info-row.sub { padding-left: 16px; }
+.mcp-info-k { flex-shrink: 0; width: 110px; color: var(--t3); }
+.mcp-info-v { color: var(--t1); font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; overflow-wrap: anywhere; }
+.mcp-info-link {
+  color: var(--primary); cursor: pointer;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; overflow-wrap: anywhere;
+}
+.mcp-info-link:hover { text-decoration: underline; }
+/* Agent field when an agent kit supplies the agent — the same shape as the
+   dropdown button, minus the affordance, since there's nothing to pick. */
+.agent-dd-fixed {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); color: var(--t2);
+}
+
 </style>
 <style>
 /* ═══ Capture-specific additions ═══ */
+/* Brand marks in kit capability chips and MCP rows (the app uses PNG assets
+   from src/renderer/src/assets/mcp; this capture inlines SVG instead). */
+.ks-mcp .mcp-logo { width: 15px; height: 15px; flex-shrink: 0; color: var(--t1); }
+.ks-mcp { padding-left: 9px; }
+.mcp-row-ic-svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--t1); }
 
 /* Graphite color theme — the app default; mirrors applyTheme('graphite', mode).
    The Settings color-theme picker overrides these via inline props on <html>. */
@@ -3888,7 +4523,9 @@ const LUCIDE = {
  "moon": "<path d=\"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z\"/>",
  "monitor": "<rect width=\"20\" height=\"14\" x=\"2\" y=\"3\" rx=\"2\"/><line x1=\"8\" x2=\"16\" y1=\"21\" y2=\"21\"/><line x1=\"12\" x2=\"12\" y1=\"17\" y2=\"21\"/>",
  "scale": "<path d=\"m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z\"/><path d=\"m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z\"/><path d=\"M7 21h10\"/><path d=\"M12 3v18\"/><path d=\"M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2\"/>",
- "lock": "<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/>"
+ "lock": "<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/>",
+ "key-round": "<path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/>",
+ "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>"
 };
 function ic(name, size, cls) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${cls ? ` class="${cls}"` : ''}>${LUCIDE[name] || ''}</svg>`;
@@ -4051,8 +4688,7 @@ const INFO = {
     rules:[
       { dec:'ALLOW', name:'balanced-ai-apis', scope:'all sandboxes', prov:'default', res:['api.anthropic.com','api.openai.com','generativelanguage.googleapis.com'] },
       { dec:'ALLOW', name:'balanced-registries', scope:'all sandboxes', prov:'default', res:['registry.npmjs.org','pypi.org','ghcr.io'] },
-      { dec:'ALLOW', name:'kit:playwright', scope:'sandbox:atlas-color-themes', prov:'kit', res:['cdn.playwright.dev'] },
-      { dec:'ALLOW', name:'local', scope:'sandbox:atlas-color-themes', prov:'local', res:['github.com'] }
+      { dec:'ALLOW', name:'kit:playwright', scope:'sandbox:atlas-color-themes', prov:'kit', res:['cdn.playwright.dev'] }
     ] },
   'import-parser-fix': { memory:'default', kits:[], authMode:'api-key',
     secrets:[{ n:'openai' }],
@@ -4077,11 +4713,14 @@ const INFO = {
 
 const KITS = {
   mixin: [
+    { name:'workspace-context', star:false,
+      caps:{ mcp:['Notion','Linear'], net:{allow:['api.notion.com','api.linear.app'],deny:[]}, env:['NOTION_API_KEY','LINEAR_API_KEY'], cmd:[], cred:['notion'], mem:'Read the spec in Notion and the ticket in Linear before you start, then link the PR back to the issue.' },
+      spec:`name: workspace-context\nkind: mixin\ndescription: Notion + Linear context for planning work\n\nmcp:\n  - notion\n  - linear\n\nenv:\n  - NOTION_API_KEY\n  - LINEAR_API_KEY\n\nnetwork:\n  allow:\n    - api.notion.com\n    - api.linear.app\n\nagent_context: |\n  Read the spec in Notion and the ticket in Linear\n  before you start, then link the PR back to the issue.` },
     { name:'playwright', star:true,
       caps:{ mcp:[], net:{allow:['cdn.playwright.dev','registry.npmjs.org'],deny:[]}, env:['PLAYWRIGHT_BROWSERS_PATH'], cmd:['npm install -g playwright@1.49','npx playwright install chromium --with-deps'], mem:'Playwright is preinstalled. Prefer `npx playwright test` and store traces under ./test-results.' },
       spec:`name: playwright\nkind: mixin\ndescription: Browser automation for agent test runs\n\nenv:\n  - PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers\n\ninstall:\n  - npm install -g playwright@1.49\n  - npx playwright install chromium --with-deps\n\nnetwork:\n  allow:\n    - cdn.playwright.dev\n    - registry.npmjs.org\n\nagent_context: |\n  Playwright is preinstalled. Prefer \`npx playwright test\`\n  and store traces under ./test-results.` },
     { name:'github-cli', star:false,
-      caps:{ mcp:[], net:{allow:['github.com','api.github.com'],deny:[]}, env:['GITHUB_TOKEN'], cmd:['type gh >/dev/null || brew install gh'], mem:null },
+      caps:{ mcp:[], net:{allow:['github.com','api.github.com'],deny:[]}, env:['GITHUB_TOKEN'], cmd:['type gh >/dev/null || brew install gh'], cred:['github'], mem:null },
       spec:`name: github-cli\nkind: mixin\ndescription: gh CLI wired to a sandbox-scoped token\n\nenv:\n  - GITHUB_TOKEN\n\ninstall:\n  - type gh >/dev/null || brew install gh\n\nnetwork:\n  allow:\n    - github.com\n    - api.github.com` },
     { name:'notion-mcp', star:false,
       caps:{ mcp:['Notion'], net:{allow:[],deny:[]}, env:['NOTION_API_KEY'], cmd:[], mem:null },
@@ -4133,7 +4772,11 @@ const state = {
   ns: { name:'claude-atlas', nameEdited:false, agent:'claude', workspace:'/Users/isabella/Code/atlas',
         kits:['playwright'], clone:true, basicOpen:true, advOpen:false, cmdOpen:true, agentOpen:false, kitDdOpen:false },
   infoAcc: { workspaces:true, kits:false, secrets:false, ports:true, network:true },
-  npDraft: null                          // network 'Add rule' draft {decision}
+  npDraft: null,                         // network 'Add rule' draft {decision}
+  mcpInspect: null,                      // server whose `sbx mcp inspect` rows are open
+  mcpAuthing: null,                      // server whose browser authorization is in flight
+  mcpEmpty: false,                       // show the welcome screen instead of the list
+  mcpTab: 'catalog'
 };
 const $ = (sel, el) => (el || document).querySelector(sel);
 const sb = (id) => SANDBOXES.find((s) => s.id === id);
@@ -4173,6 +4816,7 @@ function toolbarTitle() {
   if (p === 'templates') return { title: 'Templates', sub: 'Reusable sandbox images' };
   if (p === 'mixins')    return { title: 'Mixin Kits', sub: 'Add-ons layered onto an agent' };
   if (p === 'kits')      return { title: 'Sandbox Kits', sub: 'Full agents, defined from scratch' };
+  if (p === 'mcp')       return { title: 'MCP servers', sub: 'Shared by every sandbox' };
   if (p === 'settings')  return { title: 'Settings', sub: 'den preferences' };
   const s = sb(state.activeSandbox);
   if (!s) return { title: 'den', sub: 'No sandbox selected' };
@@ -4254,6 +4898,7 @@ function renderSidebar() {
         <div class="sb-nav-item${navActive('templates')}" data-nav="templates">${ic('layout-grid', 16)}<span class="sb-nav-label">Templates</span></div>
         <div class="sb-nav-item${navActive('mixins')}" data-nav="mixins">${ic('layers', 16)}<span class="sb-nav-label">Mixin Kits</span></div>
         <div class="sb-nav-item${navActive('kits')}" data-nav="kits">${ic('package', 16)}<span class="sb-nav-label">Sandbox Kits</span></div>
+        <div class="sb-nav-item${navActive('mcp')}" data-nav="mcp">${ic('plug', 16)}<span class="sb-nav-label">MCP Servers</span></div>
       </div>
     </div>
     <div class="sb-div"></div>
@@ -4531,7 +5176,8 @@ const CAP_DEFS = [
   { key: 'mcp', icon: 'plug', label: 'Remote MCP' },
   { key: 'net', icon: 'globe', label: 'Policies' },
   { key: 'env', icon: 'variable', label: 'Env vars' },
-  { key: 'cmd', icon: 'square-terminal', label: 'Commands' },
+  { key: 'cmd', icon: 'square-terminal', label: 'Setup' },
+  { key: 'cred', icon: 'key-round', label: 'Credentials' },
   { key: 'mem', icon: 'file-text', label: 'Memory' }
 ];
 function kitCapCount(k, key) {
@@ -4540,6 +5186,7 @@ function kitCapCount(k, key) {
   if (key === 'net') return c.net && c.net.allow ? c.net.allow.length + c.net.deny.length : (c.net || 0);
   if (key === 'env') return Array.isArray(c.env) ? c.env.length : (c.env || 0);
   if (key === 'cmd') return Array.isArray(c.cmd) ? c.cmd.length : (c.cmd || 0);
+  if (key === 'cred') return Array.isArray(c.cred) ? c.cred.length : (c.cred || 0);
   return c.mem ? 1 : 0;
 }
 function kitCaps(k, compact) {
@@ -4550,6 +5197,20 @@ function kitCaps(k, compact) {
   }).join('');
   return `<div class="kit-caps${compact ? ' compact' : ''}">${cells}</div>`;
 }
+const MCP_LOGOS = {
+  notion: '<svg class="mcp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .046-.28-.047-.326L17.86 1.968c-.42-.326-.98-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.933.374-.933.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952l1.448.327s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.216-1.632z"/></svg>',
+  linear: '<svg class="mcp-logo" viewBox="0 0 100 100" fill="currentColor" aria-hidden="true"><path d="M1.225 61.523c-.222-.949.908-1.546 1.597-.857l36.512 36.512c.69.69.092 1.82-.857 1.597C20.628 94.278 5.722 79.372 1.225 61.523M.004 47.978a.99.99 0 0 0 .29.749l50.98 50.98a.99.99 0 0 0 .75.29 51 51 0 0 0 6.826-.808c.802-.14 1.084-1.123.508-1.699L2.51 40.644c-.576-.576-1.56-.294-1.699.508a51 51 0 0 0-.808 6.826M3.605 33.045a.99.99 0 0 0 .213 1.076l62.062 62.062a.99.99 0 0 0 1.076.213 51 51 0 0 0 4.235-1.908c.685-.351.777-1.294.204-1.867L7.36 28.686c-.573-.573-1.516-.481-1.867.204a51 51 0 0 0-1.888 4.155M9.549 21.507a1 1 0 0 0 .143 1.245l67.556 67.556a1 1 0 0 0 1.245.143 51 51 0 0 0 3.363-2.42c.626-.482.687-1.41.128-1.968L13.937 17.916c-.558-.558-1.486-.497-1.968.128a51 51 0 0 0-2.42 3.463M17.917 13.938c-.562-.562-.5-1.497.13-1.983C26.929 5.14 37.483 1 49.017 1 76.63 1 99 23.37 99 50.983c0 11.534-4.14 22.088-11.045 30.24-.486.63-1.421.692-1.983.13z"/></svg>',
+  github: '<svg class="mcp-logo" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>',
+  figma: '<svg class="mcp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.148 0h7.704A4.074 4.074 0 0 1 18.6 6.99a4.074 4.074 0 0 1 0 6.99 4.074 4.074 0 1 1-6.6 3.204V13.98H8.148a4.074 4.074 0 1 1 0-6.99 4.074 4.074 0 0 1 0-6.99zm0 1.471a2.603 2.603 0 0 0 0 5.205h2.381V1.471zm3.852 0v5.205h2.381a2.603 2.603 0 1 0 0-5.205zm0 6.676v5.206h2.381a2.603 2.603 0 1 0 0-5.206zM8.148 8.147a2.603 2.603 0 0 0 0 5.206h2.381V8.147zm0 6.677a2.603 2.603 0 1 0 2.381 2.593v-2.593z"/></svg>',
+  slack: '<svg class="mcp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523z"/></svg>',
+  gitlab: '<svg class="mcp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m23.6 9.593-.033-.086L20.3.98a.851.851 0 0 0-.336-.405.876.876 0 0 0-1 .054.875.875 0 0 0-.29.44l-2.2 6.762H7.526l-2.2-6.762a.87.87 0 0 0-.29-.441.876.876 0 0 0-1-.054.855.855 0 0 0-.336.405L.437 9.502l-.034.086a6.062 6.062 0 0 0 2.01 7.003l.012.01.03.022 4.966 3.72 2.456 1.86 1.496 1.13a1.01 1.01 0 0 0 1.22 0l1.496-1.13 2.456-1.86 4.996-3.742.013-.01a6.065 6.065 0 0 0 2.006-7z"/></svg>',
+  sentry: '<svg class="mcp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.91 2.505c-.873-1.501-3.036-1.504-3.92 0L6.229 8.867a15.06 15.06 0 0 1 8.891 12.283h-2.104A12.97 12.97 0 0 0 5.183 10.69l-2.955 5.113a7.531 7.531 0 0 1 4.128 5.343H2.395c-.257 0-.415-.28-.284-.502l1.294-2.242a5.32 5.32 0 0 0-1.65-.94l-1.272 2.203c-.598 1.036.147 2.335 1.34 2.335h5.362a9.157 9.157 0 0 0-3.564-8.038l.98-1.698a11.147 11.147 0 0 1 4.222 9.736h6.79a17.04 17.04 0 0 0-7.593-15.09l1.916-3.318c.13-.222.45-.223.582 0l10.204 17.66c.13.227-.03.51-.29.51h-2.65c.03.57.036 1.14.017 1.708h2.633c1.194 0 1.94-1.3 1.34-2.336z"/></svg>',
+  vercel: '<svg class="mcp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M24 22.525H0l12-21.05z"/></svg>',
+  supabase: '<svg class="mcp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.9 1.036c-.015-.986-1.26-1.41-1.874-.637L.764 12.05C-.33 13.427.65 15.455 2.409 15.455h9.579l.113 7.51c.014.985 1.259 1.408 1.873.636l9.262-11.653c1.093-1.375.113-3.403-1.645-3.403h-9.642z"/></svg>'
+};
+function mcpLogo(name) {
+  return MCP_LOGOS[String(name).toLowerCase()] || ('<span class="mock-mcp-ic">' + ic('plug', 10) + '</span>');
+}
 function kitSummary(k, variant) {
   const c = k.caps;
   const rows = [];
@@ -4557,7 +5218,7 @@ function kitSummary(k, variant) {
   if (variant === 'sandbox' && k.base) rows.push(`<div class="ks-row"><span class="ks-k">Base</span><span class="ks-v ks-mono">${k.base}</span></div>`);
   if (variant === 'sandbox' && k.entry) rows.push(`<div class="ks-row"><span class="ks-k">Entrypoint</span><span class="ks-v ks-mono">${k.entry}</span></div>`);
   if (c.mcp.length) rows.push(`<div class="ks-block"><span class="ks-k">Remote MCPs · ${c.mcp.length}</span>
-    <div class="ks-mcps">${c.mcp.map((m) => `<span class="ks-mcp"><span class="mock-mcp-ic">${ic('plug', 10)}</span>${m}</span>`).join('')}</div></div>`);
+    <div class="ks-mcps">${c.mcp.map((m) => `<span class="ks-mcp">${mcpLogo(m)}${m}</span>`).join('')}</div></div>`);
   if (c.net.allow.length || c.net.deny.length) rows.push(`<div class="ks-block"><span class="ks-k">Network · ${c.net.allow.length} allowed · ${c.net.deny.length} denied</span>
     <div class="ks-mcps">${c.net.allow.map((d) => `<span class="ks-tag">${d}</span>`).join('')}${c.net.deny.map((d) => `<span class="ks-tag ks-tag-deny">${d}</span>`).join('')}</div></div>`);
   if (c.cmd.length) rows.push(`<div class="ks-block"><span class="ks-k">Commands · ${c.cmd.length}</span>${c.cmd.map((x) => `<div class="ks-cmd">${esc(x)}</div>`).join('')}</div>`);
@@ -4575,7 +5236,9 @@ function renderKits(variant) {
   const rowIcon = variant === 'mixin' ? 'layers' : 'package';
 
   const library = `<div class="lib-tbl">
-    <div class="lib-hdr lib-hdr-kit"><span>${variant === 'mixin' ? 'MIXIN KIT' : 'SANDBOX KIT'}</span><span>CAPABILITIES</span><span></span></div>
+    <div class="lib-hdr lib-hdr-kit"><span>${variant === 'mixin' ? 'MIXIN KIT' : 'SANDBOX KIT'}</span>
+      <div class="kit-caps-hdr"><span>MCP</span><span>Policies</span><span>Env</span><span>Setup</span><span>Creds</span><span>Memory</span></div>
+      <span></span></div>
     ${kits.map((k) => {
       const open = state.openKit === `${variant}:${k.name}`;
       return `<div>
@@ -4584,8 +5247,11 @@ function renderKits(variant) {
           ${kitCaps(k)}
           <div style="display:flex;gap:4px;justify-content:flex-end" data-stop>
             ${variant === 'mixin' ? `<button class="btn btn-ghost btn-sm tpl-icon-btn kit-star-btn${k.star ? ' on' : ''}" data-act="star" data-star="${k.name}" title="${k.star ? 'Default kit — auto-added to new sandboxes. Click to unset.' : 'Make default — auto-add to new sandboxes'}">${ic('star', 15).replace('fill="none"', k.star ? 'fill="currentColor"' : 'fill="none"')}</button>` : ''}
+            <button class="btn btn-ghost btn-sm" title="Edit &quot;${k.name}&quot; in the kit composer">${ic('square-terminal', 14)} Edit</button>
             <div class="kit-add-wrap">
-              <button class="btn btn-default btn-sm" data-act="kit-add" data-kit-add="${variant}:${k.name}" title="Add this kit to a running sandbox">${ic('package-plus', 14)} Add to sandbox</button>
+              ${variant === 'sandbox'
+                ? `<button class="btn btn-default btn-sm" title="Create a sandbox from &quot;${k.name}&quot;">${ic('plus', 14)} Create sandbox</button>`
+                : `<button class="btn btn-default btn-sm" data-act="kit-add" data-kit-add="${variant}:${k.name}" title="Add this kit to a running sandbox">${ic('package-plus', 14)} Add to sandbox</button>`}
             </div>
             <button class="btn btn-ghost btn-sm tpl-icon-btn kit-more-btn" data-act="kit-more" data-kit-more="${variant}:${k.name}" title="More…">${ic('ellipsis-vertical', 15)}</button>
           </div>
@@ -4650,6 +5316,119 @@ function renderKits(variant) {
       </p>
       ${tab === 'library' ? library : gallery}
     </div>
+  </div>`;
+}
+
+/* ── MCP gateway (sbx v0.38) ─────────────────────────────────────────────── */
+// Servers are registered once on the host and reused by every sandbox. The
+// authorization column is the interesting part: sbx reports no state for it,
+// so den classifies whatever wording it gets and falls back to its own record
+// of a successful `sbx mcp auth`.
+const MCP_REG = [
+  { name:'notion',     target:'https://mcp.notion.com/mcp',  auth:'authorized' },
+  { name:'linear',     target:'https://mcp.linear.app/sse',  auth:'authorized' },
+  { name:'vercel',     target:'https://mcp.vercel.com',      auth:'not authorized' },
+  { name:'sentry',     target:'https://mcp.sentry.dev/mcp',  auth:'expired' },
+  { name:'playwright', target:'npx @playwright/mcp@latest',  auth:'', local:true }
+];
+const MCP_INSPECT = {
+  notion: [['Name','notion'],['Transport','streamable-http'],['URL','https://mcp.notion.com/mcp'],
+           ['OAuth','required'],['Issuer','https://mcp.notion.com',1],
+           ['Registration','https://mcp.notion.com/register',1],['Scopes','read write'],['Tools','17']],
+  linear: [['Name','linear'],['Transport','sse'],['URL','https://mcp.linear.app/sse'],
+           ['OAuth','required'],['Issuer','https://mcp.linear.app',1],['Scopes','read write issues:create'],['Tools','23']],
+  vercel: [['Name','vercel'],['Transport','streamable-http'],['URL','https://mcp.vercel.com'],
+           ['OAuth','required'],['Issuer','https://vercel.com',1],
+           ['Registration','https://api.vercel.com/v1/oauth/register',1],['Tools','31']],
+  sentry: [['Name','sentry'],['Transport','streamable-http'],['URL','https://mcp.sentry.dev/mcp'],
+           ['OAuth','required'],['Issuer','https://sentry.io',1],['Tools','14']],
+  playwright: [['Name','playwright'],['Transport','stdio'],['Command','npx @playwright/mcp@latest'],
+               ['OAuth','none'],['Tools','21']]
+};
+// Mirrors authState() in McpPage.tsx: negatives are tested before positives,
+// because "not authorized" contains "authorized"; a bare capability word
+// ("required") is not a state at all and shows nothing.
+function mcpAuth(s) {
+  const t = (s || '').toLowerCase();
+  if (!t) return { label:'', tone:'none' };
+  if (/^(required|optional|supported|enabled|disabled)$/.test(t)) return { label:'', tone:'none' };
+  if (/expired|invalid|fail|revoked/.test(t)) return { label:'Reauthorize', tone:'warn' };
+  if (/not authorized|unauthori[sz]ed|pending|needs|^(no|none|never)$/.test(t)) return { label:'Not authorized', tone:'warn' };
+  if (/\b(ok|yes)\b|valid|authorized|active|connected/.test(t)) return { label:'Authorized', tone:'ok' };
+  return { label: s.length > 24 ? s.slice(0, 23) + '…' : s, tone:'none' };
+}
+function mcpRowIcon(name) {
+  const tile = MCP_ICONS[name];
+  return tile ? `<img src="${tile}" alt="" class="mcp-row-ic" />` : `<span class="mcp-row-ic-svg">${mcpLogo(name)}</span>`;
+}
+function renderMcp() {
+  const zero = state.mcpEmpty;
+  const running = SANDBOXES.filter((s) => s.status === 'running');
+  const empty = `<div class="home-empty">
+    <span class="empty-mark">${ic('plug', 34)}</span>
+    <span class="home-empty-eyebrow">${ic('zap', 11)} Model Context Protocol</span>
+    <h1 class="home-empty-title">Give your agents tools</h1>
+    <p class="home-empty-sub">Add a server once here and every sandbox can reach it through the
+      gateway — no per-sandbox setup, and no credentials inside the container.</p>
+    <div class="home-empty-actions">
+      <button class="btn btn-primary" data-act="mcp-demo">${ic('plus', 15)} Add MCP server</button>
+    </div>
+    <div class="home-empty-features">
+      <div class="home-empty-feat"><span class="home-empty-feat-ic">${ic('boxes', 14)}</span>
+        <span class="home-empty-feat-title">Add once, use everywhere</span>
+        <span class="home-empty-feat-sub">Registered on this Mac and shared by every sandbox</span></div>
+      <div class="home-empty-feat"><span class="home-empty-feat-ic">${ic('shield-check', 14)}</span>
+        <span class="home-empty-feat-title">Credentials stay home</span>
+        <span class="home-empty-feat-sub">OAuth runs on the host; tokens never enter a sandbox</span></div>
+      <div class="home-empty-feat"><span class="home-empty-feat-ic">${ic('search', 14)}</span>
+        <span class="home-empty-feat-title">Static or discovered</span>
+        <span class="home-empty-feat-sub">Pre-load servers at creation, or let the agent find them</span></div>
+    </div>
+  </div>`;
+  const table = `<div class="lib-tbl">
+    <div class="lib-hdr lib-hdr-mcp"><span>SERVER</span><span>TARGET</span><span>AUTH</span><span></span></div>
+    ${MCP_REG.map((m) => {
+      const st = mcpAuth(m.auth);
+      const open = state.mcpInspect === m.name;
+      const rows = MCP_INSPECT[m.name] || [];
+      return `<div class="mcp-entry">
+        <div class="lib-row lib-row-mcp">
+          <div class="lib-primary">${mcpRowIcon(m.name)}<span>${m.name}</span></div>
+          <span class="mcp-row-target" title="${m.target}">${m.target}</span>
+          <span class="mcp-row-auth">${st.label
+            ? `<span class="rt-badge ${st.tone === 'ok' ? 'rt-badge-ok' : st.tone === 'warn' ? 'rt-badge-update' : ''}" title="${esc(m.auth)}">${st.label}</span>`
+            : '<span class="lib-muted">—</span>'}</span>
+          <div class="mcp-row-actions">
+            <div class="kit-add-wrap">
+              <button class="btn btn-default btn-sm" data-act="mcp-add" data-mcp="${m.name}"
+                title="${running.length ? 'Attach to a running sandbox' : 'No running sandboxes'}"${running.length ? '' : ' disabled'}>${ic('package-plus', 14)} Add to sandbox</button>
+            </div>
+            <button class="btn btn-ghost btn-sm${open ? ' active' : ''}" data-act="mcp-info" data-mcp="${m.name}" title="sbx mcp inspect">${ic('info', 13)} Info</button>
+            <button class="btn btn-ghost btn-sm tpl-icon-btn kit-more-btn" data-act="mcp-more" data-mcp="${m.name}" title="More…">${ic('ellipsis-vertical', 15)}</button>
+          </div>
+        </div>
+        ${open ? `<div class="mcp-info">${rows.map(([k, v, sub]) => `<div class="mcp-info-row${sub ? ' sub' : ''}">
+          <span class="mcp-info-k">${k}</span>
+          ${/^https?:/.test(v) ? `<a class="mcp-info-link">${v}</a>` : `<span class="mcp-info-v">${v}</span>`}
+        </div>`).join('')}</div>` : ''}
+        ${state.mcpAuthing === m.name ? `<div class="mcp-authing">${ic('refresh-cw', 13, 'spin')}
+          <span>Waiting for you to authorize <strong>${m.name}</strong> in your browser…</span>
+          <button class="btn btn-ghost btn-sm">Open the page again</button></div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>`;
+  return `<div class="page">
+    <div class="page-hdr"><span class="page-title">MCP servers</span><span class="lib-badge" style="margin-left:8px">Gateway</span></div>
+    <div class="page-subbar">
+      <span class="mcp-subbar-note">Registered once on this Mac and reused by every sandbox. OAuth stays here.</span>
+      <div class="page-subbar-actions">
+        <button class="btn btn-ghost btn-sm">${ic('refresh-cw', 14)} Refresh</button>
+        ${zero ? '' : `<button class="btn btn-primary btn-sm" data-act="mcp-demo">${ic('plus', 14)} Add an MCP</button>`}
+      </div>
+    </div>
+    <div class="page-body${zero ? ' page-body-center' : ''}">${zero ? empty : table}</div>
+    ${zero ? '' : `<div class="mcp-foot">${ic('info', 13)}<span>Pre-load servers into a new sandbox from
+      <strong>New Sandbox</strong> (static mode). Choose none and the agent discovers them itself through the gateway.</span></div>`}
   </div>`;
 }
 
@@ -5061,8 +5840,10 @@ function render() {
     state.page === 'sandbox'   ? renderDetail() :
     state.page === 'mixins'    ? renderKits('mixin') :
     state.page === 'kits'      ? renderKits('sandbox') :
+    state.page === 'mcp'       ? renderMcp() :
     state.page === 'templates' ? renderTemplates() :
     renderSettings();
+  if (window.__denRerender) { $('#app').innerHTML = renderMcp(); return; }
   $('#app').innerHTML = `${renderToolbar()}<div class="body">${renderSidebar()}<div class="content">${content}${renderModal()}</div></div>`;
 }
 
@@ -5178,6 +5959,44 @@ function openKitMoreMenu(btn) {
     <button class="kit-more-item">${ic('cloud-upload', 14)} Upload to Hub…</button>
     <div class="kit-more-sep"></div>
     <button class="kit-more-item danger">${ic('trash-2', 14)} Delete kit</button>`;
+  overlays().appendChild(el);
+  const w = el.getBoundingClientRect().width;
+  el.style.top = (r.bottom + 4) + 'px';
+  el.style.left = Math.max(8, r.right - w) + 'px';
+}
+function openMcpAddMenu(btn) {
+  closeMenus();
+  const r = btn.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = 'kit-add-menu mcp-attach-menu';
+  // Creation-time pre-loading is a different mechanism (--static-mcp, chosen in
+  // New Sandbox); this only attaches to something already running.
+  const running = SANDBOXES.filter((s) => s.status === 'running');
+  el.innerHTML = `<div class="kit-add-label">Add to running sandbox</div>
+    ${running.map((s) => `<button class="kit-add-sb">
+      <span class="kit-add-dot on"></span>
+      <span class="kit-add-sb-name">${s.name}</span>
+    </button>`).join('')}`;
+  overlays().appendChild(el);
+  const w = el.getBoundingClientRect().width;
+  el.style.top = (r.bottom + 4) + 'px';
+  el.style.left = Math.max(8, r.right - w) + 'px';
+}
+function openMcpMoreMenu(btn) {
+  closeMenus();
+  const name = btn.dataset.mcp;
+  const m = MCP_REG.find((x) => x.name === name) || {};
+  const st = mcpAuth(m.auth);
+  const r = btn.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = 'kit-more-menu';
+  el.innerHTML = `
+    <button class="kit-more-item" data-act="mcp-auth" data-mcp="${name}">${ic('key-round', 14)} ${st.tone === 'ok' ? 'Reauthorize' : 'Authorize'}</button>
+    <button class="kit-more-item">${ic('copy', 14)} Copy ${m.local ? 'command' : 'endpoint'}</button>
+    <button class="kit-more-item">${ic('square-terminal', 14)} Copy add command</button>
+    ${m.local ? `<button class="kit-more-item">${ic('folder-open', 14)} Open in Finder</button>` : ''}
+    <div class="kit-more-sep"></div>
+    <button class="kit-more-item danger">${ic('trash-2', 14)} Remove server</button>`;
   overlays().appendChild(el);
   const w = el.getBoundingClientRect().width;
   el.style.top = (r.bottom + 4) + 'px';
@@ -5299,6 +6118,8 @@ mq.addEventListener('change', () => { if (state.themePref === 'system') applyThe
 addEventListener('message', (e) => {
   const t = e.data && e.data.denTheme;
   if (t === 'dark' || t === 'light' || t === 'system') applyThemePref(t);
+  const c = e.data && e.data.denColorTheme;
+  if (c && THEMES.some((x) => x.id === c)) { state.colorTheme = c; applyColorTheme(); render(); }
 });
 window.den = {
   setTheme: applyThemePref,
@@ -5339,6 +6160,33 @@ document.addEventListener('click', (e) => {
   if ((el = hit('[data-act="restart"]'))) { closeMenus(); setStatus(el.dataset.sbxAct, 'running'); return; }
   if ((el = hit('[data-act="ctx-close"]'))) { closeMenus(); return; }
   if ((el = hit('[data-act="kit-close"]'))) { state.openKit = null; render(); return; }
+
+  /* MCP gateway */
+  if ((el = hit('[data-act="mcp-info"]'))) {
+    const n = el.dataset.mcp;
+    state.mcpInspect = state.mcpInspect === n ? null : n;
+    render(); return;
+  }
+  if ((el = hit('[data-act="mcp-add"]')))  { e.stopPropagation(); openMcpAddMenu(el); return; }
+  if ((el = hit('[data-act="mcp-more"]'))) { e.stopPropagation(); openMcpMoreMenu(el); return; }
+  if ((el = hit('[data-act="mcp-auth"]'))) {
+    // The real flow opens a browser on the host and waits; the capture shows
+    // the waiting state, then lands on authorized.
+    const n = el.dataset.mcp;
+    closeMenus();
+    state.mcpAuthing = n; render();
+    setTimeout(() => {
+      const m = MCP_REG.find((x) => x.name === n);
+      if (m) m.auth = 'authorized';
+      state.mcpAuthing = null; render();
+    }, 2600);
+    return;
+  }
+  if ((el = hit('[data-act="mcp-demo"]'))) {
+    // No Add-an-MCP modal in the capture: flip between the populated list and
+    // the welcome screen so both states are reachable from the page itself.
+    state.mcpEmpty = !state.mcpEmpty; render(); return;
+  }
 
   /* Docks */
   if ((el = hit('[data-act="dock-info"]'))) { state.dock = state.dock === 'info' ? null : 'info'; render(); return; }
@@ -5541,8 +6389,156 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMen
 
 /* ── Boot ───────────────────────────────────────────────────────────────── */
 const q = new URLSearchParams(location.search);
+const qc = q.get('color');
+if (qc && THEMES.some((x) => x.id === qc)) state.colorTheme = qc;
 applyThemePref(q.get('theme') === 'dark' ? 'dark' : q.get('theme') === 'light' ? 'light' : 'system', true);
-render();
+// ?page=mcp lands straight on the gateway; ?mcp=empty shows its welcome screen
+// instead of the registered list.
+if (q.get('page')) state.page = q.get('page');
+if (q.get('mcp') === 'empty') state.mcpEmpty = true;
+if (q.get('embed') === 'kit') {
+  // focused embed: a kit's summary, showing what it adds to a sandbox
+  const k = KITS.mixin.find((x) => x.name === 'workspace-context') || KITS.mixin[0];
+  document.documentElement.classList.add('embed-kit');
+  document.head.insertAdjacentHTML('beforeend',
+    '<style>'
+    + 'html.embed-kit #overlays{display:none;}'
+    + '.embed-kit-wrap{min-height:100vh;padding:20px 22px;box-sizing:border-box;}'
+    + '.embed-kit-hd{display:flex;align-items:center;gap:10px;margin-bottom:4px;padding-bottom:14px;border-bottom:1px solid var(--border);}'
+    + '.embed-kit-hd svg{color:var(--t2);}'
+    + '.embed-kit-hd .ekh-name{font-size:15.5px;font-weight:600;color:var(--t1);}'
+    + '.embed-kit-hd .ekh-tag{font-size:11px;color:var(--t3);background:var(--bg-subtle);border:1px solid var(--border);border-radius:100px;padding:2px 10px;}'
+    + '</style>');
+  document.getElementById('app').innerHTML =
+    '<div class="embed-kit-wrap">'
+    + '<div class="embed-kit-hd">' + ic('layers', 18) + '<span class="ekh-name">' + k.name + '</span><span class="ekh-tag">mixin kit</span></div>'
+    + kitSummary(k, 'mixin')
+    + '</div>';
+} else if (q.get('embed') === 'mcp') {
+  // focused embed: the MCP servers page on its own, without app chrome
+  state.page = 'mcp';
+  document.documentElement.classList.add('embed-mcp');
+  document.head.insertAdjacentHTML('beforeend',
+    '<style>'
+    + '.embed-mcp .page{height:100vh;}'
+    + '.embed-mcp .page-hdr{-webkit-app-region:no-drag;}'
+    + '</style>');
+  document.getElementById('app').innerHTML = renderMcp();
+  // Keep the row menus and Info expander working inside the crop.
+  const rerender = () => { document.getElementById('app').innerHTML = renderMcp(); };
+  window.__denRerender = rerender;
+} else if (q.get('embed') === 'network') {
+  // focused embed: render only the network-policy panel of a sample sandbox
+  const s = sb('atlas-color-themes');
+  state.infoAcc = { workspaces:false, kits:false, secrets:false, ports:false, network:true };
+  document.documentElement.classList.add('embed-net');
+  document.head.insertAdjacentHTML('beforeend',
+    '<style>'
+    + 'html.embed-net #overlays{display:none;}'
+    + '.embed-net-wrap{position:relative;min-height:100vh;padding:18px 20px;box-sizing:border-box;overflow:hidden;}'
+    + '.embed-net .info-dock{display:block;border:0;box-shadow:none;background:transparent;height:auto;}'
+    + '.embed-net .info-dock-hd,.embed-net .info-stats,.embed-net .np-note{display:none;}'
+    + '.embed-net .info-panel{overflow:visible;padding:0;}'
+    + '.embed-net .info-acc{border-top:0;}'
+    + '.embed-net .info-acc:not(.open){display:none;}'
+    + '.embed-net .info-acc-hd{pointer-events:none;}'
+    + '.embed-cursor{position:absolute;left:0;top:0;z-index:50;width:22px;height:22px;pointer-events:none;transition:transform .8s cubic-bezier(.4,0,.2,1);}'
+    + '.embed-cursor svg{width:22px;height:22px;display:block;filter:drop-shadow(0 2px 5px rgba(0,0,0,.4));transition:transform .12s;}'
+    + '.embed-cursor.tap svg{transform:scale(.82);}'
+    + '.ec-ripple{position:absolute;left:-4px;top:-4px;width:22px;height:22px;border-radius:50%;background:#C0702E;opacity:0;}'
+    + '.ec-ripple.go{animation:ecr .62s ease-out;}'
+    + '@keyframes ecr{0%{opacity:.5;transform:scale(.25);}100%{opacity:0;transform:scale(2.6);}}'
+    + '.np-rule-added{overflow:hidden;max-height:0;opacity:0;transform:translateY(-6px);transition:max-height .45s ease,opacity .35s ease,transform .35s ease;}'
+    + '.np-rule-added.in{max-height:150px;opacity:1;transform:none;}'
+    + '.np-add-form.anim{animation:npf .28s ease;}'
+    + '@keyframes npf{from{opacity:0;transform:translateY(-5px);}to{opacity:1;transform:none;}}'
+    + '.embed-net .np-add-input.act{outline:2px solid rgba(192,112,46,.45);outline-offset:0;}'
+    + '</style>');
+  document.getElementById('app').innerHTML = '<div class="embed-net-wrap">' + renderInfoDock(s) + '</div>';
+  // loop: cursor opens "+ Add rule", types a domain, clicks Add, then the rule appears
+  (function () {
+    const wrap = document.querySelector('.embed-net-wrap');
+    const addBtn = document.querySelector('[data-act="np-add-rule"]');
+    const addBox = document.querySelector('.np-add-box');
+    const cta = document.querySelector('.np-add-cta');
+    const rules = document.querySelector('.np-rules');
+    const badge = document.querySelector('.info-acc.open .info-acc-badge');
+    if (!wrap || !addBtn || !addBox || !rules) return;
+    const cur = document.createElement('div');
+    cur.className = 'embed-cursor';
+    cur.innerHTML = '<span class="ec-ripple"></span><svg viewBox="0 0 24 24" fill="#FBF7ED" stroke="#241A0F" stroke-width="1.3" stroke-linejoin="round"><path d="M5.4 2.8 5.4 17.6 9.1 14.1 11.6 19.8 13.9 18.8 11.4 13.1 16.3 12.9 Z"/></svg>';
+    wrap.appendChild(cur);
+    const ripple = cur.querySelector('.ec-ripple');
+    const baseCount = badge ? (parseInt(badge.textContent, 10) || 0) : 0;
+    const DOMAIN = 'huggingface.co';
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const rel = (el) => { const b = el.getBoundingClientRect(), w = wrap.getBoundingClientRect(); return { x: b.left - w.left, y: b.top - w.top, w: b.width, h: b.height }; };
+    const moveToEl = (el, dx, dy) => { const a = rel(el); cur.style.transform = 'translate(' + (a.x + (dx == null ? a.w * 0.5 : dx)) + 'px,' + (a.y + (dy == null ? a.h * 0.5 : dy)) + 'px)'; };
+    const moveXY = (x, y) => { cur.style.transform = 'translate(' + x + 'px,' + y + 'px)'; };
+    const tap = async (el) => {
+      ripple.classList.remove('go'); void ripple.offsetWidth; ripple.classList.add('go');
+      cur.classList.add('tap'); if (el) el.style.transform = 'scale(.96)';
+      await sleep(150);
+      cur.classList.remove('tap'); if (el) el.style.transform = '';
+    };
+    const formHtml =
+      '<div class="np-add-form np-rule np-rule-draft anim">'
+      + '<div class="np-dec-seg"><button class="np-dec-opt on">' + ic('check', 13, 'np-dec-ic-allow') + ' Allow</button>'
+      + '<button class="np-dec-opt">' + ic('x', 13, 'np-dec-ic-block') + ' Block</button></div>'
+      + '<input class="np-add-input" placeholder="example.com,  *.example.com:443" />'
+      + '<div class="np-add-form-actions"><button class="btn btn-ghost btn-sm">Cancel</button>'
+      + '<button class="btn btn-default btn-sm np-add-confirm">Add</button></div></div>';
+    (async function loop() {
+      moveToEl(addBtn, null, null); // start at the button
+      while (true) {
+        await sleep(1400);
+        // 1) click "+ Add rule"
+        moveToEl(addBtn, addBtn.getBoundingClientRect().width * 0.5 - 4, -2);
+        await sleep(780);
+        await tap(addBtn);
+        // 2) open the draft form (hide the CTA row while it's open)
+        if (cta) cta.style.display = 'none';
+        addBox.insertAdjacentHTML('afterbegin', formHtml);
+        const form = addBox.querySelector('.np-add-form');
+        const input = form.querySelector('.np-add-input');
+        const confirm = form.querySelector('.np-add-confirm');
+        await sleep(360);
+        // 3) move to the input and type the domain
+        moveToEl(input, 18, input.getBoundingClientRect().height * 0.5);
+        await sleep(520);
+        input.classList.add('act');
+        input.value = '';
+        for (let i = 0; i < DOMAIN.length; i++) { input.value += DOMAIN[i]; await sleep(58 + (i % 3) * 22); }
+        await sleep(420);
+        input.classList.remove('act');
+        // 4) click Add
+        moveToEl(confirm, confirm.getBoundingClientRect().width * 0.5, confirm.getBoundingClientRect().height * 0.5);
+        await sleep(560);
+        await tap(confirm);
+        // 5) close the form, the new rule slides in
+        form.remove();
+        if (cta) cta.style.display = '';
+        const nr = document.createElement('div');
+        nr.className = 'np-rule np-rule-added';
+        nr.innerHTML = '<div class="np-rule-hd"><span class="np-dec np-dec-allow">ALLOW</span><span class="np-rule-name">local</span><span class="np-scope">sandbox:atlas-color-themes · local</span></div><div class="np-res"><span class="np-chip">' + DOMAIN + '</span></div>';
+        rules.appendChild(nr);
+        void nr.offsetWidth;
+        nr.classList.add('in');
+        if (badge) badge.textContent = String(baseCount + 1);
+        await sleep(2600);
+        // 6) reset
+        nr.classList.remove('in');
+        if (badge) badge.textContent = String(baseCount);
+        await sleep(480);
+        nr.remove();
+        moveToEl(addBtn, null, null);
+        await sleep(700);
+      }
+    })();
+  })();
+} else {
+  render();
+}
 </script>
 </body>
 </html>
