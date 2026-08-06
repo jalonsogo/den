@@ -4163,22 +4163,8 @@ html, body, #root {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-subtle); padding: 14px; margin-bottom: 18px;
 }
-.mcp-add-hd {
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 12.5px; font-weight: 600; color: var(--t1); margin-bottom: 10px;
-}
-.mcp-add-x { background: none; border: none; cursor: pointer; color: var(--t3); display: flex; padding: 2px; }
 .mcp-add-x:hover { color: var(--t1); }
-.mcp-add-sep {
-  display: flex; align-items: center; gap: 10px;
-  margin: 14px 0 10px; font-size: 11px; color: var(--t3);
-}
-.mcp-add-sep::before, .mcp-add-sep::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
-.mcp-pick-search {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
-  border: 1px solid var(--border); border-radius: 6px; padding: 4px 9px; background: var(--bg);
-}
 .mcp-pick-search input { flex: 1; border: none; background: none; outline: none; color: var(--t1); font-size: 12px; }
 .mcp-pick-search button { border: none; background: none; cursor: pointer; color: var(--t3); display: flex; }
 
@@ -4218,8 +4204,6 @@ html, body, #root {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 48px 20px; text-align: center; color: var(--t3);
 }
-.mcp-zero-t { font-size: 13px; font-weight: 600; color: var(--t1); }
-.mcp-zero-s { font-size: 12px; max-width: 420px; line-height: 1.5; }
 
 /* Static-MCP picker in New Sandbox — toggles, not a dropdown: the set is small
    and which servers are pre-loaded is worth seeing at a glance. */
