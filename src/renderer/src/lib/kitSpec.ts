@@ -63,7 +63,13 @@ function tokenize(src: string): Line[] {
     return {
       // A blank line never ends a block — treat it as infinitely indented so
       // block scalars keep their internal paragraph breaks.
-      indent: blank ? Number.MAX_SAFE_INTEGER : raw.length - raw.replace(/^ */, '').length,
+      //
+      // Tabs count as indentation too. YAML forbids them, but hand-written and
+      // tool-generated kits use them anyway, and measuring spaces alone gave a
+      // tab-indented child indent 0 — making it a sibling of its own parent. The
+      // block then parsed as empty, so `sandbox.image`/`entrypoint` silently
+      // vanished, and re-saving wrote the default image over the real one.
+      indent: blank ? Number.MAX_SAFE_INTEGER : raw.length - raw.replace(/^[ \t]*/, '').length,
       text: raw.trim(),
       raw,
       blank
@@ -317,9 +323,12 @@ export function parseKitSpec(text: string): ParsedKit {
     description: asStr(root.description).replace(/\n+/g, ' ').trim(),
     image: asStr(sandbox.image),
     // v2 flattened entrypoint to a bare list; v1 wrapped it in `run`.
-    entrypoint: (v2
-      ? (Array.isArray(sandbox.entrypoint) ? sandbox.entrypoint.map(asStr) : strList(sandbox.entrypoint))
-      : (Array.isArray(entry.run) ? entry.run.map(asStr) : strList(entry.run))
+    // v2 flattened entrypoint to a bare list, v1 wrapped it in `run`. Accept
+    // either whatever the file declares: a spec that mixes them (or omits
+    // schemaVersion) shouldn't silently lose its entrypoint.
+    entrypoint: (Array.isArray(sandbox.entrypoint)
+      ? sandbox.entrypoint.map(asStr)
+      : Array.isArray(entry.run) ? entry.run.map(asStr) : strList(entry.run)
     ).join(' '),
     aiFilename: v2 ? asStr(agentInstructions.filename) : asStr(sandbox.aiFilename),
     allowedDomains: strList(v2 ? network.allow : network.allowedDomains),
