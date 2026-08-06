@@ -391,7 +391,9 @@ declare global {
       portPublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       portUnpublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       listFiles(name: string, relPath: string): Promise<FileEntry[]>
-      workspaceRoot(name: string, hint: string): Promise<string>
+      // null = couldn't reach the container to verify; caller should retry
+      // rather than fall back to the unverified host path.
+      workspaceRoot(name: string, hint: string): Promise<string | null>
       gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }>
       isGitRepo(dir: string): Promise<boolean>
       gitInfo(dir: string): Promise<{ isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>

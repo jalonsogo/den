@@ -712,7 +712,11 @@ function parsePolicyLs(out: string) {
   return { governance, sync, rules }
 }
 
-function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
+// `raw` keeps stdout exactly as produced. The default trim is right for the
+// value-style callers (a version, a JSON blob), but it silently corrupts any
+// format where leading whitespace on the first line is significant — see
+// gitStatus, where a trimmed " M path" loses a character off the filename.
+function sbx(args: string[], opts?: { timeout?: number; raw?: boolean }): Promise<string> {
   const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {
     // maxBuffer: the default is 1 MB — `sbx ls --json` / `exec … find` on a busy
@@ -720,7 +724,7 @@ function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
     // failed", so give it generous headroom. On error, prefer stderr, then any
     // stdout captured.
     execFile(getSbxPath(), args, { timeout, maxBuffer: 32 * 1024 * 1024, env: guiEnv() }, (err, stdout, stderr) => {
-      if (!err) return resolve(stdout.trim())
+      if (!err) return resolve(opts?.raw ? stdout : stdout.trim())
       const out = (stderr || stdout || '').toString().trim()
       if (out) return reject(new Error(out))
       // Nothing on either stream: all execFile gives us is "Command failed: <cmd>",
@@ -1903,14 +1907,26 @@ interface FileChange {
 async function gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }> {
   try {
     const out = await sbx(
-      ['exec', name, 'git', '-C', workspace, 'status', '--porcelain=v1', '--untracked-files=all'],
-      { timeout: 10000 }
+      // `raw`: porcelain v1 writes the two status columns then a space, and a
+      // worktree-only change leaves the first column blank (" M path"). Trimming
+      // the payload eats that leading space on the first line, and since git
+      // lists tracked changes before untracked ones, the first line is exactly
+      // where such an entry lands — which took a character off the filename and
+      // produced paths like "EADME.md" that nothing could then open.
+      // `core.quotePath=false`: otherwise a non-ASCII name arrives C-quoted
+      // ("caf\303\251.md") and is equally unopenable.
+      ['exec', name, 'git', '-C', workspace, '-c', 'core.quotePath=false',
+        'status', '--porcelain=v1', '--untracked-files=all'],
+      { timeout: 10000, raw: true }
     )
     const changes: FileChange[] = []
-    for (const line of out.split('\n')) {
-      if (!line.trim()) continue
-      const code = line.slice(0, 2)
-      let path = line.slice(3)
+    for (const rawLine of out.split('\n')) {
+      // Require the exact "XY path" shape rather than slicing blind, so a line
+      // that isn't what we expect is skipped instead of silently mangled.
+      const m = /^(..) (.+)$/.exec(rawLine.replace(/\r$/, ''))
+      if (!m) continue
+      const code = m[1]
+      let path = m[2]
       if (path.includes(' -> ')) path = path.split(' -> ')[1] // renamed: show new name
       let status: FileChange['status'] = 'modified'
       if (code.includes('?') || code.includes('A')) status = 'new'
@@ -2932,9 +2948,14 @@ function setupIPC(): void {
     const script = 'for d in "$1" "$PWD" "$HOME" /; do [ -n "$d" ] && [ -d "$d" ] && { printf %s "$d"; exit 0; }; done; printf /'
     try {
       const out = await sbx(['exec', name, 'sh', '-c', script, 'sh', hint || ''])
-      return (out.trim() || hint || '/')
+      return (out.trim() || null)
     } catch {
-      return hint || '/'
+      // Couldn't ask the container — usually it reports "running" a moment
+      // before `exec` works. Return null, not the unverified hint: handing back
+      // a host path we failed to check is what produced a doomed listing and an
+      // "Error occurred in handler for 'minipit:list-files'" stack per attempt.
+      // The caller retries instead.
+      return null
     }
   })
 

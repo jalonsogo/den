@@ -203,12 +203,25 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
     setRootReady(false)
     if (sandbox.status !== 'running') return
     let cancelled = false
-    window.minipit?.workspaceRoot(sandbox.name, sandbox.workspace)
-      .then((root) => { if (!cancelled) { if (root) setCwd(root); setRootReady(true) } })
-      // Couldn't resolve (sandbox not ready yet): fall back to listing the stored
-      // path rather than leaving the panel permanently blank.
-      .catch(() => { if (!cancelled) setRootReady(true) })
-    return () => { cancelled = true }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // A sandbox can report `running` a moment before `exec` works, and the
+    // resolver returns null rather than guessing when it can't reach the
+    // container. Retry briefly instead of listing the unresolved host path,
+    // which fails by construction for any workspace mounted elsewhere.
+    const resolve = (attempt: number) => {
+      window.minipit?.workspaceRoot(sandbox.name, sandbox.workspace)
+        .then((root) => {
+          if (cancelled) return
+          if (root) { setCwd(root); setRootReady(true) }
+          else if (attempt < 3) timer = setTimeout(() => resolve(attempt + 1), 400 * (attempt + 1))
+          // Out of retries: let the listing run so the panel shows the real
+          // failure, rather than spinning on a placeholder forever.
+          else setRootReady(true)
+        })
+        .catch(() => { if (!cancelled) setRootReady(true) })
+    }
+    resolve(0)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [sandbox.id, sandbox.workspace, sandbox.status, sandbox.name])
 
   const rootKey = cacheKey(sandbox.name, cwd)

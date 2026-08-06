@@ -127,6 +127,26 @@ Template:
   `src/main/index.ts` → `scanOutputForStartError()`, `WORKSPACE_GONE_RE`.
 - **Status:** fixed.
 
+### A workspace's host path is not always its path inside the container
+- **Version:** v0.37.0
+- **Symptom:** `Error: no such directory in sandbox: /Users/me/Code/<project>` from
+  the `list-files` handler, for a sandbox that is up and healthy.
+- **Cause:** den stores the workspace as the **host** path (`workspaces[0]` from
+  `sbx ls --json`) and uses it as an in-container path. That holds for a plain
+  direct-mount sandbox and not otherwise — `--clone` puts the working copy
+  somewhere else entirely (the host repo is read-only at `/run/sandbox/source`),
+  and a moved folder or a different mount point breaks it too.
+- **Fix:** ask the container instead of assuming — `workspace-root` probes
+  `"$1"`, `$PWD`, `$HOME`, `/` inside the sandbox and roots the Files tree at the
+  first that exists. When it can't reach the container it now returns nothing and
+  the caller retries, rather than falling back to the unverified host path and
+  guaranteeing a failed listing. `src/main/index.ts` → `minipit:workspace-root`,
+  `src/renderer/src/components/FilesPanel.tsx`.
+- **Status:** worked around. **Open:** whether `sbx inspect <name> --json`
+  reports the container-side mount target — den passes that payload straight to
+  the UI without parsing it. If it does, that beats probing. Needs checking on a
+  host with the CLI.
+
 ### `-p` is honoured at creation only
 - **Version:** v0.37.0
 - **Symptom:** ports passed on a re-attach are ignored, with no error.
