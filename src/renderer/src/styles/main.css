@@ -4181,3 +4181,24 @@ html, body, #root {
 .mcp-card-on { color: var(--green); flex-shrink: 0; }
 .mcp-card-busy { color: var(--t3); font-size: 12px; }
 .mcp-empty { grid-column: 1 / -1; font-size: 12px; color: var(--t3); padding: 8px 2px; }
+.mcp-oauth-toggle {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 8px;
+  background: none; border: none; cursor: pointer; color: var(--t2); font-size: 12px; padding: 2px 0;
+}
+.mcp-oauth-toggle:hover { color: var(--t1); }
+.mcp-skip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--t2); white-space: nowrap; }
+/* Row actions need a positioning context for the attach dropdown, and the row
+   itself must not clip it. */
+.mcp-row-actions { position: relative; }
+.mcp-attach-menu { right: 0; top: calc(100% + 4px); }
+/* Static-MCP picker in New Sandbox — toggles, not a dropdown: the set is small
+   and the choice (which servers are pre-loaded) is worth seeing at a glance. */
+.mcp-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcp-pick-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--t2); font-size: 12px; cursor: pointer;
+}
+.mcp-pick-item img { width: 14px; height: 14px; border-radius: 3px; object-fit: contain; }
+.mcp-pick-item:hover { border-color: var(--border-hi); color: var(--t1); }
+.mcp-pick-item.on { border-color: var(--primary); color: var(--t1); box-shadow: 0 0 0 1px var(--primary); }

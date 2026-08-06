@@ -4,6 +4,7 @@ import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { KitCaps } from '../KitCaps'
 import { randomName } from '../../lib/names'
+import { mcpIcon } from '../../lib/mcpCatalog'
 import { parseKitSpec, type ParsedKit } from '../../lib/kitSpec'
 import { AGENTS, type AgentType, type Template } from '../../types'
 
@@ -94,6 +95,12 @@ export function NewSandboxModal() {
   const [availKits, setAvailKits]     = useState<{ name: string; dir: string }[]>([])
   const [kitSpecs, setKitSpecs]       = useState<Record<string, ParsedKit>>({})  // dir → parsed spec, for preview
   const [kitKinds, setKitKinds]       = useState<Record<string, { name: string; kind: string }>>({})
+  // MCP gateway servers registered on the host (Library > MCP Servers). Picking
+  // any switches this sandbox to STATIC mode (--static-mcp): only those are
+  // pre-loaded. Picking none leaves it DYNAMIC — the agent discovers servers
+  // itself through the gateway's mcp-find tool.
+  const [mcpServers, setMcpServers]   = useState<string[]>([])
+  const [selMcps, setSelMcps]         = useState<string[]>([])
   const [selKits, setSelKits]         = useState<string[]>([])
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
@@ -106,6 +113,7 @@ export function NewSandboxModal() {
       if (t && t[0]) setTemplate((cur) => cur || `${t[0].repository}:${t[0].tag}`)
     }).catch(() => {})
     // Mixin kits can be stacked onto the new sandbox at creation (--kit).
+    window.minipit?.mcpList?.().then((r) => setMcpServers((r?.servers ?? []).map((m) => m.name))).catch(() => {})
     window.minipit?.listKits().then((k) => {
       const all = k ?? []
       setKitKinds(Object.fromEntries(all.map((x) => [x.dir, { name: x.name, kind: x.kind }])))
@@ -240,6 +248,7 @@ export function NewSandboxModal() {
           branch: clone,
           template: source === 'template' && template ? template : undefined,
           kits: selKits,
+          staticMcps: selMcps,
           ports: parsePorts(portsRaw),
           // Only sent when opting out — the store is mounted by default.
           noShareSkills: !shareSkills
@@ -276,6 +285,7 @@ export function NewSandboxModal() {
     ...parsePorts(portsRaw).flatMap((p) => ['-p', p]),
     ...(shareSkills ? [] : ['--no-share-skills']),
     ...selKits.flatMap((entry) => ['--kit', q(entry)]),
+    ...selMcps.flatMap((m) => ['--static-mcp', m]),
     agent,
     q(workspace || '<workspace>')
   ]
@@ -354,6 +364,35 @@ export function NewSandboxModal() {
             </div>
             <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
           </div>
+
+          {/* MCP servers from the gateway. Selecting any switches this sandbox
+              to static mode; selecting none leaves the agent free to discover
+              servers itself at runtime. */}
+          {mcpServers.length > 0 && (
+            <div className="fg">
+              <label className="flabel">
+                MCP servers
+                <span className="flabel-hint">
+                  {selMcps.length
+                    ? `static — ${selMcps.length} pre-loaded`
+                    : 'dynamic — the agent discovers them itself'}
+                </span>
+              </label>
+              <div className="mcp-pick">
+                {mcpServers.map((m) => (
+                  <button
+                    key={m}
+                    className={`mcp-pick-item${selMcps.includes(m) ? ' on' : ''}`}
+                    onClick={() => setSelMcps((cur) => cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m])}
+                  >
+                    <img src={mcpIcon(m.toLowerCase())} alt=""
+                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Mixin kits — stacked onto the agent at creation (--kit). Accepts
               local kits and remote OCI references (pulled by sbx at creation). */}

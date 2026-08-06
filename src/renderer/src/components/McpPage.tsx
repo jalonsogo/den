@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Plus, Trash2, KeyRound, RefreshCw, Search, X, Check, Globe, TerminalSquare, Info
+  Plus, Trash2, KeyRound, RefreshCw, Search, X, Check, Globe, TerminalSquare, Info, PackagePlus, FileSearch, ChevronDown
 } from 'lucide-react'
+import { useStore } from '../store'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 import { bridgeError } from '../lib/utils'
 import type { McpServerEntry } from '../types'
@@ -27,6 +28,7 @@ function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
 }
 
 export function McpPage() {
+  const sandboxes = useStore((s) => s.sandboxes)
   const [servers, setServers] = useState<McpServerEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -41,6 +43,16 @@ export function McpPage() {
   const [fCmd, setFCmd] = useState('')
   const [fArgs, setFArgs] = useState('')
   const [query, setQuery] = useState('')
+  // OAuth registration extras: scopes recorded with the server, an optional
+  // pre-registered client id, and registering without starting a browser flow.
+  const [fScopes, setFScopes] = useState('')
+  const [fClientId, setFClientId] = useState('')
+  const [fSkipAuth, setFSkipAuth] = useState(false)
+  const [oauthOpen, setOauthOpen] = useState(false)
+  // Per-row: `sbx mcp inspect` output, and the attach-to-sandbox picker.
+  const [inspectFor, setInspectFor] = useState<string | null>(null)
+  const [inspectOut, setInspectOut] = useState('')
+  const [attachFor, setAttachFor] = useState<string | null>(null)
 
   // Live output from `sbx mcp auth` — it opens a browser and may print a code,
   // so it streams rather than being swallowed.
@@ -63,13 +75,17 @@ export function McpPage() {
 
   const registered = new Set(servers.map((s) => s.name.toLowerCase()))
 
-  const add = async (cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean }) => {
+  const add = async (cfg: {
+    name: string; url?: string; command?: string; args?: string; local?: boolean
+    scopes?: string; clientId?: string; skipAuth?: boolean
+  }) => {
     setBusy(cfg.name); setMsg(null)
     const r = await window.minipit?.mcpAdd(cfg).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Register server') }))
     setBusy(null)
     if (r?.ok) {
       setMsg({ ok: true, text: `Registered "${cfg.name}". Authorize it if the server uses OAuth.` })
       setAdding(false); setFName(''); setFUrl(''); setFCmd(''); setFArgs('')
+      setFScopes(''); setFClientId(''); setFSkipAuth(false); setOauthOpen(false)
       load()
     } else {
       setMsg({ ok: false, text: r?.error || `Could not register "${cfg.name}".` })
@@ -94,6 +110,28 @@ export function McpPage() {
       : { ok: false, text: r?.error || `Authorization for "${name}" did not complete.` })
     load()
   }
+
+  const inspect = async (name: string) => {
+    if (inspectFor === name) { setInspectFor(null); return }
+    setInspectFor(name); setInspectOut('Loading…')
+    const r = await window.minipit?.mcpInspect(name)
+      .catch((e) => ({ ok: false as const, error: bridgeError(e, 'Inspect') }))
+    setInspectOut(r?.ok ? (r.raw || '(no output)') : (r?.error || 'Inspect failed.'))
+  }
+
+  // Attach to an ALREADY RUNNING sandbox. Creation-time attachment is a
+  // different mechanism — --static-mcp, chosen in New Sandbox.
+  const attach = async (name: string, sandbox: string) => {
+    setAttachFor(null); setBusy(name); setMsg(null)
+    const r = await window.minipit?.mcpLoad(name, sandbox)
+      .catch((e) => ({ ok: false as const, error: bridgeError(e, 'Add to sandbox') }))
+    setBusy(null)
+    setMsg(r?.ok
+      ? { ok: true, text: `Added "${name}" to ${sandbox}.` }
+      : { ok: false, text: r?.error || `Could not add "${name}" to ${sandbox}.` })
+  }
+
+  const running = sandboxes.filter((s) => s.status === 'running')
 
   const shown = MCP_CATALOG.filter((m) =>
     !query.trim() || `${m.name} ${m.category} ${m.description}`.toLowerCase().includes(query.toLowerCase()))
@@ -143,14 +181,34 @@ export function McpPage() {
                     <input className="finput" placeholder="args (e.g. @playwright/mcp@latest)" value={fArgs} onChange={(e) => setFArgs(e.target.value)} />
                   </>}
             </div>
+            <button className="mcp-oauth-toggle" onClick={() => setOauthOpen((v) => !v)}>
+              <ChevronDown size={13} style={{ transform: oauthOpen ? 'none' : 'rotate(-90deg)' }} />
+              OAuth options
+            </button>
+            {oauthOpen && (
+              <div className="kit-list-row" style={{ marginTop: 6 }}>
+                <input className="finput" placeholder="scopes (space or comma separated)"
+                       value={fScopes} onChange={(e) => setFScopes(e.target.value)} />
+                <input className="finput" placeholder="client id (if pre-registered)"
+                       value={fClientId} onChange={(e) => setFClientId(e.target.value)} />
+                <label className="mcp-skip">
+                  <input type="checkbox" checked={fSkipAuth} onChange={(e) => setFSkipAuth(e.target.checked)} />
+                  Register without authorizing
+                </label>
+              </div>
+            )}
             <div className="np-add-form-actions" style={{ marginTop: 8 }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setAdding(false)}>Cancel</button>
               <button
                 className="btn btn-default btn-sm"
                 disabled={!fName.trim() || (mode === 'remote' ? !fUrl.trim() : !fCmd.trim()) || busy !== null}
-                onClick={() => add(mode === 'remote'
-                  ? { name: fName, url: fUrl }
-                  : { name: fName, command: fCmd, args: fArgs, local: true })}
+                onClick={() => add({
+                  name: fName,
+                  ...(mode === 'remote'
+                    ? { url: fUrl }
+                    : { command: fCmd, args: fArgs, local: true }),
+                  scopes: fScopes, clientId: fClientId, skipAuth: fSkipAuth
+                })}
               >
                 Register
               </button>
@@ -183,7 +241,31 @@ export function McpPage() {
                 )}
               </div>
               <span className="mcp-row-target">{s.url || s.command || '—'}</span>
-              <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }} className="mcp-row-actions">
+                <div className="kit-add-wrap">
+                  <button
+                    className="btn btn-default btn-sm"
+                    title={running.length ? 'Attach to a running sandbox' : 'No running sandboxes'}
+                    disabled={busy === s.name || running.length === 0}
+                    onClick={() => setAttachFor(attachFor === s.name ? null : s.name)}
+                  >
+                    <PackagePlus size={14} /> Add to sandbox
+                  </button>
+                  {attachFor === s.name && (
+                    <div className="kit-add-menu mcp-attach-menu">
+                      <div className="kit-add-label">Add to running sandbox</div>
+                      {running.map((sb) => (
+                        <button key={sb.id} className="kit-add-sb" onClick={() => attach(s.name, sb.name)}>
+                          <span className="kit-add-dot on" />
+                          <span className="kit-add-sb-name">{sb.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button className="btn btn-ghost btn-sm" title="sbx mcp inspect" onClick={() => inspect(s.name)}>
+                  <FileSearch size={13} /> Inspect
+                </button>
                 <button className="btn btn-ghost btn-sm" disabled={busy === s.name} onClick={() => authorize(s.name)}>
                   <KeyRound size={13} /> {busy === s.name && authFor === s.name ? 'Authorizing…' : 'Authorize'}
                 </button>
@@ -195,6 +277,11 @@ export function McpPage() {
             </div>
           )
         })}
+        {inspectFor && (
+          <div className="rt-output" style={{ marginTop: 4 }}>
+            <pre className="logs-pre">{inspectOut}</pre>
+          </div>
+        )}
 
         {authFor && authOut && (
           <div className="rt-output" style={{ marginTop: 10 }}>

@@ -2910,6 +2910,7 @@ function setupIPC(): void {
     name?: string
     template?: string
     kits?: string[]
+    staticMcps?: string[]
     ports?: string[]
     noShareSkills?: boolean
   }) => {
@@ -2930,6 +2931,9 @@ function setupIPC(): void {
     if (config.noShareSkills) args.push('--no-share-skills')
     // --kit can only be passed at creation; stack one flag per kit directory.
     for (const dir of config.kits ?? []) args.push('--kit', dir)
+    // Static MCP mode: pre-load these registered servers. Passing none leaves the
+    // agent in dynamic mode, discovering servers itself via the gateway.
+    for (const m of config.staticMcps ?? []) args.push('--static-mcp', m)
     args.push(config.agent, config.workspace)
     // Stream output so the New Sandbox modal can show live progress (image pull,
     // kit injection, startup) instead of a silent "Creating…" spinner.
@@ -3102,6 +3106,7 @@ function setupIPC(): void {
 
   ipcMain.handle('minipit:mcp-add', async (_, cfg: {
     name: string; url?: string; command?: string; args?: string; local?: boolean
+    scopes?: string; clientId?: string; skipAuth?: boolean
   }) => {
     const name = (cfg.name || '').trim()
     if (!name) return { ok: false, error: 'A server name is required.' }
@@ -3112,6 +3117,11 @@ function setupIPC(): void {
     // `--args` takes the rest of the child command line; split on whitespace so
     // "npx @playwright/mcp@latest" reaches sbx as separate argv entries.
     for (const a of (cfg.args ?? '').trim().split(/\s+/).filter(Boolean)) args.push('--args', a)
+    // OAuth scopes recorded with the registration; repeatable, one flag each.
+    for (const sc of (cfg.scopes ?? '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)) args.push('--scope', sc)
+    if (cfg.clientId?.trim()) args.push('--client-id', cfg.clientId.trim())
+    // Register without kicking off a browser flow — useful when authorizing later.
+    if (cfg.skipAuth) args.push('--skip_auth')
     if (!cfg.url?.trim() && !cfg.command?.trim()) {
       return { ok: false, error: 'Give either a URL (remote) or a command (local).' }
     }
@@ -3126,6 +3136,17 @@ function setupIPC(): void {
   ipcMain.handle('minipit:mcp-remove', async (_, name: string) => {
     try {
       const output = await sbx(['mcp', 'rm', name], { timeout: 30000 })
+      return { ok: true, output }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Attach a registered server to a sandbox that's already running. Creation-time
+  // attachment is a different flag (`--static-mcp`, passed to `sbx run`).
+  ipcMain.handle('minipit:mcp-load', async (_, name: string, sandbox: string) => {
+    try {
+      const output = await sbx(['mcp', 'load', name, '--sandbox', sandbox], { timeout: 60000 })
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }

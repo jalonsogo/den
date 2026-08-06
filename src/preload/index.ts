@@ -185,6 +185,7 @@ const api = {
   mcpList:    ()                    => ipcRenderer.invoke('minipit:mcp-list'),
   mcpAdd:     (cfg: unknown)        => ipcRenderer.invoke('minipit:mcp-add', cfg),
   mcpRemove:  (name: string)        => ipcRenderer.invoke('minipit:mcp-remove', name),
+  mcpLoad:    (name: string, sandbox: string) => ipcRenderer.invoke('minipit:mcp-load', name, sandbox),
   mcpInspect: (name: string)        => ipcRenderer.invoke('minipit:mcp-inspect', name),
   mcpAuth:    (name: string)        => ipcRenderer.invoke('minipit:mcp-auth', name),
   onMcpAuthOutput: (cb: (chunk: string) => void) => {

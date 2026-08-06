@@ -527,8 +527,9 @@ declare global {
       // known=false while the probe is still running or the daemon is down.
       sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
       mcpList(): Promise<{ ok: boolean; servers: McpServerEntry[]; error?: string }>
-      mcpAdd(cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean }): Promise<{ ok: boolean; output?: string; error?: string }>
+      mcpAdd(cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean; scopes?: string; clientId?: string; skipAuth?: boolean }): Promise<{ ok: boolean; output?: string; error?: string }>
       mcpRemove(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      mcpLoad(name: string, sandbox: string): Promise<{ ok: boolean; output?: string; error?: string }>
       mcpInspect(name: string): Promise<{ ok: boolean; raw?: string; error?: string }>
       mcpAuth(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
       onMcpAuthOutput(cb: (chunk: string) => void): () => void
