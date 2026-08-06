@@ -135,6 +135,11 @@ interface AppState {
   // "seen" watermark so attention badges clear once the user looks.
   policyBlocks: Record<string, PolicyBlock[]>
   blocksSeenAt: Record<string, number>
+  // Policy edits already written to disk but not yet in force — a rule only
+  // takes effect when the sandbox next starts. Per sandbox name, a short
+  // description of each change; drained on (re)start. The Network panel turns
+  // this into a docked "restart to apply" prompt.
+  policyRestartPending: Record<string, string[]>
   toasts: PolicyBlock[]
   // Last refused launch per sandbox name. Sticky: a failed start leaves no other
   // trace in the UI (the terminal is replaced by the stopped placeholder), so it
@@ -211,6 +216,9 @@ interface AppState {
   setFiles:           (sandboxId: string, files: FileEntry[]) => void
   addPolicyBlock:     (block: PolicyBlock) => void
   ackPolicyBlocks:    (sandboxName: string) => void
+  dismissPolicyBlocks: (sandboxName: string, host: string) => void
+  notePolicyChange:   (sandboxName: string, change: string) => void
+  clearPolicyRestart: (sandboxName: string) => void
   dismissToast:       (block: PolicyBlock) => void
   setSandboxError:    (err: SandboxError) => void
   clearSandboxError:  (sandboxName: string) => void
@@ -276,6 +284,7 @@ export const useStore = create<AppState>((set) => ({
   customizeSandbox: null,
   policyBlocks: {},
   blocksSeenAt: {},
+  policyRestartPending: {},
   toasts: [],
   sandboxErrors: {},
   agentActivity: {},
@@ -665,7 +674,20 @@ export const useStore = create<AppState>((set) => ({
         stopHolds = { ...stopHolds }
         delete stopHolds[id]
       }
-      return { sandboxes, agentActivity, stopHolds }
+      // A start is what makes staged policy edits live, so drain the pending
+      // list here — the one place every start path (toolbar, palette, context
+      // menu, Network panel) funnels through. Only on an actual transition into
+      // running: a poll re-asserting "running" must not clear a fresh edit.
+      let policyRestartPending = state.policyRestartPending
+      const wasRunning = state.sandboxes.find((s) => s.id === id)?.status === 'running'
+      if ((updates.status === 'running' || updates.status === 'starting') && !wasRunning) {
+        const sb = sandboxes.find((s) => s.id === id)
+        if (sb && policyRestartPending[sb.name]) {
+          policyRestartPending = { ...policyRestartPending }
+          delete policyRestartPending[sb.name]
+        }
+      }
+      return { sandboxes, agentActivity, stopHolds, policyRestartPending }
     }),
 
   setActiveSandboxId: (id) => set({ activeSandboxId: id, activePage: 'sandbox', activeTab: 'terminal', logsReturn: null }),
@@ -719,6 +741,36 @@ export const useStore = create<AppState>((set) => ({
 
   ackPolicyBlocks: (sandboxName) =>
     set((state) => ({ blocksSeenAt: { ...state.blocksSeenAt, [sandboxName]: Date.now() } })),
+
+  // Drop a host's denials once they've been dealt with (allowed from the panel),
+  // so the list only ever shows blocks that still need a decision. Clears the
+  // matching toast too — the alert is stale the moment the rule exists.
+  dismissPolicyBlocks: (sandboxName, host) =>
+    set((state) => {
+      const list = state.policyBlocks[sandboxName]
+      if (!list) return {}
+      const next = list.filter((b) => b.host !== host)
+      if (next.length === list.length) return {}
+      return {
+        policyBlocks: { ...state.policyBlocks, [sandboxName]: next },
+        toasts: state.toasts.filter((t) => !(t.sandbox === sandboxName && t.host === host))
+      }
+    }),
+
+  notePolicyChange: (sandboxName, change) =>
+    set((state) => {
+      const list = state.policyRestartPending[sandboxName] ?? []
+      if (list.includes(change)) return {}
+      return { policyRestartPending: { ...state.policyRestartPending, [sandboxName]: [...list, change] } }
+    }),
+
+  clearPolicyRestart: (sandboxName) =>
+    set((state) => {
+      if (!state.policyRestartPending[sandboxName]?.length) return {}
+      const next = { ...state.policyRestartPending }
+      delete next[sandboxName]
+      return { policyRestartPending: next }
+    }),
 
   dismissToast: (block) =>
     set((state) => ({

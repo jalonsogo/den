@@ -94,13 +94,20 @@ sandbox — review the full diff and merge back"):
 
 ## Kits — compose & share agent setups
 
-- **Visual composer** — build a kit from a form (no YAML): Remote MCPs, network
-  policies, env vars, agent memory (attach PDFs/MD/txt), and commands.
+- **Visual composer** — build a kit from a form (no YAML): Remote MCPs, setup
+  commands (install once / startup every time), static files dropped into the
+  home dir or workspace, environment variables, credentials injected by the proxy,
+  the domains the kit needs, and the agent instructions it contributes.
 - **Remote-MCP catalog** — 50+ hosted MCP servers with search/filter, or add a
   custom MCP by URL.
 - **Mixin vs Sandbox kits** — stack mixin kits, or define a full agent with a
   sandbox kit.
 - **Add anywhere** — attach at creation or inject into a running sandbox.
+- **Import from four sources** — an OCI reference, a **Git repository**, a zip
+  archive, or a local folder. Repo import takes the URL you already have: a bare
+  repo, `git+…#ref=<rev>&dir=<subdir>`, an SSH remote, or the browser URL of a
+  branch/subfolder. It clones shallowly at the revision you pinned, and when a
+  repo holds several kits it lists them and asks which one.
 - **Share via any OCI registry** — push to Docker Hub / ghcr; pull by reference.
 
 ## Workspaces & runtime mounts

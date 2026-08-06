@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+// A static file bundled into a kit: copied to <kit>/files/<target>/<dest>.
+interface KitFile { src: string; target: 'home' | 'workspace'; dest: string }
+
 const api = {
   // UI density = a browser zoom factor applied to the whole window (scales every
   // element uniformly). Renderer-side webFrame call, so no IPC round-trip.
@@ -40,13 +43,15 @@ const api = {
   removeTemplate:(ref: string)          => ipcRenderer.invoke('minipit:remove-template', ref),
   templatePush:  (ref: string)          => ipcRenderer.invoke('minipit:template-push', ref),
   storageUsage: ()                      => ipcRenderer.invoke('minipit:storage-usage'),
-  createKit:     (name: string, spec: string, files?: string[]) => ipcRenderer.invoke('minipit:create-kit', name, spec, files),
+  createKit:     (name: string, spec: string, files?: KitFile[]) => ipcRenderer.invoke('minipit:create-kit', name, spec, files),
   pickFiles:     ()                     => ipcRenderer.invoke('minipit:pick-files'),
   listKits:      ()                     => ipcRenderer.invoke('minipit:list-kits'),
   kitAdd:        (sandbox: string, dir: string) => ipcRenderer.invoke('minipit:kit-add', sandbox, dir),
   appliedKits:   (sandbox: string)      => ipcRenderer.invoke('minipit:applied-kits', sandbox),
   readKit:       (dir: string)          => ipcRenderer.invoke('minipit:read-kit', dir),
-  updateKit:     (dir: string, spec: string, files?: string[]) => ipcRenderer.invoke('minipit:update-kit', dir, spec, files),
+  updateKit:     (dir: string, spec: string, files?: KitFile[]) => ipcRenderer.invoke('minipit:update-kit', dir, spec, files),
+  listKitFiles:  (dir: string)          => ipcRenderer.invoke('minipit:list-kit-files', dir),
+  removeKitFile: (dir: string, target: string, dest: string) => ipcRenderer.invoke('minipit:remove-kit-file', dir, target, dest),
   removeKit:     (dir: string)          => ipcRenderer.invoke('minipit:remove-kit', dir),
   kitPush:       (dir: string, ref: string) => ipcRenderer.invoke('minipit:kit-push', dir, ref),
   kitValidate:   (dir: string)          => ipcRenderer.invoke('minipit:kit-validate', dir),
@@ -55,7 +60,7 @@ const api = {
   kitImport:     (ref: string)          => ipcRenderer.invoke('minipit:kit-import', ref),
   kitImportZip:  ()                     => ipcRenderer.invoke('minipit:kit-import-zip'),
   kitImportFolder: ()                   => ipcRenderer.invoke('minipit:kit-import-folder'),
-  kitImportGit:  (url: string)          => ipcRenderer.invoke('minipit:kit-import-git', url),
+  kitImportGit:  (url: string, pickDir?: string) => ipcRenderer.invoke('minipit:kit-import-git', url, pickDir),
   listHubKits:   ()                     => ipcRenderer.invoke('minipit:list-hub-kits'),
   dockerAccount: ()                     => ipcRenderer.invoke('minipit:docker-account'),
   dockerLogin:   ()                     => ipcRenderer.invoke('minipit:docker-login'),
@@ -166,6 +171,15 @@ const api = {
     ipcRenderer.on('minipit:policy-block', handler)
     return () => ipcRenderer.removeListener('minipit:policy-block', handler)
   },
+  // An agent's API connection failed (closed mid-response, ECONNRESET, …), with
+  // the host-side circumstances captured at that moment.
+  onApiError: (cb: (trace: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, trace: unknown) => cb(trace)
+    ipcRenderer.on('minipit:api-error', handler)
+    return () => ipcRenderer.removeListener('minipit:api-error', handler)
+  },
+  apiTraces:       ()  => ipcRenderer.invoke('minipit:api-traces'),
+  revealApiTraces: ()  => ipcRenderer.invoke('minipit:reveal-api-traces'),
   // A launch that `sbx run` refused (bad workspace, runtime error) — the message
   // it printed before exiting, so the UI can show it instead of losing it.
   onSandboxError: (cb: (err: unknown) => void) => {

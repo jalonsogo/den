@@ -220,6 +220,29 @@ export interface PolicyBlock {
   source: 'log' | 'output'
 }
 
+// An agent's API connection failed, plus the host-side circumstances at that
+// moment. den can't see the connection itself (it lives inside the container),
+// so the trace is built from what the host can attest to — see docs/errors.md
+// for how to read one. Mirrors ApiErrorTrace in src/main/apiTrace.ts.
+export interface ApiErrorTrace {
+  at: string
+  sandbox: string
+  agent?: string
+  kind: 'closed-mid-response' | 'econnreset' | 'timeout' | 'other'
+  message: string
+  // How long the request had been running when it died — a lifetime cap shows
+  // up as this number repeating across traces.
+  streamMs: number | null
+  quietMs: number | null
+  sandboxUptimeMs: number | null
+  // Small values mean the Mac woke / changed network right before the failure,
+  // which resets every connection at once.
+  sinceResumeMs: number | null
+  sinceNetChangeMs: number | null
+  net: string
+  probe?: { daemon: 'ok' | 'failed'; detail?: string; ms: number }
+}
+
 // A launch `sbx run` refused. `kind` picks the remedy the UI offers:
 // `workspace-missing` means the host folder behind the workspace mount is gone
 // (`path` holds it) and the sandbox can't start until it's restored or removed.
@@ -337,6 +360,25 @@ export interface HubKit {
   updatedAt: string
 }
 
+// A kit found inside a Git repository — one entry per spec.yaml, offered as a
+// choice when a repo holds more than one.
+export interface RepoKit {
+  dir: string
+  name: string
+  kind: string
+  displayName: string
+  description: string
+}
+
+// A static file bundled into a kit. `src` is the host path picked in the editor;
+// it lands at <kit>/files/<target>/<dest>, which sbx copies into /home/agent/
+// (home) or the workspace at create time.
+export interface KitFile {
+  src: string
+  target: 'home' | 'workspace'
+  dest: string
+}
+
 declare global {
   interface Window {
     minipit: {
@@ -349,7 +391,9 @@ declare global {
       portPublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       portUnpublish(name: string, spec: string): Promise<{ ok: boolean; output?: string; error?: string }>
       listFiles(name: string, relPath: string): Promise<FileEntry[]>
-      workspaceRoot(name: string, hint: string): Promise<string>
+      // null = couldn't reach the container to verify; caller should retry
+      // rather than fall back to the unverified host path.
+      workspaceRoot(name: string, hint: string): Promise<string | null>
       gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }>
       isGitRepo(dir: string): Promise<boolean>
       gitInfo(dir: string): Promise<{ isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string }>
@@ -375,13 +419,15 @@ declare global {
       listTemplates(): Promise<Template[]>
       removeTemplate(ref: string): Promise<void>
       templatePush(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
-      createKit(name: string, spec: string, files?: string[]): Promise<{ dir: string; zip: string; output: string }>
+      createKit(name: string, spec: string, files?: KitFile[]): Promise<{ dir: string; zip: string; output: string }>
       pickFiles(): Promise<string[]>
       listKits(): Promise<{ name: string; kind: string; dir: string; hasZip: boolean }[]>
       kitAdd(sandbox: string, dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
       appliedKits(sandbox: string): Promise<string[]>
       readKit(dir: string): Promise<string>
-      updateKit(dir: string, spec: string, files?: string[]): Promise<{ ok: boolean; output?: string; error?: string }>
+      updateKit(dir: string, spec: string, files?: KitFile[]): Promise<{ ok: boolean; output?: string; error?: string }>
+      listKitFiles(dir: string): Promise<{ target: 'home' | 'workspace'; dest: string }[]>
+      removeKitFile(dir: string, target: string, dest: string): Promise<{ ok: boolean; error?: string }>
       removeKit(dir: string): Promise<void>
       kitPush(dir: string, ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitValidate(dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
@@ -390,7 +436,11 @@ declare global {
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
       kitImportZip(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
       kitImportFolder(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
-      kitImportGit(url: string): Promise<{ ok: boolean; name?: string; error?: string }>
+      // `choices` comes back instead of an import when the repo holds several
+      // kits — re-call with the chosen `dir` as `pickDir`.
+      kitImportGit(url: string, pickDir?: string): Promise<{
+        ok: boolean; name?: string; error?: string; choices?: RepoKit[]; repo?: string; ref?: string
+      }>
       listHubKits(): Promise<{ ok: boolean; kits?: HubKit[]; error?: string }>
       dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; fullName?: string; gravatar?: string; orgs?: string[] }>
       dockerLogin(): Promise<{ ok: boolean; output?: string; error?: string; netError?: boolean }>
@@ -463,6 +513,9 @@ declare global {
       onSandboxesUpdated(cb: (sandboxes: Sandbox[]) => void): () => void
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
+      onApiError(cb: (trace: ApiErrorTrace) => void): () => void
+      apiTraces(): Promise<{ path: string; count: number }>
+      revealApiTraces(): Promise<{ ok: boolean; empty: boolean }>
       onSandboxError(cb: (err: SandboxError) => void): () => void
       onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
       onAgentAttention(cb: (name: string) => void): () => void

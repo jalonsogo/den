@@ -3,10 +3,10 @@
   "version": "0.8.0",
   "description": "A beautiful GUI for Docker Sandboxes",
   "main": "./out/main/index.js",
-  "homepage": "https://den.studio",
+  "homepage": "https://useden.ai",
   "author": {
     "name": "den",
-    "url": "https://den.studio"
+    "url": "https://useden.ai"
   },
   "license": "MIT",
   "build": {

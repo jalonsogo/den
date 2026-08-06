@@ -7,7 +7,7 @@ import type { PolicyBlock, SandboxError } from '../types'
 // Each offers a one-click Allow (adds the host to the policy) and a jump to the
 // sandbox to manage it. Auto-dismisses so it never piles up.
 function Toast({ block }: { block: PolicyBlock }) {
-  const { dismissToast, setActiveSandboxId } = useStore()
+  const { dismissToast, setActiveSandboxId, dismissPolicyBlocks, notePolicyChange } = useStore()
   const [state, setState] = useState<'idle' | 'busy' | 'done' | 'err'>('idle')
 
   useEffect(() => {
@@ -19,7 +19,14 @@ function Toast({ block }: { block: PolicyBlock }) {
     setState('busy')
     const res = await window.minipit?.policyAllow(block.sandbox, block.host).catch(() => null)
     setState(res?.ok ? 'done' : 'err')
-    if (res?.ok) setTimeout(() => dismissToast(block), 3500)
+    if (res?.ok) {
+      // Same bookkeeping as allowing from the Network panel: the host is handled
+      // (drop it from the panel's list) but inert until a restart (which the
+      // panel's docked footer now asks for).
+      notePolicyChange(block.sandbox, `Allowed ${block.host}`)
+      dismissPolicyBlocks(block.sandbox, block.host)
+      setTimeout(() => dismissToast(block), 5000)
+    }
   }
 
   return (
@@ -30,7 +37,7 @@ function Toast({ block }: { block: PolicyBlock }) {
         <div className="toast-sub">
           <strong>{block.sandbox}</strong> → {block.host}
         </div>
-        {state === 'done' && <div className="toast-note ok">Allowed · restart the sandbox to apply</div>}
+        {state === 'done' && <div className="toast-note ok">Rule added — not active until the sandbox restarts</div>}
         {state === 'err' && <div className="toast-note err">Couldn’t add rule</div>}
         <div className="toast-actions">
           {state === 'idle' || state === 'busy' ? (

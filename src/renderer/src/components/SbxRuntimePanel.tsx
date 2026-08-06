@@ -234,6 +234,17 @@ export function SbxRuntimePanel({
   const diagRef = useRef<HTMLDivElement>(null)
   const daemonRef = useRef<HTMLDivElement>(null)
 
+  // Debug traces for dropped agent API connections. Recorded in the background
+  // whether or not anyone is looking — the failure is intermittent, so the count
+  // here is usually the first sign one happened.
+  const [traces, setTraces] = useState<{ path: string; count: number } | null>(null)
+  useEffect(() => {
+    const load = () => { void window.minipit?.apiTraces?.().then(setTraces).catch(() => {}) }
+    load()
+    // Refresh live: a failure can land while this panel is open.
+    return window.minipit?.onApiError?.(load)
+  }, [])
+
   // Daemon health + log level (`sbx daemon status` / `log-level`).
   const [daemonStatus, setDaemonStatus] = useState<{ running: boolean; raw?: string } | null>(null)
   const [logLevel, setLogLevel] = useState<string>('')
@@ -898,6 +909,29 @@ export function SbxRuntimePanel({
             </div>
           </div>
         )}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">
+              API failure traces
+              {!!traces?.count && <span className="rt-badge rt-badge-update" style={{ marginLeft: 8 }}>{traces.count}</span>}
+            </div>
+            <div className="ss-sub">
+              {traces?.count
+                ? 'Recorded automatically when an agent reports a dropped API connection.'
+                : 'None recorded. '}
+              den can’t see the connection itself — it’s inside the container — so each trace notes how
+              long the request had been running and whether this Mac had just woken or changed network.
+              That’s what tells a connection-lifetime cap apart from a whole-path reset.
+            </div>
+          </div>
+          <button
+            className="btn btn-default btn-sm"
+            onClick={() => window.minipit?.revealApiTraces?.()}
+            title={traces?.path}
+          >
+            <Bug size={13} /> Reveal
+          </button>
+        </div>
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Daemon log level</div>

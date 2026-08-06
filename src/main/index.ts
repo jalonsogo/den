@@ -17,6 +17,12 @@ import http from 'http'
 import { randomBytes, createHash } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { execFile, spawn } from 'child_process'
+import { parseGitKitRef, assertRepoSubdir, cloneAtRef, resolveKitDir, type GitKitRef } from './gitKitRef'
+import {
+  startApiTraceWatchers, scanOutputForApiErrors, writeApiErrorTrace,
+  noteTurnStart, forgetSandbox as forgetApiTrace,
+  traceFile, traceDir, traceCount, type ApiErrorTrace
+} from './apiTrace'
 import Store from 'electron-store'
 // node-pty 1.x compiles to CJS with `__esModule: true` but no `default` export,
 // so a default import resolves to `undefined` under esbuild's interop (crashing
@@ -40,6 +46,9 @@ const sbxProcesses = new Map<string, ReturnType<typeof pty.spawn>>()
 const ptyMap = new Map<string, ReturnType<typeof pty.spawn>>()
 // Track uptime start times
 const uptimeMap = new Map<string, number>()
+// Sandbox name → agent id, refreshed from every `sbx ls`. Read by API-failure
+// traces, which run off the PTY and have no sandbox record to hand.
+const sandboxAgents = new Map<string, string>()
 // Sandboxes created in this app instance that have not yet had an agent session
 // started. A brand-new sandbox has no conversation to resume, so its first
 // `agent-ensure` must start fresh rather than pass `--continue` (which would
@@ -526,6 +535,52 @@ function kitsRoot(): string {
   return root
 }
 
+// A kit's bundled static file: copy `src` (a host path) to
+// <kit>/files/<target>/<dest>, which sbx drops into /home/agent/ or the
+// workspace at create time.
+type KitFileArg = { src: string; target?: 'home' | 'workspace'; dest?: string } | string
+
+// Paths that reach the kit handlers come from the renderer, so confine every
+// filesystem write to the kits root before touching it.
+function assertInsideKitsRoot(p: string): string {
+  const path = require('path')
+  const root = kitsRoot()
+  const resolved = path.resolve(p)
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new Error(`refusing to touch a path outside the kits folder: ${p}`)
+  }
+  return resolved
+}
+
+// Join a renderer-supplied relative path onto `base` without letting it escape
+// (`../`, absolute paths).
+function safeJoin(base: string, rel: string): string {
+  const path = require('path')
+  const resolved = path.resolve(base, rel)
+  if (resolved !== base && !resolved.startsWith(path.resolve(base) + path.sep)) {
+    throw new Error(`invalid destination path: ${rel}`)
+  }
+  return resolved
+}
+
+function copyKitFiles(kitDir: string, files?: KitFileArg[]): void {
+  if (!files?.length) return
+  const fs = require('fs')
+  const path = require('path')
+  const base = assertInsideKitsRoot(kitDir)
+  for (const f of files) {
+    // A bare string is the old renderer contract: drop it in the workspace root.
+    const entry = typeof f === 'string' ? { src: f } : f
+    if (!entry?.src) continue
+    try {
+      const target = entry.target === 'home' ? 'home' : 'workspace'
+      const dest = safeJoin(join(base, 'files', target), entry.dest?.trim() || path.basename(entry.src))
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.copyFileSync(entry.src, dest)
+    } catch (e) { console.error('copy kit file failed:', e) }
+  }
+}
+
 // sbx has no "which kits are on this sandbox" query, so track it locally.
 function recordKits(sandbox: string, kitDirs: string[]): void {
   if (!sandbox || !kitDirs?.length) return
@@ -657,7 +712,11 @@ function parsePolicyLs(out: string) {
   return { governance, sync, rules }
 }
 
-function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
+// `raw` keeps stdout exactly as produced. The default trim is right for the
+// value-style callers (a version, a JSON blob), but it silently corrupts any
+// format where leading whitespace on the first line is significant — see
+// gitStatus, where a trimmed " M path" loses a character off the filename.
+function sbx(args: string[], opts?: { timeout?: number; raw?: boolean }): Promise<string> {
   const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {
     // maxBuffer: the default is 1 MB — `sbx ls --json` / `exec … find` on a busy
@@ -665,7 +724,7 @@ function sbx(args: string[], opts?: { timeout?: number }): Promise<string> {
     // failed", so give it generous headroom. On error, prefer stderr, then any
     // stdout captured.
     execFile(getSbxPath(), args, { timeout, maxBuffer: 32 * 1024 * 1024, env: guiEnv() }, (err, stdout, stderr) => {
-      if (!err) return resolve(stdout.trim())
+      if (!err) return resolve(opts?.raw ? stdout : stdout.trim())
       const out = (stderr || stdout || '').toString().trim()
       if (out) return reject(new Error(out))
       // Nothing on either stream: all execFile gives us is "Command failed: <cmd>",
@@ -757,6 +816,9 @@ function extractPortArray(data: unknown, name: string): RawPort[] {
 }
 
 function normalizeSandbox(raw: SbxSandbox) {
+  // Remembered for API-failure traces: which agent produced the error matters,
+  // since each one words its failures (and retries) differently.
+  sandboxAgents.set(raw.name, raw.agent ?? 'claude')
   const startTime = uptimeMap.get(raw.name)
   const uptimeSeconds =
     raw.status === 'running' && startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined
@@ -1549,6 +1611,34 @@ function scanOutputForBlocks(name: string, data: string): void {
   // Keep only the tail so the buffer can't grow unbounded.
   blockScanBuf.set(name, buf.slice(-2048))
   scanOutputForStartError(name, buf)
+  scanOutputForApiFailures(name, stripped)
+}
+
+// An agent reported an API failure. den can't see the connection that broke —
+// it lives inside the container — so record the host-side circumstances that
+// tell a connection-lifetime cap apart from a whole-path reset, and probe the
+// daemon to see whether the proxy itself went down. See docs/errors.md.
+function scanOutputForApiFailures(name: string, stripped: string): void {
+  const traces = scanOutputForApiErrors(name, stripped, {
+    agent: sandboxAgents.get(name),
+    uptimeAt: uptimeMap.get(name)
+  })
+  for (const trace of traces) {
+    // Probe, then write — the daemon's state is part of the evidence. Writing
+    // is deferred by at most the probe timeout; nothing else waits on it.
+    const started = Date.now()
+    sbx(['daemon', 'status'], { timeout: 5000 })
+      .then(() => ({ daemon: 'ok' as const }))
+      .catch((e: unknown) => ({
+        daemon: 'failed' as const,
+        detail: (e instanceof Error ? e.message : String(e)).slice(0, 200)
+      }))
+      .then((probe) => {
+        const entry: ApiErrorTrace = { ...trace, probe: { ...probe, ms: Date.now() - started } }
+        writeApiErrorTrace(entry)
+        mainWindow?.webContents.send('minipit:api-error', entry)
+      })
+  }
 }
 
 // ── Failed launches ──────────────────────────────────────────────────────────
@@ -1650,6 +1740,9 @@ const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 function setAgentState(name: string, state: AgentState): void {
   if (agentState.get(name) === state) return
   agentState.set(name, state)
+  // Entering `working` starts a turn — the clock an API-failure trace reports as
+  // `streamMs`, i.e. how long the request had been running when it died.
+  if (state === 'working') noteTurnStart(name)
   hookLog(`${name} state → ${state}`)
   mainWindow?.webContents.send('minipit:agent-activity', name, state)
   // The menus colour and order sandboxes by this, so rebuild. Cheap enough:
@@ -1814,14 +1907,26 @@ interface FileChange {
 async function gitStatus(name: string, workspace: string): Promise<{ isRepo: boolean; changes: FileChange[] }> {
   try {
     const out = await sbx(
-      ['exec', name, 'git', '-C', workspace, 'status', '--porcelain=v1', '--untracked-files=all'],
-      { timeout: 10000 }
+      // `raw`: porcelain v1 writes the two status columns then a space, and a
+      // worktree-only change leaves the first column blank (" M path"). Trimming
+      // the payload eats that leading space on the first line, and since git
+      // lists tracked changes before untracked ones, the first line is exactly
+      // where such an entry lands — which took a character off the filename and
+      // produced paths like "EADME.md" that nothing could then open.
+      // `core.quotePath=false`: otherwise a non-ASCII name arrives C-quoted
+      // ("caf\303\251.md") and is equally unopenable.
+      ['exec', name, 'git', '-C', workspace, '-c', 'core.quotePath=false',
+        'status', '--porcelain=v1', '--untracked-files=all'],
+      { timeout: 10000, raw: true }
     )
     const changes: FileChange[] = []
-    for (const line of out.split('\n')) {
-      if (!line.trim()) continue
-      const code = line.slice(0, 2)
-      let path = line.slice(3)
+    for (const rawLine of out.split('\n')) {
+      // Require the exact "XY path" shape rather than slicing blind, so a line
+      // that isn't what we expect is skipped instead of silently mangled.
+      const m = /^(..) (.+)$/.exec(rawLine.replace(/\r$/, ''))
+      if (!m) continue
+      const code = m[1]
+      let path = m[2]
       if (path.includes(' -> ')) path = path.split(' -> ')[1] // renamed: show new name
       let status: FileChange['status'] = 'modified'
       if (code.includes('?') || code.includes('A')) status = 'new'
@@ -2126,6 +2231,7 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
       return
     }
     uptimeMap.delete(name)
+    forgetApiTrace(name)
     clearAgentActivity(name)
     mainWindow?.webContents.send('minipit:agent-exit', name)
     // Trigger a sandbox list refresh
@@ -2688,7 +2794,7 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     {
       role: 'help',
       submenu: [
-        { label: 'den Website', click: () => shell.openExternal('https://den.studio') }
+        { label: 'den Website', click: () => shell.openExternal('https://useden.ai') }
       ]
     }
   ]
@@ -2842,9 +2948,14 @@ function setupIPC(): void {
     const script = 'for d in "$1" "$PWD" "$HOME" /; do [ -n "$d" ] && [ -d "$d" ] && { printf %s "$d"; exit 0; }; done; printf /'
     try {
       const out = await sbx(['exec', name, 'sh', '-c', script, 'sh', hint || ''])
-      return (out.trim() || hint || '/')
+      return (out.trim() || null)
     } catch {
-      return hint || '/'
+      // Couldn't ask the container — usually it reports "running" a moment
+      // before `exec` works. Return null, not the unverified hint: handing back
+      // a host path we failed to check is what produced a doomed listing and an
+      // "Error occurred in handler for 'minipit:list-files'" stack per attempt.
+      // The caller retries instead.
+      return null
     }
   })
 
@@ -2884,20 +2995,14 @@ function setupIPC(): void {
 
   // ── Kits ───────────────────────────────────────────────────────────────
   // Kit artifacts authored under <userData>/kits/<name>/ (spec.yaml + files/).
-  ipcMain.handle('minipit:create-kit', async (_, name: string, specYaml: string, files?: string[]) => {
+  ipcMain.handle('minipit:create-kit', async (_, name: string, specYaml: string, files?: KitFileArg[]) => {
     const fs = require('fs')
-    const path = require('path')
-    const base = join(kitsRoot(), name)
+    // The name reaches us from the renderer and becomes a directory — keep it a
+    // single folder inside the kits root (`..` would escape it).
+    const base = safeJoin(kitsRoot(), name)
     fs.mkdirSync(join(base, 'files'), { recursive: true })
     fs.writeFileSync(join(base, 'spec.yaml'), specYaml)
-    // Bundle attached reference files into the kit (injected into the workspace).
-    if (files?.length) {
-      const dest = join(base, 'files', 'workspace')
-      fs.mkdirSync(dest, { recursive: true })
-      for (const fp of files) {
-        try { fs.copyFileSync(fp, join(dest, path.basename(fp))) } catch (e) { console.error('copy kit file failed:', e) }
-      }
-    }
+    copyKitFiles(base, files)
     const zip = join(kitsRoot(), `${name}.zip`)
     // pack validates the spec and produces the ZIP artifact.
     const output = await sbx(['kit', 'pack', base, '-o', zip], { timeout: 30000 })
@@ -2905,10 +3010,15 @@ function setupIPC(): void {
     return { dir: base, zip, output }
   })
 
+  // Kit files are config, dotfiles and helper scripts as often as documents, so
+  // "All files" leads; `showHiddenFiles` makes dotfiles selectable at all.
   ipcMain.handle('minipit:pick-files', async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Docs', extensions: ['pdf', 'txt', 'md', 'markdown', 'json', 'yaml', 'yml', 'csv'] }]
+      properties: ['openFile', 'multiSelections', 'showHiddenFiles'],
+      filters: [
+        { name: 'All files', extensions: ['*'] },
+        { name: 'Docs', extensions: ['pdf', 'txt', 'md', 'markdown', 'json', 'yaml', 'yml', 'csv'] }
+      ]
     })
     return r.canceled ? [] : r.filePaths
   })
@@ -2942,20 +3052,44 @@ function setupIPC(): void {
     catch { return '' }
   })
 
-  // Rewrite a kit's spec.yaml, bundle any newly-attached files, and re-pack it.
-  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string, files?: string[]) => {
-    try {
-      const fs = require('fs')
-      const path = require('path')
-      fs.writeFileSync(join(dir, 'spec.yaml'), spec)
-      // Copy in any new reference files (existing bundled files are left as-is).
-      if (files?.length) {
-        const dest = join(dir, 'files', 'workspace')
-        fs.mkdirSync(dest, { recursive: true })
-        for (const fp of files) {
-          try { fs.copyFileSync(fp, join(dest, path.basename(fp))) } catch (e) { console.error('copy kit file failed:', e) }
+  // The static files already packed under <kit>/files/, as {target, dest} pairs
+  // the editor can display and remove.
+  ipcMain.handle('minipit:list-kit-files', (_, dir: string) => {
+    const fs = require('fs')
+    const path = require('path')
+    const out: { target: 'home' | 'workspace'; dest: string }[] = []
+    for (const target of ['home', 'workspace'] as const) {
+      const root = join(assertInsideKitsRoot(dir), 'files', target)
+      const walk = (d: string) => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true }) as { name: string; isDirectory: () => boolean }[]) {
+          const full = join(d, e.name)
+          if (e.isDirectory()) walk(full)
+          else out.push({ target, dest: path.relative(root, full) })
         }
       }
+      try { walk(root) } catch { /* no files/<target> in this kit */ }
+    }
+    return out
+  })
+
+  ipcMain.handle('minipit:remove-kit-file', (_, dir: string, target: string, dest: string) => {
+    try {
+      const fs = require('fs')
+      const base = join(assertInsideKitsRoot(dir), 'files', target === 'home' ? 'home' : 'workspace')
+      fs.rmSync(safeJoin(base, dest), { force: true })
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Rewrite a kit's spec.yaml, bundle any newly-attached files, and re-pack it.
+  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string, files?: KitFileArg[]) => {
+    try {
+      const fs = require('fs')
+      fs.writeFileSync(join(assertInsideKitsRoot(dir), 'spec.yaml'), spec)
+      // Copy in any newly-attached files (already-packed files are left as-is).
+      copyKitFiles(dir, files)
       const output = await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 })
       return { ok: true, output }
     } catch (err) {
@@ -3381,30 +3515,51 @@ function setupIPC(): void {
     }
   })
 
-  // Import a kit from a Git repository. Accepts a plain repo URL, or one with a
-  // `#dir=<subdir>` fragment (or `git+` prefix) to point at a kit in a subfolder.
-  ipcMain.handle('minipit:kit-import-git', async (_, url: string) => {
+  // Import a kit from a Git repository. Takes anything paste-shaped (see
+  // parseGitKitRef): a bare repo URL, sbx's `git+…#ref=&dir=` form, an scp-style
+  // remote, or a browser URL pointing at a branch and subfolder. `pickDir`
+  // overrides the subdirectory — that's how the renderer answers the kit picker
+  // returned when a repo holds several kits.
+  ipcMain.handle('minipit:kit-import-git', async (_, url: string, pickDir?: string) => {
     const fs = require('fs')
     const os = require('os')
-    const raw = (url || '').trim()
-    if (!raw) return { ok: false, error: 'Repository URL is required.' }
-    const [repoUrl, frag] = raw.replace(/^git\+/, '').split('#')
-    const subdir = /(?:^|&)dir=([^&]+)/.exec(frag || '')?.[1] || ''
-    const name = kitNameFrom(subdir || repoUrl.replace(/\.git$/, ''))
-    const dir = join(kitsRoot(), name)
-    const tmp = fs.mkdtempSync(join(os.tmpdir(), 'den-kit-'))
-    try {
-      await runBin('git', ['clone', '--depth', '1', repoUrl, tmp])
-      const src = subdir ? join(tmp, subdir) : tmp
-      if (!fs.existsSync(join(src, 'spec.yaml'))) {
-        return { ok: false, error: `No spec.yaml found${subdir ? ` in "${subdir}"` : ' at the repo root'} — pass "#dir=<subfolder>" if the kit lives in a subdirectory.` }
+    let parsed: GitKitRef
+    try { parsed = parseGitKitRef(url) } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+    const { repo, ref } = parsed
+    let subdir = parsed.dir
+    if (pickDir != null) {
+      try { subdir = assertRepoSubdir(pickDir) } catch (err) {
+        return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
       }
+    }
+    const tmp = fs.mkdtempSync(join(os.tmpdir(), 'den-kit-'))
+    let dir = ''
+    try {
+      await cloneAtRef(repo, ref, tmp, (args, timeout) => runBin('git', args, timeout))
+      // Several candidates go back to the renderer as a picker; one is imported
+      // without asking, even when the reference pointed somewhere else.
+      const resolved = resolveKitDir(tmp, subdir)
+      if (resolved.choices) return { ok: false, choices: resolved.choices, repo, ref }
+      if (resolved.dir == null) {
+        return {
+          ok: false,
+          error: `No spec.yaml found in ${repo}${ref ? ` at ${ref}` : ''}${subdir ? ` (looked in "${subdir}" and the whole repo)` : ''} — this repo doesn't look like it holds a kit.`
+        }
+      }
+      subdir = resolved.dir
+      const src = subdir ? join(tmp, subdir) : tmp
+      const name = kitNameFrom(subdir || repo.replace(/\.git$/i, ''))
+      dir = join(kitsRoot(), name)
       fs.rmSync(dir, { recursive: true, force: true })
       fs.cpSync(src, dir, { recursive: true })
+      // A subfolder import copies only that folder, but a root import brings the
+      // whole repo — drop the git metadata either way.
       fs.rmSync(join(dir, '.git'), { recursive: true, force: true })
       return await finalizeImportedKit(name)
     } catch (err) {
-      fs.rmSync(dir, { recursive: true, force: true })
+      if (dir) fs.rmSync(dir, { recursive: true, force: true })
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     } finally {
       try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
@@ -3721,6 +3876,18 @@ function setupIPC(): void {
     if (/^https?:\/\//i.test(path)) return openExternalSafe(path)
     const expanded = path.replace(/^~/, app.getPath('home'))
     return shell.openPath(expanded)
+  })
+
+  // Debug traces for agent API failures — where the file is, how much is in it,
+  // and a way to get at it. See docs/errors.md for how to read one.
+  ipcMain.handle('minipit:api-traces', () => ({ path: traceFile(), count: traceCount() }))
+  ipcMain.handle('minipit:reveal-api-traces', () => {
+    const fs = require('fs')
+    const file = traceFile()
+    // Nothing recorded yet: reveal the folder rather than no-op on a missing file.
+    if (!fs.existsSync(file)) { void shell.openPath(traceDir()); return { ok: true, empty: true } }
+    shell.showItemInFolder(file)
+    return { ok: true, empty: false }
   })
 
   // Open the built-in file editor in its own window.
@@ -4613,6 +4780,11 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('studio.den.app')
   app.on('browser-window-created', (_, window) => { optimizer.watchWindowShortcuts(window) })
 
+  // Sleep/wake and network-change clocks for API-failure traces. Cheap and
+  // always on: the whole point is that the failure is intermittent, so the
+  // circumstances have to already be recorded when it finally happens.
+  startApiTraceWatchers()
+
   // Brand the running app: dock icon (dev shows the default Electron icon
   // otherwise) and the native "About den" panel (which pulls its icon/name from
   // the running app, so it'd be blank/Electron without this).
@@ -4627,7 +4799,7 @@ app.whenReady().then(() => {
       applicationName: 'den',
       applicationVersion: `Version ${app.getVersion()}`,
       version: '',
-      copyright: '© Docker · den.studio',
+      copyright: '© Docker · useden.ai',
       iconPath: dockIconPath
     })
   }

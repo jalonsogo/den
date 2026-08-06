@@ -20,6 +20,16 @@ export interface McpServer {
   transport: 'http' | 'sse'
   category: string
   description: string
+  // Extra hosts to allow beyond the server URL's own. Under the MCP
+  // Authorization spec the *client* — the agent, inside the sandbox — performs
+  // discovery, dynamic client registration and the token exchange itself, and a
+  // provider can put those on different hosts than the MCP endpoint. Allowing
+  // only the endpoint leaves a flow that half-works: the browser authorization
+  // succeeds and the token exchange is then blocked, which reads as "it just
+  // doesn't connect". Take these from the provider's own metadata
+  // (`/.well-known/oauth-protected-resource` → `oauth-authorization-server`)
+  // rather than guessing.
+  authHosts?: string[]
 }
 
 export const MCP_CATALOG: McpServer[] = [
@@ -30,6 +40,10 @@ export const MCP_CATALOG: McpServer[] = [
   { id: 'cloudflare', name: 'Cloudflare', url: 'https://mcp.cloudflare.com/mcp', transport: 'http', category: 'Cloud', description: 'Workers, D1, R2, DNS, account APIs' },
   { id: 'netlify', name: 'Netlify', url: 'https://netlify-mcp.netlify.app/mcp', transport: 'http', category: 'Cloud', description: 'Create, deploy and manage sites' },
   { id: 'railway', name: 'Railway', url: 'https://mcp.railway.com', transport: 'http', category: 'Cloud', description: 'Projects, services, deployments' },
+  // OAuth lives off-host: vercel.com serves the authorization-server metadata
+  // and JWKS, api.vercel.com the client registration, token exchange/refresh,
+  // revoke and userinfo.
+  { id: 'vercel', name: 'Vercel', url: 'https://mcp.vercel.com', transport: 'http', category: 'Cloud', description: 'Projects, deployments, logs, docs', authHosts: ['vercel.com', 'api.vercel.com'] },
   // Data
   { id: 'neon', name: 'Neon', url: 'https://mcp.neon.tech/mcp', transport: 'http', category: 'Data', description: 'Postgres projects, branches, SQL' },
   { id: 'supabase', name: 'Supabase', url: 'https://mcp.supabase.com/mcp', transport: 'http', category: 'Data', description: 'Projects, database, docs' },

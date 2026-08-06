@@ -37,6 +37,31 @@ interface XTermProps {
 // re-enable (would need per-visibility clearTextureAtlas/refresh handling first).
 const ENABLE_WEBGL = false
 
+// Fit the grid to its box, then hand a row back if what got rendered still
+// overflows it.
+//
+// xterm derives a row's height from devicePixelRatio — ceil(charHeight × dpr)
+// device px, divided back down — so at a fractional dpr (exactly what a UI
+// density other than 100% produces: zoom 1.1 → dpr 2.2 on a Retina display) a
+// row comes out a hair taller than the whole-pixel cell height the fit was
+// computed from. Over ~50 rows that hair adds up to several pixels, and since
+// xterm sizes .xterm-screen itself (rows × cell height) while the container
+// clips, the surplus eats the bottom of the last row — the agent's status line
+// arrives sliced in half. Measuring what was actually laid out catches that
+// (and any other rounding mismatch) instead of trusting the arithmetic.
+function fitToBox(term: Terminal, fit: FitAddon, host: HTMLElement | null): void {
+  fit.fit()
+  if (!host || term.rows <= 1) return
+  const screen = term.element?.querySelector('.xterm-screen') as HTMLElement | null
+  if (!screen) return
+  // Computed height is the content box — the same measurement FitAddon makes.
+  const available = parseFloat(window.getComputedStyle(host).height)
+  const rendered = screen.getBoundingClientRect().height
+  // A pixel of slack: sub-pixel rounding is unavoidable and invisible, and
+  // trimming on it would cost a row for nothing.
+  if (isFinite(available) && rendered > available + 1) term.resize(term.cols, term.rows - 1)
+}
+
 // A real VT100 terminal (xterm.js) that handles full-screen TUIs like Claude Code.
 function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStart, onDispose, onDropFiles, shiftEnterNewline }: XTermProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -80,7 +105,7 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     const fit = fitRef.current
     if (!term || !fit) return
     try {
-      fit.fit()
+      fitToBox(term, fit, ref.current)
       if (term.rows <= 0) return
       const resize = onResizeRef.current
       if (term.cols !== sentColsRef.current || term.rows !== sentRowsRef.current) {
@@ -160,7 +185,7 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     let gotData = false
     const refit = () => {
       try {
-        fit.fit()
+        fitToBox(term, fit, ref.current)
         if (term.rows > 0) term.refresh(0, term.rows - 1)
       } catch { /* container not sized yet */ }
     }
@@ -293,9 +318,36 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     const ro = new ResizeObserver(() => { kick() })
     ro.observe(ref.current)
 
+    // Changing the UI density zooms the window, and a zoom changes
+    // devicePixelRatio. xterm re-measures its cell size on that (it listens for
+    // the same event) but never touches the row count — resizing the grid is the
+    // fit addon's job, and nothing was re-running it. The container's own resize
+    // does fire, but it lands *before* xterm re-measures, so the fit it triggers
+    // is computed from the outgoing cell height. Result: the row count stays as
+    // it was while each row grows, and the bottom row is clipped for good, since
+    // nothing else moves. Watch dpr ourselves and refit once xterm has settled.
+    let dprQuery: MediaQueryList | null = null
+    let dprTimer: ReturnType<typeof setTimeout> | undefined
+    const onDprChange = () => {
+      if (disposed) return
+      watchDpr()   // one-shot: the old query can no longer match
+      // rAF, not now: our listener and xterm's are on the same event and the
+      // order between them isn't ours to decide.
+      requestAnimationFrame(() => { kick(); requestAnimationFrame(kick) })
+      dprTimer = setTimeout(() => { if (!disposed) kick() }, 200)
+    }
+    const watchDpr = () => {
+      dprQuery?.removeEventListener('change', onDprChange)
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+      dprQuery.addEventListener('change', onDprChange)
+    }
+    watchDpr()
+
     return () => {
       disposed = true
       settleTimers.forEach(clearTimeout)
+      clearTimeout(dprTimer)
+      dprQuery?.removeEventListener('change', onDprChange)
       ro.disconnect()
       dataDisp.dispose()
       el.removeEventListener('copy', onCopy)
@@ -312,6 +364,20 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
   useEffect(() => {
     if (termRef.current) termRef.current.options.theme = theme
   }, [theme])
+
+  // Settings → density zooms the whole window. The dpr watcher below covers it
+  // (and a drag onto a differently-scaled display), but this is the trigger we
+  // can observe directly, so drive the refit off it too rather than relying on
+  // when the resolution media query decides to fire. Skips the mount pass: the
+  // terminal's own settle timers already handle first paint.
+  const density = useStore((s) => s.density)
+  const densityCustom = useStore((s) => s.densityCustom)
+  const densitySeen = useRef(false)
+  useEffect(() => {
+    if (!densitySeen.current) { densitySeen.current = true; return }
+    const timers = [0, 80, 250, 600].map((ms) => setTimeout(forceRedraw, ms))
+    return () => timers.forEach(clearTimeout)
+  }, [density, densityCustom, forceRedraw])
 
   // Force a repaint when this tab becomes visible (the inactive tab is laid out
   // at a different size than the active one, so the agent's last frame won't match
