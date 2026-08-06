@@ -227,7 +227,7 @@ export function SbxRuntimePanel({
   // hidden until a diagnostics run has completed at least once — they only make
   // sense once you've actually run the probe.
   const [diagRan, setDiagRan] = useState(false)
-  // Daemon restart (`sbx daemon stop` + `sbx daemon start -d`) — its own output
+  // Daemon restart (`sbx daemon restart`) — its own output
   // box, rendered under the Restart daemon button.
   const [daemonBusy, setDaemonBusy] = useState(false)
   const [daemonOut, setDaemonOut] = useState('')
@@ -884,8 +884,7 @@ export function SbxRuntimePanel({
               )}
             </div>
             <div className="ss-sub">
-              Stop and restart the sbx daemon (<code>sbx daemon stop</code> then{' '}
-              <code>sbx daemon start -d</code>) — try this if you hit connection errors
+              Restart the sbx daemon (<code>sbx daemon restart</code>) — try this if you hit connection errors
               (<code>ECONNREFUSED</code>/<code>ECONNRESET</code>).
             </div>
           </div>

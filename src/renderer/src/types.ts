@@ -514,6 +514,8 @@ declare global {
       onLogLine(cb: (name: string, line: LogLine) => void): () => void
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
       onApiError(cb: (trace: ApiErrorTrace) => void): () => void
+      // known=false while the probe is still running or the daemon is down.
+      sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
       apiTraces(): Promise<{ path: string; count: number }>
       revealApiTraces(): Promise<{ ok: boolean; empty: boolean }>
       onSandboxError(cb: (err: SandboxError) => void): () => void

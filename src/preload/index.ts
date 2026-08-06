@@ -178,6 +178,8 @@ const api = {
     ipcRenderer.on('minipit:api-error', handler)
     return () => ipcRenderer.removeListener('minipit:api-error', handler)
   },
+  // Is the installed sbx new enough for the CLI dialect den speaks?
+  sbxVersionCheck: ()  => ipcRenderer.invoke('minipit:sbx-version-check'),
   apiTraces:       ()  => ipcRenderer.invoke('minipit:api-traces'),
   revealApiTraces: ()  => ipcRenderer.invoke('minipit:reveal-api-traces'),
   // A launch that `sbx run` refused (bad workspace, runtime error) — the message

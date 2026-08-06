@@ -1012,7 +1012,7 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         const data = (await resp.json()) as { access_token?: string }
         if (!data.access_token) throw new Error('no access_token in token response')
         // Store via stdin so the token never appears in argv / shell history.
-        await sbxWithInput(['secret', 'set', '-g', 'anthropic'], data.access_token + '\n')
+        await sbxWithInput(['secret', 'set', 'anthropic'], data.access_token + '\n')
         resolve({ ok: true })
       } catch (err) {
         reject(err)
@@ -1042,8 +1042,11 @@ function anthropicOAuth(): Promise<{ ok: true }> {
 
 // Translate a scope value from the renderer into `sbx secret set/rm` args:
 // global → ['-g']; anything else is a sandbox name passed positionally.
+// v0.38 made secrets global by default and moved sandbox scope onto a flag. The
+// old spellings — a bare positional sandbox name, and `-g` for global — are
+// deprecated and warn. Global is now simply the absence of a scope.
 function secretScopeArgs(scope?: string): string[] {
-  return !scope || scope === '(global)' ? ['-g'] : [scope]
+  return !scope || scope === '(global)' ? [] : ['--sandbox', scope]
 }
 
 // Parse the `sbx secret ls` table (columns separated by 2+ spaces). No `-g`, so
@@ -2293,8 +2296,8 @@ function showMainWindow(): void {
 
 // Show the window (recreating it if it was closed) and deliver a tray-driven
 // navigation event once the renderer has finished loading.
-// Stop then start sandboxd. Shared by the Runtime IPC handler and the menu-bar
-// item, so both stream into the same Diagnostics output box.
+// Restart sandboxd (`sbx daemon restart`, v0.38). Shared by the Runtime IPC
+// handler and the menu-bar item, so both stream into the same output box.
 async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
   const send = (chunk: string) =>
     mainWindow?.webContents.send('minipit:daemon-output', chunk)
@@ -2304,9 +2307,10 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
     return code
   }
   try {
-    await step(['daemon', 'stop'])          // best-effort — ignore its exit code
-    const code = await step(['daemon', 'start', '-d'])
-    if (code !== 0) return { ok: false, error: `sbx daemon start exited ${code}` }
+    // v0.38 added a first-class `daemon restart`; it supersedes the old
+    // stop-then-start pair, which raced when the daemon was slow to exit.
+    const code = await step(['daemon', 'restart'])
+    if (code !== 0) return { ok: false, error: `sbx daemon restart exited ${code}` }
     send('\nDaemon restarted.\n')
     return { ok: true }
   } catch (err) {
@@ -2317,6 +2321,23 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
 // sbx version for the menu bar. Cached because the tray menu is rebuilt
 // synchronously (and often); refreshed in the background on each rebuild so a
 // runtime update shows up without restarting den.
+// den speaks the v0.38 CLI dialect only: `daemon restart`, `secret set
+// --sandbox`, `--static-mcp`, `--deny-network` and kit spec v2 all arrived
+// there, and the pre-0.38 spellings it replaced are deprecated. Rather than
+// carry two code paths, den states the floor and shows a banner below it —
+// otherwise an old runtime fails as a stream of opaque "unknown flag" errors.
+export const MIN_SBX_VERSION = '0.38.0'
+
+/** True when `a` is an older release than `b`. Non-numeric suffixes ignored. */
+function semverLt(a: string, b: string): boolean {
+  const parts = (s: string) => (s.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1, 4) ?? []).map(Number)
+  const [a1 = 0, a2 = 0, a3 = 0] = parts(a)
+  const [b1 = 0, b2 = 0, b3 = 0] = parts(b)
+  if (a1 !== b1) return a1 < b1
+  if (a2 !== b2) return a2 < b2
+  return a3 < b3
+}
+
 let cachedSbxVersion = ''
 // Both menus retry the read while the version is still unknown (a down runtime
 // never fills it), so keep one probe in flight rather than stacking an exec per
@@ -2985,6 +3006,20 @@ function setupIPC(): void {
     }
   })
 
+  // Is the installed runtime new enough? `known: false` means the probe hasn't
+  // answered yet (or the daemon is down) — the UI shows nothing rather than
+  // accusing a runtime it couldn't read.
+  ipcMain.handle('minipit:sbx-version-check', async () => {
+    if (!cachedSbxVersion) refreshSbxVersion()
+    const version = cachedSbxVersion
+    return {
+      version,
+      min: MIN_SBX_VERSION,
+      known: !!version,
+      outdated: !!version && semverLt(version, MIN_SBX_VERSION)
+    }
+  })
+
   ipcMain.handle('minipit:list-templates', () => listTemplates())
 
   ipcMain.handle('minipit:remove-template', async (_, ref: string) => {
@@ -3299,11 +3334,9 @@ function setupIPC(): void {
     }
   )
 
-  // Restart the sbx daemon: `sbx daemon stop` then `sbx daemon start -d`. Runs
-  // the two steps in sequence and streams to its OWN channel so the output can
-  // render under the Restart daemon button, separate from the diagnostics box.
-  // The first step is best-effort — if the daemon is already down, `stop` may
-  // exit non-zero, which shouldn't block the restart.
+  // Restart the sbx daemon (`sbx daemon restart`, v0.38 — supersedes the old
+  // stop-then-start pair). Streams to its OWN channel so the output renders
+  // under the Restart daemon button, separate from the diagnostics box.
   ipcMain.handle('minipit:daemon-restart', () => restartDaemon())
 
   // Daemon health for the Diagnostics status indicator: `sbx daemon status`
@@ -4003,7 +4036,7 @@ function setupIPC(): void {
 
   // sbx has a built-in OAuth flow for OpenAI (opens the browser, stores tokens).
   ipcMain.handle('minipit:oauth-secret', (_, service: string) => new Promise((resolve, reject) => {
-    const proc = spawn(getSbxPath(), ['secret', 'set', '-g', service, '--oauth'])
+    const proc = spawn(getSbxPath(), ['secret', 'set', service, '--oauth'])
     let err = ''
     proc.stderr?.on('data', (d) => (err += d))
     proc.on('error', reject)
