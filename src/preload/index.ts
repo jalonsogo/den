@@ -179,6 +179,7 @@ const api = {
     return () => ipcRenderer.removeListener('minipit:api-error', handler)
   },
   // Is the installed sbx new enough for the CLI dialect den speaks?
+  mainBuildId: ()      => ipcRenderer.invoke('minipit:build-id'),
   sbxVersionCheck: ()  => ipcRenderer.invoke('minipit:sbx-version-check'),
   // MCP gateway (sbx v0.38): servers registered once on the host, reused by
   // sandboxes. OAuth stays host-side, so den only drives the CLI.

@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight } from 'lucide-react'
 import { useStore } from '../store'
 
+// Stamped into every bundle at build time by electron.vite.config.ts.
+declare const __BUILD_ID__: string
+
 // den speaks the sbx v0.38 CLI dialect only — `daemon restart`, `secret set
 // --sandbox`, `--static-mcp`, `--deny-network`, kit spec v2. On an older
 // runtime those surface one at a time as opaque "unknown flag" failures spread
@@ -14,6 +17,19 @@ export function OutdatedRuntimeBanner() {
   const { setActivePage, setSettingsTarget } = useStore()
   const [info, setInfo] = useState<{ version: string; min: string; outdated: boolean } | null>(null)
   const [dismissed, setDismissed] = useState(false)
+
+  // The renderer hot-reloads; the main process only reloads on a full restart.
+  // When they drift, new UI calls handlers that don't exist yet (or worse, old
+  // ones that quietly succeed) — which reads as a broken button, not stale code.
+  // Both bundles carry the same build stamp, so a mismatch is decisive.
+  const [staleMain, setStaleMain] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void window.minipit?.mainBuildId?.()
+      .then((id) => { if (!cancelled && id && id !== __BUILD_ID__) setStaleMain(true) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -29,6 +45,18 @@ export function OutdatedRuntimeBanner() {
     return () => { cancelled = true; clearInterval(t) }
   }, [])
 
+  if (staleMain) {
+    return (
+      <div className="rt-outdated">
+        <AlertTriangle size={14} className="rt-outdated-ic" />
+        <span className="rt-outdated-txt">
+          den’s background process is running <strong>older code</strong> than this window. The interface
+          has reloaded but its handlers haven’t — actions will look like they do nothing.
+          <strong> Quit and reopen den.</strong>
+        </span>
+      </div>
+    )
+  }
   if (!info?.outdated || dismissed) return null
   return (
     <div className="rt-outdated">

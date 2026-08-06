@@ -31,6 +31,8 @@ import * as pty from 'node-pty'
 
 // Name the app early (before whenReady) so menus, the About panel and the dock
 // label read "den" instead of "Electron" in dev. Packaged builds use productName.
+declare const __BUILD_ID__: string
+
 app.setName('den')
 
 const store = new Store()
@@ -3047,6 +3049,11 @@ function setupIPC(): void {
   // Is the installed runtime new enough? `known: false` means the probe hasn't
   // answered yet (or the daemon is down) — the UI shows nothing rather than
   // accusing a runtime it couldn't read.
+  // The build this main process was started from. The renderer compares it with
+  // its own: they differ whenever main has been rebuilt but not restarted, which
+  // presents as new UI wired to old handlers.
+  ipcMain.handle('minipit:build-id', () => __BUILD_ID__)
+
   ipcMain.handle('minipit:sbx-version-check', async () => {
     if (!cachedSbxVersion) refreshSbxVersion()
     const version = cachedSbxVersion

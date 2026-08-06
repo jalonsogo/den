@@ -525,6 +525,7 @@ declare global {
       onPolicyBlock(cb: (block: PolicyBlock) => void): () => void
       onApiError(cb: (trace: ApiErrorTrace) => void): () => void
       // known=false while the probe is still running or the daemon is down.
+      mainBuildId(): Promise<string>
       sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
       mcpList(): Promise<{ ok: boolean; servers: McpServerEntry[]; error?: string }>
       mcpAdd(cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean; scopes?: string; clientId?: string; skipAuth?: boolean }): Promise<{ ok: boolean; output?: string; error?: string }>
