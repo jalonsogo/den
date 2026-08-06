@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Plus, Trash2, KeyRound, RefreshCw, Search, X, Check, Globe, TerminalSquare, Info, PackagePlus, FileSearch, ChevronDown
+  Plus, Plug, Trash2, KeyRound, RefreshCw, Search, X, Check, Globe, TerminalSquare, Info, PackagePlus, FileSearch, ChevronDown
 } from 'lucide-react'
 import { useStore } from '../store'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
@@ -138,14 +138,18 @@ export function McpPage() {
 
   return (
     <div className="page">
+      {/* .page-hdr is a fixed 45px single-line row — title and actions only.
+          Anything explanatory belongs in the body, not crammed in here. */}
       <div className="page-hdr">
-        <div>
-          <div className="page-title">MCP servers</div>
-          <div className="page-sub">
-            Registered once here and reused by every sandbox through the gateway. OAuth stays on this Mac.
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 7 }}>
+        <span className="page-title">MCP servers</span>
+        <span className="lib-badge" style={{ marginLeft: 8 }}>Gateway</span>
+      </div>
+
+      <div className="page-subbar">
+        <span className="mcp-subbar-note">
+          Registered once on this Mac and reused by every sandbox. OAuth stays here.
+        </span>
+        <div className="page-subbar-actions">
           <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin' : undefined} /> Refresh
           </button>
@@ -155,16 +159,49 @@ export function McpPage() {
         </div>
       </div>
 
-      <div className="page-body" style={{ padding: '8px 28px 28px' }}>
+      <div className="page-body">
         {msg && (
           <div className={`np-banner ${msg.ok ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>
             <span className="np-banner-txt">{msg.text}</span>
           </div>
         )}
 
+        {/* Registration lives behind the CTA: the catalog is 50+ entries, and as
+            permanent page furniture it buried the thing you actually came for. */}
         {adding && (
           <div className="mcp-add-form">
-            <div className="np-dec-seg" style={{ marginBottom: 10 }}>
+            <div className="mcp-add-hd">
+              <span>Register a server</span>
+              <button className="mcp-add-x" onClick={() => setAdding(false)} aria-label="Close"><X size={14} /></button>
+            </div>
+
+            <div className="mcp-pick-search">
+              <Search size={13} />
+              <input value={query} placeholder="Search the catalog…" onChange={(e) => setQuery(e.target.value)} />
+              {query && <button onClick={() => setQuery('')}><X size={12} /></button>}
+            </div>
+            <div className="mcp-grid">
+              {shown.map((m) => {
+                const on = registered.has(m.id.toLowerCase())
+                return (
+                  <button
+                    key={m.id}
+                    className={`mcp-card${on ? ' on' : ''}`}
+                    disabled={on || busy === m.id}
+                    title={on ? `${m.name} is already registered` : `${m.name} — ${m.description}`}
+                    onClick={() => add({ name: m.id, url: m.url })}
+                  >
+                    <img src={mcpIcon(m.id)} alt="" />
+                    <span className="mcp-card-name">{m.name}</span>
+                    {on ? <Check size={13} className="mcp-card-on" /> : busy === m.id ? <span className="mcp-card-busy">…</span> : null}
+                  </button>
+                )
+              })}
+              {shown.length === 0 && <div className="mcp-empty">No servers match.</div>}
+            </div>
+
+            <div className="mcp-add-sep">or enter one manually</div>
+            <div className="np-dec-seg" style={{ marginBottom: 8 }}>
               <button className={`np-dec-opt${mode === 'remote' ? ' on' : ''}`} onClick={() => setMode('remote')}>
                 <Globe size={13} /> Remote
               </button>
@@ -197,7 +234,7 @@ export function McpPage() {
                 </label>
               </div>
             )}
-            <div className="np-add-form-actions" style={{ marginTop: 8 }}>
+            <div className="np-add-form-actions" style={{ marginTop: 10 }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setAdding(false)}>Cancel</button>
               <button
                 className="btn btn-default btn-sm"
@@ -216,114 +253,93 @@ export function McpPage() {
           </div>
         )}
 
-        {/* Registered servers */}
-        <div className="lib-head">
-          <span>REGISTERED{servers.length ? ` · ${servers.length}` : ''}</span>
-        </div>
-        {error && <div className="np-empty">Couldn’t read the registry: {error}</div>}
-        {!error && !loading && servers.length === 0 && (
-          <div className="np-empty">
-            None yet. Register one below, or add your own — a sandbox reaches them through the gateway.
+        {error && <div className="np-banner err" style={{ marginBottom: 12 }}><span className="np-banner-txt">{error}</span></div>}
+
+        {!error && !loading && servers.length === 0 && !adding && (
+          <div className="mcp-zero">
+            <Plug size={20} />
+            <div className="mcp-zero-t">No MCP servers registered</div>
+            <div className="mcp-zero-s">
+              Register one and every sandbox can reach it through the gateway — authorization happens
+              here on the host, not inside a sandbox.
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
+              <Plus size={14} /> Register server
+            </button>
           </div>
         )}
+
         {servers.map((s) => {
           const st = authState(s.auth)
           return (
-            <div className="lib-row" key={s.name}>
-              <div className="lib-primary">
-                <img src={mcpIcon(s.name.toLowerCase())} alt="" className="mcp-row-ic"
-                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
-                <span>{s.name}</span>
-                {st.label && (
-                  <span className={`rt-badge ${st.tone === 'ok' ? 'rt-badge-ok' : st.tone === 'warn' ? 'rt-badge-update' : ''}`}>
-                    {st.label}
-                  </span>
-                )}
-              </div>
-              <span className="mcp-row-target">{s.url || s.command || '—'}</span>
-              <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }} className="mcp-row-actions">
-                <div className="kit-add-wrap">
-                  <button
-                    className="btn btn-default btn-sm"
-                    title={running.length ? 'Attach to a running sandbox' : 'No running sandboxes'}
-                    disabled={busy === s.name || running.length === 0}
-                    onClick={() => setAttachFor(attachFor === s.name ? null : s.name)}
-                  >
-                    <PackagePlus size={14} /> Add to sandbox
-                  </button>
-                  {attachFor === s.name && (
-                    <div className="kit-add-menu mcp-attach-menu">
-                      <div className="kit-add-label">Add to running sandbox</div>
-                      {running.map((sb) => (
-                        <button key={sb.id} className="kit-add-sb" onClick={() => attach(s.name, sb.name)}>
-                          <span className="kit-add-dot on" />
-                          <span className="kit-add-sb-name">{sb.name}</span>
-                        </button>
-                      ))}
-                    </div>
+            <div key={s.name}>
+              <div className="lib-row">
+                <div className="lib-primary">
+                  <img src={mcpIcon(s.name.toLowerCase())} alt="" className="mcp-row-ic"
+                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+                  <span>{s.name}</span>
+                  {st.label && (
+                    <span className={`rt-badge ${st.tone === 'ok' ? 'rt-badge-ok' : st.tone === 'warn' ? 'rt-badge-update' : ''}`}>
+                      {st.label}
+                    </span>
                   )}
                 </div>
-                <button className="btn btn-ghost btn-sm" title="sbx mcp inspect" onClick={() => inspect(s.name)}>
-                  <FileSearch size={13} /> Inspect
-                </button>
-                <button className="btn btn-ghost btn-sm" disabled={busy === s.name} onClick={() => authorize(s.name)}>
-                  <KeyRound size={13} /> {busy === s.name && authFor === s.name ? 'Authorizing…' : 'Authorize'}
-                </button>
-                <button className="btn btn-ghost btn-sm tpl-icon-btn" title="Remove" disabled={busy === s.name}
-                        onClick={() => remove(s.name)}>
-                  <Trash2 size={15} />
-                </button>
+                <span className="mcp-row-target">{s.url || s.command || '—'}</span>
+                <div className="mcp-row-actions">
+                  <div className="kit-add-wrap">
+                    <button
+                      className="btn btn-default btn-sm"
+                      title={running.length ? 'Attach to a running sandbox' : 'No running sandboxes'}
+                      disabled={busy === s.name || running.length === 0}
+                      onClick={() => setAttachFor(attachFor === s.name ? null : s.name)}
+                    >
+                      <PackagePlus size={14} /> Add to sandbox
+                    </button>
+                    {attachFor === s.name && (
+                      <div className="kit-add-menu mcp-attach-menu">
+                        <div className="kit-add-label">Add to running sandbox</div>
+                        {running.map((sb) => (
+                          <button key={sb.id} className="kit-add-sb" onClick={() => attach(s.name, sb.name)}>
+                            <span className="kit-add-dot on" />
+                            <span className="kit-add-sb-name">{sb.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button className="btn btn-ghost btn-sm tpl-icon-btn" title="Inspect" onClick={() => inspect(s.name)}>
+                    <FileSearch size={15} />
+                  </button>
+                  <button className="btn btn-ghost btn-sm" disabled={busy === s.name} onClick={() => authorize(s.name)}>
+                    <KeyRound size={13} /> {busy === s.name && authFor === s.name ? 'Authorizing…' : 'Authorize'}
+                  </button>
+                  <button className="btn btn-ghost btn-sm tpl-icon-btn" title="Remove" disabled={busy === s.name}
+                          onClick={() => remove(s.name)}>
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
+              {inspectFor === s.name && (
+                <div className="rt-output" style={{ margin: '2px 0 10px' }}>
+                  <pre className="logs-pre">{inspectOut}</pre>
+                </div>
+              )}
+              {authFor === s.name && authOut && (
+                <div className="rt-output" style={{ margin: '2px 0 10px' }}>
+                  <pre className="logs-pre">{authOut}</pre>
+                </div>
+              )}
             </div>
           )
         })}
-        {inspectFor && (
-          <div className="rt-output" style={{ marginTop: 4 }}>
-            <pre className="logs-pre">{inspectOut}</pre>
+
+        {servers.length > 0 && (
+          <div className="np-note" style={{ marginTop: 14 }}>
+            <Info size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+            Pre-load servers into a new sandbox from <strong>New Sandbox</strong> (static mode).
+            Choose none and the agent discovers them itself through the gateway.
           </div>
         )}
-
-        {authFor && authOut && (
-          <div className="rt-output" style={{ marginTop: 10 }}>
-            <pre className="logs-pre">{authOut}</pre>
-          </div>
-        )}
-
-        {/* One-click registration from den's curated catalog. */}
-        <div className="lib-head" style={{ marginTop: 22 }}>
-          <span>CATALOG</span>
-          <div className="mcp-search">
-            <Search size={13} />
-            <input value={query} placeholder="Search servers…" onChange={(e) => setQuery(e.target.value)} />
-            {query && <button onClick={() => setQuery('')}><X size={12} /></button>}
-          </div>
-        </div>
-        <div className="mcp-grid">
-          {shown.map((m) => {
-            const on = registered.has(m.id.toLowerCase())
-            return (
-              <button
-                key={m.id}
-                className={`mcp-card${on ? ' on' : ''}`}
-                disabled={on || busy === m.id}
-                title={on ? `${m.name} is already registered` : `${m.name} — ${m.description}`}
-                onClick={() => add({ name: m.id, url: m.url })}
-              >
-                <img src={mcpIcon(m.id)} alt="" />
-                <span className="mcp-card-name">{m.name}</span>
-                {on ? <Check size={13} className="mcp-card-on" /> : busy === m.id ? <span className="mcp-card-busy">…</span> : null}
-              </button>
-            )
-          })}
-          {shown.length === 0 && <div className="mcp-empty">No servers match.</div>}
-        </div>
-
-        <div className="np-note" style={{ marginTop: 14 }}>
-          <Info size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />
-          Attach a registered server to a sandbox with <code>--static-mcp &lt;name&gt;</code> at run.
-          Leave it off and the agent discovers servers itself through the gateway’s
-          <code>mcp-find</code> tool.
-        </div>
       </div>
     </div>
   )
