@@ -10,10 +10,6 @@
 
 den is a beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (the `sbx` CLI). Launch disposable, isolated environments, point an AI agent (Claude Code, Codex, Cursor, Gemini, …) at a workspace, and let it build, run, and iterate on apps — then throw the sandbox away when you're done. All without living in the terminal.
 
-<br />
-
-<img src="docs/shots-ui/21-dark-sandbox-claude-agent.png" alt="den — a running sandbox with Claude Code, sandboxes organized into groups" width="820" />
-
 </div>
 
 ---
@@ -26,9 +22,10 @@ den wraps the `sbx` CLI in a native macOS/Windows app:
 - **Agent & Shell terminals** — full‑screen agent TUIs (e.g. Claude Code) and an interactive shell, rendered with **xterm.js** over a real PTY.
 - **Files** — browse the sandbox workspace, open/edit files in a dedicated editor window, and see the agent's **changes inline** (live `git status` badges).
 - **Groups** — organize sandboxes into named groups. Drag to reorder within a group or move a sandbox to another group (an insertion line marks a reorder; a highlighted group marks a move — no modifier keys). Start or stop every sandbox in a group at once, or delete the group (optionally with its sandboxes). Give each sandbox its own **color + icon** so you can tell them apart at a glance.
-- **Network policy** — see exactly which domains a sandbox can reach, add allow rules from the UI, and get a clear warning when an org governance profile is overriding local rules.
+- **MCP servers** — register a server once and every sandbox can reach it. A Library page lists what's registered, with **Authorize** running the OAuth flow **on the host** (a callback from inside a sandbox is a browser redirect the host can't reach), plus inspect, remove, and attach‑to‑a‑running‑sandbox. At creation, pick which servers to pre‑load: any means **static** mode, none means **dynamic** — the agent discovers servers itself through the gateway's `mcp-find` tool.
+- **Network policy** — see exactly which domains a sandbox can reach, add allow rules from the UI, and get a clear warning when an org governance profile is overriding local rules. Blocked requests are listed one row per host, with what the block actually means and a one‑click **Allow**; because a policy change is inert until the sandbox restarts, a **Restart to apply** bar tracks what's pending.
 - **Secrets** — manage `sbx` service credentials (Anthropic, OpenAI, Google, GitHub, …) with OAuth where supported, or source a value straight from **1Password** — paste an `op://Vault/Item/field` reference and den resolves it via the `op` CLI, so the real value never lives in den.
-- **Templates & Runtime** — list/launch/delete template images; check the `sbx` version, view release notes, and update in place. See whether you're signed in to the runtime and re‑authenticate in a click.
+- **Templates & Runtime** — list/launch/delete template images; check the `sbx` version, read its release notes, and update in place. Daemon status, **Restart daemon**, SSH setup and shared agent skills live here too, alongside whether you're signed in to the runtime and a one‑click re‑authenticate.
 - **Logs** — live‑tail the `sbx` daemon logs, or read a specific sandbox's kit‑startup log.
 - **Theming** — light / dark / system, custom accent colors that retint the whole UI, and a terminal theme that can follow the app's light/dark mode or be set independently.
 - **Stay awake** — optionally prevent system sleep while any sandbox is running, so long agent runs aren't interrupted (toggle in Settings).
@@ -47,29 +44,42 @@ den keeps your working tree safe and makes it easy to get an agent's work back o
 
 Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network rules, env vars, agent memory, and startup commands onto an agent. den makes them first‑class:
 
-- **Visual composer** — build a kit from a form (no YAML): add capabilities from a dropdown — **Remote MCPs**, network policies, env variables, agent memory (attach PDFs/MD/txt), and commands.
+- **Visual composer** — build a kit from a form (no YAML), covering the whole spec: **Remote MCPs**, network policies, **Setup** (install commands that run once at create and startup commands that run on every start, each with an agent‑vs‑root and a background flag), **Files** packed with the kit, env variables, **Credentials** (the secret stays on the host; the container only ever sees `proxy-managed`), and agent instructions. A live **Code** view shows the `spec.yaml` the form will write as you edit it, and **Edit** opens the composer straight from the kit row.
+- **Spec v2, without leaving v1 behind** — kits are authored as `schemaVersion: "2"`: network rules under `permissions.network`, `commands` → `setup`, a flat entrypoint, and credentials collapsed from four coordinated blocks into one record per service. Existing v1 kits keep loading — both shapes parse into the same structure, so the editor never knows which it read.
 - **Remote‑MCP catalog** — 50+ hosted MCP servers (GitHub, Linear, Notion, Figma, Sentry, Supabase, …) with icons, search, and category filters; or add a **Custom MCP** by URL. Each becomes a one‑click allow rule + registration.
 - **Mixin vs Sandbox kits** — stack several *mixin* kits onto an agent, or define a full agent from a base image with a *sandbox* kit.
 - **Add anywhere** — attach kits at sandbox creation, or inject them into a running sandbox; the kits applied to a sandbox show in its info panel.
 - **Browse the Hub** — discover published kits live from the Docker Hub catalogue, with publisher, verified badge, pull count, and stars. Each is enriched from its registry artifact so you see its real title, description, and capabilities before importing — one click pulls it into your library.
-- **Import from anywhere** — bring a kit in by **OCI reference**, a **Git repo** URL (with `#dir=<subfolder>` for kits in a subdirectory), a packed **.zip / .tar.gz** archive, or a **local folder** — each imported kit is packed so it behaves like any locally‑authored one.
+- **Import from anywhere** — bring a kit in by **OCI reference**, a **Git repo**, a packed **.zip / .tar.gz** archive, or a **local folder**; each imported kit is packed so it behaves like any locally‑authored one. The repo importer takes whatever URL you have: a bare clone URL, sbx's `git+https://…#ref=<rev>&dir=<subdir>` form, an ssh remote, or the browser URL of a branch or subfolder on GitHub, GitLab, Bitbucket, Gitea or Codeberg. A pinned `#ref=` is honoured, and a repo holding several kits lists them so you can choose.
 - **Share via any OCI registry** — push a kit to Docker Hub / ghcr (`sbx kit push`) straight from the row's menu, with the reference prefilled from your logged‑in Docker account.
 
 ## Requirements
 
 - macOS or Windows
 - [Docker](https://www.docker.com/) running
-- The **`sbx`** CLI installed and signed in:
+- The **`sbx`** CLI, **v0.38 or newer**, installed and signed in:
   ```bash
   brew install docker/tap/sbx   # macOS
   sbx login
+  sbx version                   # must be >= 0.38
   ```
+  den speaks only the v0.38 CLI dialect. On an older runtime it shows a banner linking to
+  Settings → Runtime, where it can update in place.
+
+## Releases
+
+Latest: **[v0.9.0](https://github.com/jalonsogo/den/releases/latest)** — MCP Servers with
+host‑side OAuth, kit spec v2, and sbx v0.38 as the minimum runtime. Every release is written
+up in [`CHANGELOG.md`](CHANGELOG.md); macOS builds are signed and notarized, Windows
+installers are signtool‑signed.
 
 ## Troubleshooting
 
 Hitting an error? See the [FAQ & Troubleshooting guide](docs/faq.md) — it starts
 with known problems (like the `sbx` daemon "another daemon is already running"
-race) and their fixes.
+race) and their fixes. Quirks in the `sbx` CLI itself, and how den works around
+them, are catalogued in [`docs/sbx-quirks.md`](docs/sbx-quirks.md); reading an
+API‑connection trace is covered in [`docs/errors.md`](docs/errors.md).
 
 ## Development
 
