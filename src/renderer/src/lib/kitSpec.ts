@@ -231,38 +231,77 @@ function readCommands(n: Node | undefined): KitCommand[] {
   }).filter((c) => c.cmd)
 }
 
+// sbx v0.38 introduced kit spec v2. den authors v2, but v1 kits keep loading
+// through sbx's legacy path, so anything already on disk still has to parse —
+// both shapes are read into the same ParsedKit and the UI never knows which it
+// came from. Where a concept moved, v2 is preferred and v1 is the fallback:
+//
+//   v1                                          v2
+//   network.allowedDomains / deniedDomains  ->  permissions.network.allow / deny
+//   commands.install / startup / initFiles  ->  setup.install / startup / files
+//   sandbox.entrypoint.run: [...]           ->  sandbox.entrypoint: [...]
+//   sandbox.aiFilename + agentContext       ->  agentInstructions.filename / .content
+//   network.serviceDomains + serviceAuth
+//     + credentials.sources
+//     + environment.proxyManaged            ->  credentials[].apiKey{.name,.proxyManaged,.inject[]}
 export function parseKitSpec(text: string): ParsedKit {
   const [tree] = parseBlock(tokenize(text), 0, 0)
   const root = asMap(tree)
+  const v2 = asStr(root.schemaVersion) === '2'
+
   const sandbox = asMap(root.sandbox)
-  const network = asMap(root.network)
-  const commands = asMap(root.commands)
   const environment = asMap(root.environment)
-  const entry = asMap(sandbox.entrypoint)
+  const agentInstructions = asMap(root.agentInstructions)
+  // v2 nests the network rules under `permissions`; v1 had them at the root.
+  const network = v2 ? asMap(asMap(root.permissions).network) : asMap(root.network)
+  const setup = v2 ? asMap(root.setup) : asMap(root.commands)
 
-  const installCmds = readCommands(commands.install)
-  const startupCmds = readCommands(commands.startup)
-
+  const installCmds = readCommands(setup.install)
+  const startupCmds = readCommands(setup.startup)
   const envVars = Object.entries(asMap(environment.variables)).map(([k, v]) => `${k}=${asStr(v)}`)
 
-  // serviceDomains maps host → service; invert it to service → hosts.
-  const domainsByService = new Map<string, string[]>()
-  for (const [host, svc] of Object.entries(asMap(network.serviceDomains))) {
-    const s = asStr(svc)
-    if (!s) continue
-    domainsByService.set(s, [...(domainsByService.get(s) ?? []), host])
+  let credentials: KitCredential[]
+  let proxyManaged: string[]
+  if (v2) {
+    // One record per service, already in the shape the editor works with.
+    credentials = asList(root.credentials).map((c) => {
+      const m = asMap(c)
+      const apiKey = asMap(m.apiKey)
+      const inject = asList(apiKey.inject).map(asMap)
+      return {
+        service: asStr(m.service),
+        domains: inject.map((i) => asStr(i.domain)).filter(Boolean),
+        // The header/format pair is per-injection in v2; the editor models one
+        // per service, so take the first — which is what it round-trips back.
+        headerName: asStr(inject[0]?.header),
+        valueFormat: asStr(inject[0]?.format),
+        envVars: [asStr(apiKey.name)].filter(Boolean)
+      }
+    }).filter((c) => c.service)
+    proxyManaged = asList(root.credentials)
+      .filter((c) => asStr(asMap(asMap(c).apiKey).proxyManaged) === 'true')
+      .map((c) => asStr(asMap(asMap(c).apiKey).name)).filter(Boolean)
+  } else {
+    // v1's four-block pattern: serviceDomains maps host → service, so invert it.
+    const domainsByService = new Map<string, string[]>()
+    for (const [host, svc] of Object.entries(asMap(network.serviceDomains))) {
+      const s = asStr(svc)
+      if (!s) continue
+      domainsByService.set(s, [...(domainsByService.get(s) ?? []), host])
+    }
+    const auth = asMap(network.serviceAuth)
+    const sources = asMap(asMap(root.credentials).sources)
+    credentials = [...new Set([
+      ...domainsByService.keys(), ...Object.keys(auth), ...Object.keys(sources)
+    ])].map((service) => ({
+      service,
+      domains: domainsByService.get(service) ?? [],
+      headerName: asStr(asMap(auth[service]).headerName),
+      valueFormat: asStr(asMap(auth[service]).valueFormat),
+      envVars: strList(asMap(sources[service]).env)
+    }))
+    proxyManaged = strList(environment.proxyManaged)
   }
-  const auth = asMap(network.serviceAuth)
-  const sources = asMap(asMap(root.credentials).sources)
-  const credentials: KitCredential[] = [...new Set([
-    ...domainsByService.keys(), ...Object.keys(auth), ...Object.keys(sources)
-  ])].map((service) => ({
-    service,
-    domains: domainsByService.get(service) ?? [],
-    headerName: asStr(asMap(auth[service]).headerName),
-    valueFormat: asStr(asMap(auth[service]).valueFormat),
-    envVars: strList(asMap(sources[service]).env)
-  }))
 
   const mcps: string[] = []
   for (const c of [...installCmds, ...startupCmds]) {
@@ -270,26 +309,31 @@ export function parseKitSpec(text: string): ParsedKit {
     if (m && !mcps.includes(m[1])) mcps.push(m[1])
   }
 
+  const entry = asMap(sandbox.entrypoint)
   return {
     kind: asStr(root.kind),
     name: asStr(root.name),
     displayName: asStr(root.displayName),
     description: asStr(root.description).replace(/\n+/g, ' ').trim(),
     image: asStr(sandbox.image),
-    entrypoint: (Array.isArray(entry.run) ? entry.run.map(asStr) : strList(entry.run)).join(' '),
-    aiFilename: asStr(sandbox.aiFilename),
-    allowedDomains: strList(network.allowedDomains),
-    deniedDomains: strList(network.deniedDomains),
+    // v2 flattened entrypoint to a bare list; v1 wrapped it in `run`.
+    entrypoint: (v2
+      ? (Array.isArray(sandbox.entrypoint) ? sandbox.entrypoint.map(asStr) : strList(sandbox.entrypoint))
+      : (Array.isArray(entry.run) ? entry.run.map(asStr) : strList(entry.run))
+    ).join(' '),
+    aiFilename: v2 ? asStr(agentInstructions.filename) : asStr(sandbox.aiFilename),
+    allowedDomains: strList(v2 ? network.allow : network.allowedDomains),
+    deniedDomains: strList(v2 ? network.deny : network.deniedDomains),
     installCmds,
     startupCmds,
-    initFiles: asList(commands.initFiles).map((f) => {
+    initFiles: asList(v2 ? setup.files : setup.initFiles).map((f) => {
       const m = asMap(f)
       return { path: asStr(m.path), content: asStr(m.content), onlyIfMissing: asStr(m.onlyIfMissing) === 'true' }
     }).filter((f) => f.path),
     envVars,
-    proxyManaged: strList(environment.proxyManaged),
+    proxyManaged,
     credentials,
-    agentContext: asStr(root.agentContext).trim(),
+    agentContext: (v2 ? asStr(agentInstructions.content) : asStr(root.agentContext)).trim(),
     mcps
   }
 }
