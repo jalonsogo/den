@@ -248,6 +248,8 @@ export function SbxRuntimePanel({
 
   // Daemon health + log level (`sbx daemon status` / `log-level`).
   const [daemonStatus, setDaemonStatus] = useState<{ running: boolean; raw?: string } | null>(null)
+  const [daemonChecking, setDaemonChecking] = useState(false)
+  const [daemonCheckedAt, setDaemonCheckedAt] = useState<number | null>(null)
   const [logLevel, setLogLevel] = useState<string>('')
   const [logLevelBusy, setLogLevelBusy] = useState(false)
 
@@ -345,10 +347,16 @@ export function SbxRuntimePanel({
     setTimeout(() => setVerify('idle'), 2500)
   }
 
-  const loadDaemonStatus = () =>
-    window.minipit?.daemonStatus()
+  // `sbx daemon status` spawns a process, and a re-check that returns the same
+  // answer leaves the row byte-identical — so without an explicit in-flight state
+  // and a checked-at stamp, a working button is indistinguishable from a dead one.
+  const loadDaemonStatus = () => {
+    setDaemonChecking(true)
+    return window.minipit?.daemonStatus()
       .then((s) => setDaemonStatus(s?.ok ? { running: s.running, raw: s.raw } : { running: false, raw: s?.error }))
       .catch(() => setDaemonStatus(null))
+      .finally(() => { setDaemonChecking(false); setDaemonCheckedAt(Date.now()) })
+  }
 
   useEffect(() => {
     loadVersion()
@@ -883,6 +891,9 @@ export function SbxRuntimePanel({
                   {daemonStatus.running ? 'Running' : 'Stopped'}
                 </span>
               )}
+              {daemonCheckedAt && !daemonChecking && (
+                <span className="rt-checked">checked {new Date(daemonCheckedAt).toLocaleTimeString()}</span>
+              )}
             </div>
             <div className="ss-sub">
               Restart the sbx daemon (<code>sbx daemon restart</code>) — try this if you hit connection errors
@@ -890,8 +901,14 @@ export function SbxRuntimePanel({
             </div>
           </div>
           <div style={{ display: 'flex', gap: 7 }}>
-            <button className="btn btn-ghost btn-sm" onClick={loadDaemonStatus} disabled={daemonBusy} title="Check status">
-              <RotateCw size={13} /> Check status
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={loadDaemonStatus}
+              disabled={daemonBusy || daemonChecking}
+              title="Re-run `sbx daemon status`"
+            >
+              <RotateCw size={13} className={daemonChecking ? 'spin' : undefined} />
+              {daemonChecking ? 'Checking…' : 'Check status'}
             </button>
             <button
               className="btn btn-default btn-sm"
