@@ -3058,8 +3058,8 @@ html, body, #root {
    user's attention; this only has to say den is still waiting. */
 .mcp-authing {
   display: flex; align-items: center; gap: 8px;
-  margin: 2px 0 10px; padding: 9px 12px;
-  border: 1px solid var(--border); border-radius: var(--radius);
+  margin: 0; padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
   background: var(--bg-subtle); font-size: 12px; color: var(--t2);
 }
 .mcp-info-rawwrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 0; }
@@ -4281,10 +4281,22 @@ html, body, #root {
 .empty-mark { color: var(--t3); opacity: 0.8; display: flex; }
 /* `sbx mcp inspect` rendered as rows. Aligned key column so the values line up
    the way the CLI's own padding does, without the terminal styling. */
+/* Expanded detail for the row above, inside the table's own frame — so no
+   border or radius of its own: a second box inset within the first is what made
+   the margins read as broken. The tint marks it as expanded, the bottom rule
+   separates it from the next server, and the padding matches .lib-row so the
+   keys line up under the SERVER column. */
 .mcp-info {
-  margin: 2px 0 10px; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg-subtle); padding: 4px 12px;
+  margin: 0; padding: 2px 12px 6px;
+  background: var(--bg-subtle); border-bottom: 1px solid var(--border);
 }
+/* A server is a row plus whatever it has expanded under it, wrapped together.
+   That wrapper makes each .lib-row its own parent's last child, which the
+   generic `.lib-row:last-child { border-bottom: none }` reads as "last in the
+   table" — so every separator between servers disappeared. Put the rule back
+   here, and strip it from whatever ends the table instead. */
+.mcp-entry > .lib-row { border-bottom: 1px solid var(--border); }
+.lib-tbl > .mcp-entry:last-child > :last-child { border-bottom: none; }
 .mcp-info-row {
   display: flex; align-items: baseline; gap: 12px; padding: 6px 0;
   border-bottom: 1px solid var(--border); font-size: 12px;

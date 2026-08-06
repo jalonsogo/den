@@ -298,7 +298,7 @@ export function McpPage() {
           // `npx @playwright/mcp@latest` has no folder to open.
           const localPath = local && s.command.startsWith('/') ? s.command.split(/\s+/)[0] : ''
           return (
-            <div key={s.name}>
+            <div className="mcp-entry" key={s.name}>
               <div className="lib-row lib-row-mcp">
                 <div className="lib-primary">
                   <img src={mcpIcon(s.name.toLowerCase())} alt="" className="mcp-row-ic"
