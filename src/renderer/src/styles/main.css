@@ -4241,3 +4241,22 @@ html, body, #root {
 /* The MCP empty state reuses .home-empty; only the mark differs (an icon
    rather than den's wordmark). */
 .mcp-zero-mark { color: var(--t3); opacity: 0.8; }
+/* `sbx mcp inspect` rendered as rows. Aligned key column so the values line up
+   the way the CLI's own padding does, without the terminal styling. */
+.mcp-info {
+  margin: 2px 0 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); padding: 4px 12px;
+}
+.mcp-info-row {
+  display: flex; align-items: baseline; gap: 12px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.mcp-info-row:last-child { border-bottom: none; }
+.mcp-info-row.sub { padding-left: 16px; }
+.mcp-info-k { flex-shrink: 0; width: 110px; color: var(--t3); }
+.mcp-info-v { color: var(--t1); font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; overflow-wrap: anywhere; }
+.mcp-info-link {
+  color: var(--primary); cursor: pointer;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; overflow-wrap: anywhere;
+}
+.mcp-info-link:hover { text-decoration: underline; }

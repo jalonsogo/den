@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Plus, Plug, Trash2, KeyRound, RefreshCw, Info, PackagePlus, FileSearch,
+  Plus, Plug, Trash2, KeyRound, RefreshCw, Info, PackagePlus,
   Zap, Boxes, ShieldCheck, Search
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -17,6 +17,24 @@ import type { McpServerEntry } from '../types'
 // A kit can still register an MCP the old way (a `claude mcp add` startup
 // command); that path is unchanged and is per-sandbox. This page is the shared
 // registry.
+
+// `sbx mcp inspect` prints aligned "Key: value" lines, with indented children
+// under a heading (Issuer/Registration under OAuth). That's structured data, so
+// render it as rows — a black terminal block for six fields was den showing its
+// plumbing instead of the answer.
+interface InspectRow { key: string; value: string; depth: number }
+function parseInspect(raw: string): InspectRow[] | null {
+  const rows: InspectRow[] = []
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue
+    const m = /^(\s*)([^:]{1,40}):\s*(.*)$/.exec(line)
+    // Anything that isn't a key/value line means this isn't the shape we think
+    // it is — fall back to the raw text rather than showing a mangled table.
+    if (!m) return null
+    rows.push({ key: m[2].trim(), value: m[3].trim(), depth: m[1].length > 0 ? 1 : 0 })
+  }
+  return rows.length ? rows : null
+}
 
 // Auth wording varies by sbx build, so classify loosely rather than matching
 // exact strings — and treat "no idea" as its own state instead of guessing.
@@ -221,8 +239,8 @@ export function McpPage() {
                       </div>
                     )}
                   </div>
-                  <button className="btn btn-ghost btn-sm tpl-icon-btn" title="Inspect" onClick={() => inspect(s.name)}>
-                    <FileSearch size={15} />
+                  <button className="btn btn-ghost btn-sm" title="sbx mcp inspect" onClick={() => inspect(s.name)}>
+                    <Info size={13} /> Info
                   </button>
                   <button className="btn btn-ghost btn-sm" disabled={busy === s.name} onClick={() => authorize(s.name)}>
                     <KeyRound size={13} /> {busy === s.name && authFor === s.name ? 'Authorizing…' : 'Authorize'}
@@ -233,11 +251,28 @@ export function McpPage() {
                   </button>
                 </div>
               </div>
-              {inspectFor === s.name && (
-                <div className="rt-output" style={{ margin: '2px 0 10px' }}>
-                  <pre className="logs-pre">{inspectOut}</pre>
-                </div>
-              )}
+              {inspectFor === s.name && (() => {
+                const rows = parseInspect(inspectOut)
+                if (!rows) {
+                  return (
+                    <div className="rt-output" style={{ margin: '2px 0 10px' }}>
+                      <pre className="logs-pre">{inspectOut}</pre>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="mcp-info">
+                    {rows.map((r, i) => (
+                      <div className={`mcp-info-row${r.depth ? ' sub' : ''}`} key={`${r.key}-${i}`}>
+                        <span className="mcp-info-k">{r.key}</span>
+                        {/^https?:\/\//i.test(r.value)
+                          ? <a className="mcp-info-link" onClick={() => window.minipit?.openPath(r.value)}>{r.value}</a>
+                          : <span className="mcp-info-v">{r.value || '—'}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
               {authFor === s.name && authOut && (
                 <div className="rt-output" style={{ margin: '2px 0 10px' }}>
                   <pre className="logs-pre">{authOut}</pre>
