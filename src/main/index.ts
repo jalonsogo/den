@@ -731,6 +731,25 @@ interface McpServerEntry {
 // Fallback for `sbx mcp ls` without --json: a column-aligned table. Take the
 // first field as the name and classify the rest by shape rather than by column
 // position, which has moved before in other sbx tables.
+// `sbx mcp ls` doesn't report whether a server is authorized — `sbx mcp auth
+// status` does. Ask it per server so an authorized server actually reads as
+// one; the list is short, and a server whose status can't be read keeps
+// whatever `ls` said rather than being mislabelled.
+async function withAuthState(servers: McpServerEntry[]): Promise<McpServerEntry[]> {
+  return Promise.all(servers.map(async (m) => {
+    if (m.auth) return m
+    try {
+      const raw = await sbx(['mcp', 'auth', 'status', m.name], { timeout: 10000 })
+      return { ...m, auth: raw.trim().split('\n').filter(Boolean).pop() ?? '' }
+    } catch (err) {
+      // A non-OAuth server may reject the subcommand outright — that's not an
+      // auth failure, so say nothing rather than showing a scary state.
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
+      return { ...m, auth: /expired|unauthor|not authorized|required/.test(msg) ? 'not authorized' : '' }
+    }
+  }))
+}
+
 function parseMcpTable(out: string): McpServerEntry[] {
   const rows: McpServerEntry[] = []
   for (const line of out.split('\n')) {
@@ -3103,14 +3122,13 @@ function setupIPC(): void {
     }
     try {
       const raw = await sbx(['mcp', 'ls', '--json'], { timeout: 15000 })
-      const parsed = fromJson(raw)
-      if (parsed) return { ok: true, servers: parsed }
-      return { ok: true, servers: parseMcpTable(raw) }
+      const parsed = fromJson(raw) ?? parseMcpTable(raw)
+      return { ok: true, servers: await withAuthState(parsed) }
     } catch {
       // No --json on this build (or it errored) — try the plain table.
       try {
         const raw = await sbx(['mcp', 'ls'], { timeout: 15000 })
-        return { ok: true, servers: parseMcpTable(raw) }
+        return { ok: true, servers: await withAuthState(parseMcpTable(raw)) }
       } catch (err) {
         return { ok: false, servers: [], error: (err instanceof Error ? err.message : String(err)).trim() }
       }

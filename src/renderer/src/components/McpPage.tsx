@@ -42,8 +42,11 @@ function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
   const t = (s || '').toLowerCase()
   if (!t) return { label: '', tone: 'none' }
   if (/expired|invalid|fail/.test(t)) return { label: 'Reauthorize', tone: 'warn' }
-  if (/pending|required|needs/.test(t)) return { label: 'Not authorized', tone: 'warn' }
-  if (/ok|valid|authorized|active/.test(t)) return { label: 'Authorized', tone: 'ok' }
+  // Negatives first: "not authorized" and "unauthorized" both contain
+  // "authorized", so the positive test below would otherwise claim success for
+  // a server that has none.
+  if (/not authorized|unauthori[sz]ed|pending|required|needs/.test(t)) return { label: 'Not authorized', tone: 'warn' }
+  if (/\bok\b|valid|authorized|active/.test(t)) return { label: 'Authorized', tone: 'ok' }
   return { label: s, tone: 'none' }
 }
 
@@ -205,7 +208,7 @@ export function McpPage() {
           const st = authState(s.auth)
           return (
             <div key={s.name}>
-              <div className="lib-row">
+              <div className="lib-row lib-row-mcp">
                 <div className="lib-primary">
                   <img src={mcpIcon(s.name.toLowerCase())} alt="" className="mcp-row-ic"
                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />

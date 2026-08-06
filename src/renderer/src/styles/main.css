@@ -3033,6 +3033,10 @@ html, body, #root {
    the empty header actions cell vs the wide button cell would push the flexible
    capabilities column to a different width and the columns wouldn't line up. */
 .lib-hdr-kit, .lib-row-kit { grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 232px; }
+/* name+state | target | actions. Without a variant class these rows inherited
+   the 4-column default and left a gap where a fourth cell would have been.
+   Actions is fixed so the flexible target column can absorb the slack. */
+.lib-hdr-mcp, .lib-row-mcp { grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) 300px; }
 /* Five equal, flexible capability columns, shared by the header labels and the
    KitCaps cells so they align and shrink together. */
 .kit-caps-hdr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
@@ -4184,7 +4188,7 @@ html, body, #root {
 
 .mcp-row-ic { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; flex-shrink: 0; }
 .mcp-row-target {
-  flex: 1; min-width: 0; margin: 0 12px;
+  min-width: 0;
   font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; color: var(--t3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
