@@ -2260,6 +2260,10 @@ html, body, #root {
 }
 .page-title { font-size: 13.5px; font-weight: 600; color: var(--t1); letter-spacing: -0.015em; }
 .page-body { flex: 1; overflow-y: auto; padding: 18px; }
+/* .home-empty centres itself with flex:1 + justify-content, which needs a flex
+   parent to mean anything — .page-body is a plain block, so an empty state
+   dropped in it sits at the top. Opt in only where the body holds one. */
+.page-body-center { display: flex; flex-direction: column; }
 
 /* ── Home ── */
 /* Welcome / empty state — hero + two CTAs + feature highlights when there are no sandboxes */

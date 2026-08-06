@@ -92,6 +92,9 @@ export function McpPage() {
   useEffect(() => window.minipit?.onMcpAuthOutput?.((c) => setAuthOut((o) => o + c)), [])
 
   const registered = new Set(servers.map((s) => s.name.toLowerCase()))
+  // Nothing registered and nothing to report — the page is just the empty state,
+  // so the body switches to a flex column and lets it centre itself.
+  const zero = !error && !loading && servers.length === 0
 
   const remove = async (name: string) => {
     if (!window.confirm(`Remove the MCP server "${name}"? Sandboxes referencing it will stop finding it.`)) return
@@ -160,7 +163,7 @@ export function McpPage() {
         </div>
       </div>
 
-      <div className="page-body">
+      <div className={`page-body${zero ? ' page-body-center' : ''}`}>
         {msg && (
           <div className={`np-banner ${msg.ok ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>
             <span className="np-banner-txt">{msg.text}</span>
@@ -173,7 +176,7 @@ export function McpPage() {
             CTA, and three boxes explaining what the gateway buys you. The row
             actions (Authorize, Add to sandbox…) belong to a server — showing
             them with nothing registered was nonsense. */}
-        {!error && !loading && servers.length === 0 && (
+        {zero && (
           <div className="home-empty">
             <Plug size={34} className="mcp-zero-mark" />
             <span className="home-empty-eyebrow">
