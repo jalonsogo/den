@@ -1,7 +1,9 @@
 # den — TODO
 
 Upcoming features and tasks. Grouped by intent; roughly ordered within each group.
-See [`spec.md`](spec.md) for the architectural context behind these.
+See [`spec.md`](spec.md) for the architectural context behind these,
+[`sbx-quirks.md`](sbx-quirks.md) for sbx/API errors already diagnosed (check it
+before re-debugging one), and [`errors.md`](errors.md) for the operator runbook.
 
 Legend: `[ ]` open · `[~]` in progress · `[x]` done (keep briefly for context)
 

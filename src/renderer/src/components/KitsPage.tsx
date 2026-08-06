@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown } from 'lucide-react'
+import { Plus, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 import { KitCaps } from './KitCaps'
-import type { HubKit } from '../types'
+import type { HubKit, RepoKit } from '../types'
 
 interface Kit { name: string; kind: string; dir: string; hasZip: boolean }
 
@@ -38,13 +38,38 @@ function KitSummary({ spec }: { spec: string }) {
       )}
       {p.installCmds.length > 0 && (
         <div className="ks-block">
-          <span className="ks-k">Commands · {p.installCmds.length}</span>
-          {p.installCmds.map((c, i) => <div className="ks-cmd" key={i}>{c}</div>)}
+          <span className="ks-k">Install · {p.installCmds.length}</span>
+          {p.installCmds.map((c, i) => <div className="ks-cmd" key={i}>{c.cmd}</div>)}
+        </div>
+      )}
+      {p.startupCmds.length > 0 && (
+        <div className="ks-block">
+          <span className="ks-k">Startup · {p.startupCmds.length}</span>
+          {p.startupCmds.map((c, i) => <div className="ks-cmd" key={i}>{c.cmd}{c.background ? ' &' : ''}</div>)}
+        </div>
+      )}
+      {p.credentials.length > 0 && (
+        <div className="ks-block">
+          <span className="ks-k">Credentials · {p.credentials.length}</span>
+          <div className="ks-mcps">
+            {p.credentials.map((c) => (
+              <span className="ks-tag" key={c.service}>{c.service}{c.domains.length ? ` → ${c.domains.join(', ')}` : ''}</span>
+            ))}
+          </div>
         </div>
       )}
       {envCount > 0 && <div className="ks-row"><span className="ks-k">Env vars</span><span className="ks-v">{envCount}</span></div>}
+      {p.initFiles.length > 0 && (
+        <div className="ks-block">
+          <span className="ks-k">Init files · {p.initFiles.length}</span>
+          {p.initFiles.map((x) => <div className="ks-cmd" key={x.path}>{x.path}</div>)}
+        </div>
+      )}
       {p.agentContext && (
-        <div className="ks-block"><span className="ks-k">Agent memory</span><div className="ks-memo">{p.agentContext}</div></div>
+        <div className="ks-block">
+          <span className="ks-k">Agent instructions{p.aiFilename ? ` · ${p.aiFilename}` : ''}</span>
+          <div className="ks-memo">{p.agentContext}</div>
+        </div>
       )}
     </div>
   )
@@ -120,6 +145,9 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const [importForm, setImportForm] = useState<'oci' | 'git' | null>(null)
   const [importRef, setImportRef] = useState('')
   const [importing, setImporting] = useState(false)
+  // A repo holding several kits comes back as a list to pick from instead of an
+  // import; `repoPick.ref` is the reference the choices came from.
+  const [repoPick, setRepoPick] = useState<{ ref: string; choices: RepoKit[] } | null>(null)
 
   // Close the import source menu on any outside click.
   useEffect(() => {
@@ -172,24 +200,53 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     }
   }
 
+  // A repository, not a registry artifact: an explicit git+/scp form, a URL on a
+  // known forge, or anything ending in .git. `sbx kit pull` can't fetch these —
+  // and its refusal reads as an allowlist problem — so they go to the clone path
+  // even when typed into the OCI field.
+  const looksLikeRepo = (ref: string) =>
+    /^git[+@]/.test(ref) ||
+    /^(?:ssh|git):\/\//.test(ref) ||
+    /\.git(?:#|$)/.test(ref) ||
+    /^https?:\/\/(?:[^/]*\.)?(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|git\.sr\.ht|dev\.azure\.com)\//.test(ref)
+
   // OCI reference / Git URL — both take a text ref via the inline form.
-  const doImport = async () => {
-    const ref = importRef.trim()
+  const doImport = async (ref = importRef.trim(), pickDir?: string) => {
     if (!ref || importing) return
+    const viaGit = importForm === 'git' || looksLikeRepo(ref)
     setImporting(true)
     setMsg(null)
-    const res = importForm === 'git'
-      ? await window.minipit?.kitImportGit(ref).catch(() => null)
+    const res = viaGit
+      ? await window.minipit?.kitImportGit(ref, pickDir).catch(() => null)
       : await window.minipit?.kitImport(ref).catch(() => null)
     setImporting(false)
     if (res?.ok) {
       setImportForm(null)
       setImportRef('')
+      setRepoPick(null)
       load()
       setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
-    } else {
-      setMsg({ ok: false, text: res?.error || 'Import failed — check the reference and that the source is accessible.' })
+      return
     }
+    // Several kits in one repo — ask which, keeping the typed reference so the
+    // pick can re-run against it. (Only the git importer returns choices, so
+    // read it off the wider of the two result shapes.)
+    const choices = (res as { choices?: RepoKit[] } | null)?.choices
+    if (choices?.length) {
+      setRepoPick({ ref, choices })
+      setImportForm('git')
+      setImportRef(ref)
+      return
+    }
+    // Keep any pick list on screen — a failed pick (or a transient clone error)
+    // shouldn't cost the user the list of kits the repo holds. Editing the
+    // reference clears it.
+    setMsg({
+      ok: false,
+      text: res?.error || (viaGit
+        ? 'Clone failed — check the repository URL and that you can reach it.'
+        : 'Import failed — check the reference and that the source is accessible.')
+    })
   }
 
   // Zip / folder — the main process opens a native picker and imports in one
@@ -389,7 +446,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                       <Box size={14} /><span><b>OCI reference</b><small>Pull from a registry</small></span>
                     </button>
                     <button className="kit-import-item" onClick={() => pickImport('git')}>
-                      <Github size={14} /><span><b>Git repository</b><small>Clone a repo (or subfolder)</small></span>
+                      <Github size={14} /><span><b>Git repository</b><small>Clone a repo, branch or subfolder</small></span>
                     </button>
                     <button className="kit-import-item" onClick={() => pickImport('zip')}>
                       <FileArchive size={14} /><span><b>Zip archive…</b><small>A packed kit file</small></span>
@@ -431,21 +488,39 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                 value={importRef}
                 spellCheck={false}
                 placeholder={importForm === 'git'
-                  ? 'https://github.com/owner/repo  ·  append #dir=subfolder if needed'
+                  ? 'https://github.com/owner/repo — a branch/subfolder URL or #ref=tag&dir=subfolder also works'
                   : 'registry/repo:tag — e.g. docker.io/javieralonso716/my-kit:latest'}
-                onChange={(e) => setImportRef(e.target.value)}
+                onChange={(e) => { setImportRef(e.target.value); setRepoPick(null) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') doImport() }}
               />
-              <button className="btn btn-ghost btn-sm" onClick={() => { setImportForm(null); setImportRef('') }} disabled={importing}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={doImport} disabled={importing || !importRef.trim()}>
-                {importing ? (importForm === 'git' ? 'Cloning…' : 'Pulling…') : 'Import'}
+              <button className="btn btn-ghost btn-sm" onClick={() => { setImportForm(null); setImportRef(''); setRepoPick(null) }} disabled={importing}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={() => doImport()} disabled={importing || !importRef.trim()}>
+                {importing ? (importForm === 'git' || looksLikeRepo(importRef.trim()) ? 'Cloning…' : 'Pulling…') : 'Import'}
               </button>
             </div>
-            <div className="kit-push-hint">
-              {importForm === 'git'
-                ? <>Clones the repo and packs the kit. Add <code>#dir=&lt;subfolder&gt;</code> when the <code>spec.yaml</code> lives in a subdirectory.</>
-                : <>Pulls the artifact with <code>sbx kit pull</code> into your kit library. Private repos require <code>docker login</code>.</>}
-            </div>
+            {repoPick ? (
+              <div className="repo-pick">
+                <div className="repo-pick-hd">
+                  {repoPick.choices.length} kits in this repository — pick one to import
+                </div>
+                {repoPick.choices.map((c) => (
+                  <button key={c.dir} className="repo-pick-item" onClick={() => doImport(repoPick.ref, c.dir)} disabled={importing}>
+                    <span className="repo-pick-name">
+                      {c.displayName || c.name}
+                      <span className={`repo-pick-kind${c.kind === 'sandbox' ? ' sandbox' : ''}`}>{c.kind}</span>
+                    </span>
+                    <span className="repo-pick-dir">{c.dir}</span>
+                    {c.description && <span className="repo-pick-desc">{c.description}</span>}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="kit-push-hint">
+                {importForm === 'git'
+                  ? <>Clones the repo (shallow, at <code>#ref=</code> if you pin one) and packs the kit. Point at the subfolder or add <code>#dir=&lt;subfolder&gt;</code> when the <code>spec.yaml</code> isn't at the root — den offers a list if the repo holds several kits. SSH remotes use your local agent.</>
+                  : <>Pulls the artifact with <code>sbx kit pull</code> into your kit library. Private repos require <code>docker login</code>. A Git URL pasted here is cloned instead.</>}
+              </div>
+            )}
           </div>
         )}
 
@@ -507,7 +582,8 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                 <span>MCP</span>
                 <span>Policies</span>
                 <span>Env</span>
-                <span>Commands</span>
+                <span>Setup</span>
+                <span>Creds</span>
                 <span>Memory</span>
               </div>
               <span></span>
@@ -535,6 +611,17 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                         <Star size={15} fill={defaultKits.includes(k.name) ? 'currentColor' : 'none'} />
                       </button>
                     )}
+                    {/* Straight to the composer, the same editor "New kit"
+                        opens — reaching it used to mean expanding the row and
+                        then clicking Edit in the panel footer. The panel is
+                        still there for a read-only look. */}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      title={`Edit "${k.name}" in the kit composer`}
+                      onClick={() => { setEditKit({ dir: k.dir, name: k.name }); setModal('new-kit') }}
+                    >
+                      <SquarePen size={14} /> Edit
+                    </button>
                     <div className="kit-add-wrap">
                       <button
                         className="btn btn-default btn-sm"

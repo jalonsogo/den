@@ -1,11 +1,38 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, ShieldAlert, Check, Ban, Globe, Scale, Lock } from 'lucide-react'
+import { AlertTriangle, ShieldAlert, Check, Ban, Globe, Scale, Lock, RotateCw } from 'lucide-react'
 import { useStore } from '../store'
 import { PortsPanel } from './PortsPanel'
 import { AccordionSection } from './AccordionSection'
 import type { Sandbox, NetworkPolicy, PolicyBlock, PolicyRule } from '../types'
 
 const NO_BLOCKS: PolicyBlock[] = []
+const NO_CHANGES: string[] = []
+
+// How long an allowed block stays on screen showing its "Allowed" confirmation
+// before it fades out. Must match the .np-block.done animation in main.css.
+const BLOCK_FADE_MS = 1600
+
+// `sbx policy log` reports the raw engine verdict, e.g. "no applicable policies
+// for op=(action:net:connect:tcp, resource=net:domain:example.com:443)" — true
+// but unreadable, and it's the same sentence on every row. Say what it means
+// instead; the host is already the row's title.
+function blockReason(b: Pick<PolicyBlock, 'rule' | 'reason'>): string {
+  const raw = `${b.rule ?? ''} ${b.reason ?? ''}`.toLowerCase()
+  if (!raw.trim()) return 'Blocked by network policy'
+  if (raw.includes('no applicable') || raw.includes('default deny')) return 'No allow rule — default deny'
+  // A named rule is worth showing verbatim: it tells the user which rule to edit.
+  return b.rule ? `Denied by rule “${b.rule}”` : 'Blocked by network policy'
+}
+
+function agoLabel(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (s < 45) return 'just now'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return new Date(at).toLocaleDateString()
+}
 
 // Infer which preset is currently in force from the policy's rules, so the
 // picker highlights the *active* preset (not just whatever the user last clicked).
@@ -20,7 +47,7 @@ function detectPreset(rules: PolicyRule[]): 'allow-all' | 'balanced' | 'deny-all
 // Header carries no close button — see the note on InfoPanel: the toolbar's
 // right-dock toggle and the rail icon already close the dock.
 export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
-  const { updateSandbox, ackPolicyBlocks } = useStore()
+  const { updateSandbox, ackPolicyBlocks, dismissPolicyBlocks, notePolicyChange, clearPolicyRestart } = useStore()
   // Select the stored array directly (a stable ref) and fall back to a shared
   // constant — `?? []` inside the selector returns a new array each render and
   // sends zustand into an infinite re-render loop.
@@ -29,11 +56,37 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
   // Looking at the panel counts as seeing the blocks → clears the badge.
   useEffect(() => { ackPolicyBlocks(sandbox.name) }, [sandbox.name, blocks.length])
 
+  // Re-render on a slow tick so the "just now / 4m ago" labels don't go stale
+  // while the panel sits open.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!blocks.length) return
+    const t = setInterval(() => setTick((n) => n + 1), 30_000)
+    return () => clearInterval(t)
+  }, [blocks.length])
+
   const [policy, setPolicy] = useState<NetworkPolicy | null>(null)
   const [polLoading, setPolLoading] = useState(true)
-  const [allowBusy, setAllowBusy] = useState(false)   // one-click allow from a recent block
-  const [allowMsg, setAllowMsg] = useState<{ ok: boolean; text: string; offerRestart?: boolean } | null>(null)
+  // Per-host state for the one-click allow on a recent block, so one row's
+  // progress never disables (or claims the outcome of) its neighbours.
+  const [blockState, setBlockState] = useState<Record<string, 'busy' | 'done' | 'err'>>({})
+  // Keyed by host alone, so drop it when the panel switches sandboxes — two
+  // sandboxes can be blocked on the same domain.
+  useEffect(() => { setBlockState({}) }, [sandbox.name])
+  const [allowMsg, setAllowMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  // Rule edits are written immediately but only take effect on (re)start, so
+  // every change lands in the store and the dock grows a persistent "restart to
+  // apply" footer until the sandbox is cycled. Without it the user is left
+  // guessing whether their click did anything. It lives in the store because a
+  // toast can add a rule too, from anywhere in the app.
+  const restartPending = useStore((s) => s.policyRestartPending[sandbox.name]) ?? NO_CHANGES
+  const [restartDone, setRestartDone] = useState(false)
   const [restarting, setRestarting] = useState(false)
+
+  const noteChange = (text: string) => {
+    setRestartDone(false)
+    notePolicyChange(sandbox.name, text)
+  }
   const [rmBusy, setRmBusy] = useState<string | null>(null)
   const [preset, setPreset] = useState('balanced')
   const [presetBusy, setPresetBusy] = useState(false)
@@ -91,7 +144,11 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     setPending(remaining)
     setApplyBusy(false)
     if (failed) setAllowMsg({ ok: false, text: failed })
-    else { setAllowMsg({ ok: true, text: 'Rules applied.', offerRestart: true }); loadPolicy() }
+    else {
+      setAllowMsg(null)
+      pending.forEach((r) => noteChange(`${r.decision === 'allow' ? 'Allowed' : 'Blocked'} ${r.resources}`))
+      loadPolicy()
+    }
   }
 
   const runCheck = async () => {
@@ -108,17 +165,25 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     setCheckResult({ decision: r.decision, text, support: r.supportMessage })
   }
 
-  // One-click allow straight from a recent block.
+  // One-click allow straight from a recent block. The row confirms in place,
+  // fades out, and drops off the list — the block is handled, so leaving it
+  // sitting there (indistinguishable from the ones that aren't) is a lie.
   const allowHost = async (host: string) => {
-    if (allowBusy) return
-    setAllowBusy(true)
+    // 'err' must fall through — that's the Retry click.
+    if (blockState[host] === 'busy' || blockState[host] === 'done') return
+    setBlockState((s) => ({ ...s, [host]: 'busy' }))
     setAllowMsg(null)
     const res = await window.minipit?.policyAllow(sandbox.name, host).catch(() => null)
-    setAllowBusy(false)
     if (res?.ok) {
-      setAllowMsg({ ok: true, text: `Allowed ${host}.`, offerRestart: true })
+      setBlockState((s) => ({ ...s, [host]: 'done' }))
+      noteChange(`Allowed ${host}`)
       loadPolicy()
+      setTimeout(() => {
+        dismissPolicyBlocks(sandbox.name, host)
+        setBlockState((s) => { const n = { ...s }; delete n[host]; return n })
+      }, BLOCK_FADE_MS)
     } else {
+      setBlockState((s) => ({ ...s, [host]: 'err' }))
       setAllowMsg({ ok: false, text: res?.error || `Failed to allow ${host}.` })
     }
   }
@@ -131,7 +196,7 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     const res = await window.minipit?.policyRm(sandbox.name, resource).catch(() => null)
     setRmBusy(null)
     if (res?.ok) {
-      setAllowMsg({ ok: true, text: `Removed ${resource}.`, offerRestart: true })
+      noteChange(`Removed ${resource}`)
       loadPolicy()
     } else {
       setAllowMsg({ ok: false, text: res?.error || `Failed to remove ${resource}.` })
@@ -147,7 +212,7 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     const res = await window.minipit?.policyReset(preset).catch(() => null)
     setPresetBusy(false)
     if (res?.ok) {
-      setAllowMsg({ ok: true, text: `Rules reset — default preset is now “${preset}”.`, offerRestart: true })
+      noteChange(`Default preset → “${preset}” (custom rules reset)`)
       loadPolicy()
     } else {
       setAllowMsg({ ok: false, text: res?.error || 'Failed to reset rules.' })
@@ -161,7 +226,9 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
       if (sandbox.status === 'running') await window.minipit?.stopSandbox(sandbox.name)
       await window.minipit?.runSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'running' })
-      setAllowMsg({ ok: true, text: 'Sandbox restarted — new policy applied.' })
+      clearPolicyRestart(sandbox.name)
+      setRestartDone(true)
+      setTimeout(() => setRestartDone(false), 6000)
       // The new policy only takes effect on (re)start, so re-read it now to
       // refresh the rule list (and the active-preset highlight).
       loadPolicy()
@@ -172,34 +239,25 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     }
   }
 
+  // One row per host: the same domain is usually denied over and over (every
+  // retry logs a block), and six rows for two hosts reads as six problems.
+  const grouped = (() => {
+    const m = new Map<string, { host: string; at: number; hits: number; rule?: string; reason?: string }>()
+    for (const b of blocks) {
+      const g = m.get(b.host)
+      if (g) { g.hits += 1; g.at = Math.max(g.at, b.at); g.rule ??= b.rule; g.reason ??= b.reason }
+      else m.set(b.host, { host: b.host, at: b.at, hits: 1, rule: b.rule, reason: b.reason })
+    }
+    return [...m.values()].sort((a, b) => b.at - a.at)
+  })()
+  const shown = grouped.slice(0, 5)
+
   return (
     <div className="info-dock">
       <div className="info-dock-hd">
         <span className="info-dock-title">Network</span>
       </div>
       <div className="info-panel">
-        {blocks.length > 0 && (
-          <div className="np-blocks np-blocks-top">
-            <div className="np-blocks-hd">
-              <ShieldAlert size={13} className="np-blocks-ic" />
-              Recent blocks
-            </div>
-            {blocks.slice(0, 6).map((b, i) => (
-              <div className="np-block" key={`${b.host}|${b.at}|${i}`}>
-                <div className="np-block-body">
-                  <span className="np-block-host">{b.host}</span>
-                  <span className="np-block-meta">
-                    {b.rule ? `${b.rule} · ` : ''}{new Date(b.at).toLocaleTimeString()}
-                  </span>
-                </div>
-                <button className="btn btn-default btn-sm" onClick={() => allowHost(b.host)} disabled={allowBusy}>
-                  Allow
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
         <AccordionSection id="ports" title="Ports" badge={sandbox.ports.length || undefined} defaultOpen>
           <PortsPanel sandbox={sandbox} />
         </AccordionSection>
@@ -207,10 +265,51 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
         <AccordionSection
           id="network"
           title="Network policy"
-          badge={blocks.length || undefined}
-          alert={blocks.length > 0}
+          badge={grouped.length || undefined}
+          alert={grouped.length > 0}
           defaultOpen
         >
+          {grouped.length > 0 && (
+            <div className="np-blocks">
+              <div className="np-blocks-hd">
+                <ShieldAlert size={13} className="np-blocks-ic" />
+                <span>Blocked requests</span>
+                <span className="np-blocks-count">{grouped.length}</span>
+              </div>
+              {shown.map((b) => {
+                const st = blockState[b.host]
+                return (
+                  <div className={`np-block${st ? ` ${st}` : ''}`} key={b.host}>
+                    <div className="np-block-body">
+                      <span className="np-block-host" title={b.host}>{b.host}</span>
+                      <span className="np-block-meta">
+                        {st === 'done'
+                          ? 'Rule added — restart to apply'
+                          : st === 'err'
+                            ? 'Couldn’t add the rule — try again'
+                            : <>{blockReason(b)} · {agoLabel(b.at)}{b.hits > 1 ? ` · ${b.hits}×` : ''}</>}
+                      </span>
+                    </div>
+                    {st === 'done' ? (
+                      <span className="np-block-ok"><Check size={13} /> Allowed</span>
+                    ) : (
+                      <button
+                        className={`btn btn-sm ${st === 'err' ? 'btn-default' : 'btn-primary'} np-block-btn`}
+                        onClick={() => allowHost(b.host)}
+                        disabled={st === 'busy'}
+                        title={`Add an allow rule for ${b.host}`}
+                      >
+                        {st === 'busy' ? 'Allowing…' : st === 'err' ? 'Retry' : 'Allow'}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+              {grouped.length > shown.length && (
+                <div className="np-blocks-more">+{grouped.length - shown.length} more host{grouped.length - shown.length > 1 ? 's' : ''} blocked</div>
+              )}
+            </div>
+          )}
 
           {polLoading ? (
             <div className="np-empty">Reading policy…</div>
@@ -421,13 +520,6 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
               {allowMsg && (
                 <div className={`np-banner ${allowMsg.ok ? 'ok' : 'err'}`}>
                   <span className="np-banner-txt">{allowMsg.text}</span>
-                  {allowMsg.offerRestart && (
-                    <button className="btn btn-default btn-sm" onClick={handleRestart} disabled={restarting}>
-                      {restarting
-                        ? (sandbox.status === 'running' ? 'Restarting…' : 'Starting…')
-                        : (sandbox.status === 'running' ? 'Restart sandbox' : 'Start sandbox')}
-                    </button>
-                  )}
                 </div>
               )}
 
@@ -435,6 +527,39 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
           )}
         </AccordionSection>
       </div>
+
+      {/* Docked outside the scroll area: a policy edit is inert until the
+          sandbox is cycled, so the one action that makes it real stays in view
+          no matter how far down the panel you scrolled to make the change. */}
+      {restartPending.length > 0 && (
+        <div className="np-restart">
+          <RotateCw size={14} className="np-restart-ic" />
+          <div className="np-restart-main">
+            <div className="np-restart-title">
+              {sandbox.status === 'running' ? 'Restart to apply' : 'Start to apply'}
+            </div>
+            <div className="np-restart-sub" title={restartPending.join('\n')}>
+              {restartPending.length === 1
+                ? restartPending[0]
+                : `${restartPending.length} policy changes pending`}
+            </div>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={handleRestart} disabled={restarting}>
+            {restarting
+              ? (sandbox.status === 'running' ? 'Restarting…' : 'Starting…')
+              : (sandbox.status === 'running' ? 'Restart' : 'Start')}
+          </button>
+        </div>
+      )}
+      {restartPending.length === 0 && restartDone && (
+        <div className="np-restart ok">
+          <Check size={14} className="np-restart-ic" />
+          <div className="np-restart-main">
+            <div className="np-restart-title">New policy active</div>
+            <div className="np-restart-sub">Sandbox restarted with the updated rules.</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

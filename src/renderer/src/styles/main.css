@@ -73,7 +73,11 @@ html, body, #root {
 .app-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* 100% of #root, not 100vh: at a fractional UI-density zoom Chromium can
+     resolve vh a rounded pixel taller than the viewport actually is, and that
+     pixel comes off the bottom of whatever sits last in the column (the
+     terminal). Percentages chain off html/body, which measure the real thing. */
+  height: 100%;
   overflow: hidden;
 }
 
@@ -1933,7 +1937,7 @@ html, body, #root {
 .frow-badge-count { border-radius: 100px; min-width: 16px; padding: 0 5px; }
 
 /* File editor window (#/editor) */
-.few { display: flex; flex-direction: column; height: 100vh; background: var(--bg); }
+.few { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
 .few-bar {
   display: flex; align-items: center; gap: 10px; padding: 10px 14px;
   border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -2511,36 +2515,82 @@ html, body, #root {
   background: var(--destruct); color: #fff; font-variant-numeric: tabular-nums;
 }
 
-/* Recent network-policy blocks inside the info panel */
-.np-blocks { margin-top: 12px; }
+/* Blocked requests, at the top of the Network policy section. One card per
+   host: neutral surface with a red edge marker — the whole list used to be a
+   red slab, which shouted without making any single row easier to act on. */
+.np-blocks { margin: 2px 0 14px; }
 .np-blocks-hd {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px; margin-bottom: 7px;
   font-size: 11.5px; font-weight: 600; color: var(--t2);
 }
-.np-blocks-ic { color: var(--destruct); }
+.np-blocks-ic { color: var(--destruct); flex-shrink: 0; }
+.np-blocks-count {
+  font-size: 10.5px; font-weight: 600; color: #fff; background: var(--destruct);
+  min-width: 17px; height: 17px; padding: 0 5px; border-radius: 100px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
 .np-block {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 4px;
-  border: 1px solid var(--border); border-radius: 7px; background: var(--bg-subtle);
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 9px 7px 10px; margin-bottom: 5px; overflow: hidden;
+  border: 1px solid var(--border); border-left: 2px solid var(--destruct);
+  border-radius: 7px; background: var(--bg-subtle);
+  max-height: 90px;
 }
-.np-block-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.np-block-host { font-size: 12.5px; color: var(--t1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-block-meta { font-size: 10.5px; color: var(--t3); }
+/* min-width:0 alone doesn't stop a long unbroken hostname: it overflowed the
+   body and painted across the Allow button, which is what made the button look
+   (and in places behave) unclickable. */
+.np-block-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.np-block-host {
+  font-size: 12.5px; color: var(--t1); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.np-block-meta {
+  font-size: 10.5px; color: var(--t3); line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.np-block-btn { flex-shrink: 0; }
+.np-block-ok {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; font-weight: 600; color: var(--green);
+}
+.np-block.busy { opacity: 0.7; }
+.np-block.err { border-left-color: var(--yellow); }
+/* Allowed → confirm in place, then collapse away. Timing is mirrored by
+   BLOCK_FADE_MS in NetworkPanel.tsx, which drops the row from the store. */
+.np-block.done {
+  border-left-color: var(--green);
+  background: var(--green-dim);
+  animation: np-block-out 1.6s ease forwards;
+}
+@keyframes np-block-out {
+  0%, 62% { opacity: 1; max-height: 90px; }
+  100% {
+    opacity: 0; max-height: 0; transform: translateX(8px);
+    margin-bottom: 0; padding-top: 0; padding-bottom: 0; border-top-width: 0; border-bottom-width: 0;
+  }
+}
+.np-blocks-more { font-size: 11px; color: var(--t3); padding: 2px 2px 0; }
 
-/* Recent blocks pinned at the top of the info panel — red-ish so they read as
-   an alert that needs attention. */
-.np-blocks-top {
-  margin: 12px 14px 2px;
-  padding: 10px 10px 6px;
-  border: 1px solid color-mix(in srgb, var(--destruct) 35%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--destruct) 7%, var(--bg));
+/* Docked "your change isn't live yet" footer — see the note in NetworkPanel. */
+.np-restart {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-top: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 12%, var(--bg));
 }
-.np-blocks-top .np-blocks-hd { color: var(--destruct); }
-.np-blocks-top .np-block {
-  border-color: color-mix(in srgb, var(--destruct) 28%, var(--border));
-  background: color-mix(in srgb, var(--destruct) 6%, var(--bg));
+.np-restart-ic { color: var(--yellow); flex-shrink: 0; }
+.np-restart-main { flex: 1; min-width: 0; }
+.np-restart-title { font-size: 12px; font-weight: 600; color: var(--t1); }
+.np-restart-sub {
+  font-size: 11px; color: var(--t2); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.np-blocks-top .np-block-host { color: var(--destruct); }
+.np-restart .btn { flex-shrink: 0; }
+.np-restart.ok {
+  border-top-color: color-mix(in srgb, var(--green) 40%, var(--border));
+  background: var(--green-dim);
+}
+.np-restart.ok .np-restart-ic { color: var(--green); }
 
 /* Toaster — transient policy-block alerts, bottom-right */
 .toaster {
@@ -2892,6 +2942,18 @@ html, body, #root {
   background: none; border: none; cursor: pointer; color: var(--t2); font-size: 12.5px; padding: 4px 0;
 }
 .kit-info-toggle:hover, .kit-info-toggle.on { color: var(--t1); }
+/* Summary / Code sit side by side under the capability blocks; either one opens
+   the panel below, and clicking the open one closes it. */
+.kit-info-bar { display: flex; gap: 16px; }
+/* The spec.yaml the form will write — read-only, so it reads as output rather
+   than an editor (no focus ring, no text cursor), unlike .kit-spec-area. */
+.kit-code-preview {
+  margin-top: 8px; max-height: 320px; overflow: auto;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 12px; line-height: 1.55;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; color: var(--t2); tab-size: 2;
+  white-space: pre; user-select: text;
+}
 .kit-summary {
   margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-subtle); padding: 4px 12px;
@@ -2973,9 +3035,9 @@ html, body, #root {
 .lib-hdr-kit, .lib-row-kit { grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 232px; }
 /* Five equal, flexible capability columns, shared by the header labels and the
    KitCaps cells so they align and shrink together. */
-.kit-caps-hdr { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; }
+.kit-caps-hdr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
 .kit-caps-hdr > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-row-kit .kit-caps:not(.compact) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.lib-row-kit .kit-caps:not(.compact) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .lib-row-kit .kit-caps:not(.compact) .kit-cap-ic { padding: 0 8px 0 0; min-width: 0; overflow: hidden; }
 .lib-row-kit .kit-cap-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Progressive shrink as the table narrows. Drop the per-cell text label *first*
@@ -3001,7 +3063,7 @@ html, body, #root {
    same column across every row, table-style, even when a kit lacks some. */
 .kit-caps:not(.compact) {
   display: grid;
-  grid-template-columns: 132px 104px 108px 116px 96px;
+  grid-template-columns: 132px 104px 108px 100px 116px 96px;
   justify-content: start;
 }
 .kit-caps:not(.compact) .kit-cap-ic { padding: 0 12px 0 0; border-left: none; }
@@ -3117,6 +3179,29 @@ html, body, #root {
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-subtle);
 }
 
+/* Which kit to take, when a cloned repo holds more than one. */
+.repo-pick { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg); }
+.repo-pick-hd {
+  padding: 7px 11px; border-bottom: 1px solid var(--border); background: var(--bg-subtle);
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--t3);
+}
+.repo-pick-item {
+  display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left;
+  padding: 8px 11px; border: none; background: none; cursor: pointer; font: inherit;
+  border-top: 1px solid var(--border);
+}
+.repo-pick-item:first-of-type { border-top: none; }
+.repo-pick-item:hover:not(:disabled) { background: var(--bg-subtle); }
+.repo-pick-item:disabled { opacity: 0.5; cursor: default; }
+.repo-pick-name { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--t1); }
+.repo-pick-kind {
+  font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  color: var(--t3); background: var(--bg-muted); border-radius: 100px; padding: 1px 6px;
+}
+.repo-pick-kind.sandbox { color: var(--accent, var(--primary)); background: color-mix(in srgb, var(--accent, var(--primary)) 12%, transparent); }
+.repo-pick-dir { font-size: 10.5px; color: var(--t3); font-family: 'SF Mono','Menlo',monospace; }
+.repo-pick-desc { font-size: 11.5px; color: var(--t2); }
+
 /* Post-upload share CTA */
 .kit-share-cta {
   border: 1px solid var(--accent, var(--primary)); border-radius: 10px;
@@ -3195,6 +3280,51 @@ html, body, #root {
 .kit-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-file-rm { display: flex; background: none; border: none; cursor: pointer; color: var(--t3); padding: 0; }
 .kit-file-rm:hover { color: var(--destruct); }
+
+/* Explanatory line at the top of a capability block — what the primitive is and
+   what the spec does with it. */
+.cap-note { font-size: 11.5px; line-height: 1.55; color: var(--t2); margin-bottom: 10px; }
+.cap-note code, .fhint code { background: var(--bg-muted); padding: 1px 4px; border-radius: 4px; font-size: 10.5px; }
+
+/* Command rows (install / startup) — the input plus its spec flags. */
+.kit-cmd-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.kit-cmd-row .finput { flex: 1; min-width: 0; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+.kit-cmd-flag {
+  flex-shrink: 0; padding: 4px 8px; border-radius: 100px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-subtle); color: var(--t3);
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.2px;
+}
+.kit-cmd-flag:hover { color: var(--t1); border-color: var(--border-hi); }
+.kit-cmd-flag.on {
+  color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg-subtle));
+}
+
+/* File rows — target folder + destination path inside it. */
+.kit-file-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.kit-file-row .finput { flex: 1; min-width: 0; font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; }
+.kit-file-target {
+  flex-shrink: 0; padding: 6px 7px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-subtle); color: var(--t2);
+  font-size: 11.5px; font-family: 'SF Mono','Menlo',monospace; cursor: pointer;
+}
+.kit-file-target:disabled { opacity: 0.6; cursor: default; }
+.kit-file-tag {
+  flex-shrink: 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; color: var(--t3);
+}
+
+/* Environment variable rows — name + value. */
+.kit-env-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.kit-env-row .finput { font-family: 'SF Mono','Menlo',monospace; font-size: 11.5px; min-width: 0; }
+.kit-env-key { flex: 0 0 40%; }
+.kit-env-val { flex: 1; }
+
+/* Credential card — one authenticated service. */
+.kit-cred { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin-bottom: 8px; }
+.kit-cred-hd { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.kit-cred-hd svg { color: var(--t3); flex-shrink: 0; }
+.kit-cred-name { flex: 1; min-width: 0; font-weight: 500; }
 .lib-hdr {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
   color: var(--t3); background: var(--bg-muted); border-bottom: 1px solid var(--border);
@@ -3778,11 +3908,14 @@ html, body, #root {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 8px 28px rgba(0,0,0,0.18); padding: 4px;
-  max-height: 184px; overflow-y: auto;
+  max-height: 260px; overflow-y: auto;
 }
+/* Rows are <button>s: without the reset they keep the UA border/background and
+   shrink-wrap their label, so the menu renders as a column of little pills. */
 .agent-dd-item {
-  display: flex; align-items: center; gap: 9px;
-  padding: 5px 9px; border-radius: 5px; cursor: pointer;
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 6px 9px; border: none; background: none; font: inherit;
+  border-radius: 5px; cursor: pointer;
   font-size: 12.5px; color: var(--t1);
 }
 .agent-dd-item:hover { background: var(--bg-subtle); }

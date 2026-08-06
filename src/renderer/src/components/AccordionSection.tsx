@@ -13,8 +13,9 @@ export function AccordionSection({ id, title, badge, alert = false, defaultOpen 
 }) {
   // Key is versioned so changing a section's default open-state (e.g. always
   // unfolding Network policy / Kits / Injected secrets) takes effect once rather
-  // than being overridden by a previously-persisted collapsed value.
-  const key = `minipit:info-acc:v2:${id}`
+  // than being overridden by a previously-persisted collapsed value. v3: blocked
+  // requests moved into Network policy, which has to be open to show them.
+  const key = `minipit:info-acc:v3:${id}`
   const [open, setOpen] = useState(() => {
     const v = localStorage.getItem(key)
     return v === null ? defaultOpen : v === '1'

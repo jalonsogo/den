@@ -141,11 +141,26 @@ memory, and startup commands onto an agent. Decisions:
   icons/search; each pick becomes a one-click allow-rule + registration. Custom MCPs by
   URL are supported.
 - **Capability display is positional.** In the full kit list, capabilities render as
-  **fixed grid columns** (Remote MCP · Policies · Env vars · Commands · Memory) so types
-  line up table-style across rows even when a kit lacks some. The compact variant (New
-  Sandbox modal / dropdowns) packs only present capabilities.
+  **fixed grid columns** (Remote MCP · Policies · Env vars · Setup · Credentials · Memory)
+  so types line up table-style across rows even when a kit lacks some. The compact variant
+  (New Sandbox modal / dropdowns) packs only present capabilities.
+- **The composer covers the whole spec.** One block per kit primitive: Remote MCPs, Setup
+  (`commands.install` / `commands.startup`), Files (`files/home/`, `files/workspace/`),
+  Environment (`environment.variables`), Credential (the four-block proxy-injection
+  pattern), Requirements (`network.allowedDomains`), Agent instructions (`agentContext` +
+  `sandbox.aiFilename`). Keys with no control — a command's `description`,
+  `commands.initFiles`, `network.deniedDomains` — are parsed and re-emitted so editing a
+  hand-written kit never silently drops them. `lib/kitForm.ts` owns both directions and
+  round-trips byte-for-byte.
 - **Sharing is OCI, not bespoke.** Push/pull via any registry (`sbx kit push`), reference
   prefilled from the logged-in Docker account.
+- **Import takes the URL the user has, not a canonical one.** `src/main/gitKitRef.ts`
+  normalises bare repo URLs, `git+…#ref=&dir=`, scp/`ssh://` remotes and forge browse URLs
+  (`/tree/<ref>/<path>`, `/-/tree/…`, `/src/…`, `/blob/…`) into one clone + revision +
+  subdirectory, then `resolveKitDir` decides: import it, or offer the kits the repo
+  actually holds. A repo URL typed into the OCI field is routed to the clone path, because
+  `sbx kit pull` reports a repo reference as a `kit.allowedSources` violation, which reads
+  as a permissions problem rather than a wrong-kind-of-reference one.
 - **Community gallery** is browsed live from `docker/sbx-kits-contrib` on GitHub (one tree
   API call + raw `spec.yaml` fetches) and imported via a sparse shallow clone. Kits are
   consumed by `sbx` as `--kit "git+<repo>#dir=<name>"`.

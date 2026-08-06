@@ -1,40 +1,22 @@
-import { useState, useEffect } from 'react'
-import { Plus, X, Paperclip, Info, Search, ChevronDown, Check } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, X, Paperclip, Info, Search, ChevronDown, Check, KeyRound, FileCode2 } from 'lucide-react'
 import { useStore } from '../../store'
 import { MCP_CATALOG, mcpHost, mcpIcon } from '../../lib/mcpCatalog'
-import { parseKitSpec } from '../../lib/kitSpec'
+import {
+  buildSpec, specToForm, kitDomains, mcpStartupCmds, EMPTY_KIT,
+  type Cap, type CmdRow, type CredRow, type FileRow, type KitForm
+} from '../../lib/kitForm'
 import { AgentIcon } from '../AgentIcon'
-import { AGENTS, type AgentType } from '../../types'
-
-type Cap = 'mcp' | 'network' | 'env' | 'memory'
-
-interface KitForm {
-  kind: 'mixin' | 'sandbox'
-  name: string
-  displayName: string
-  description: string
-  image: string
-  entrypoint: string
-  mcps: string[]            // catalog ids (Remote MCP primitive)
-  installCmds: string[]
-  allowedDomains: string[]
-  deniedDomains: string[]
-  envVars: string[]
-  agentContext: string
-  attachFiles: string[]     // host paths to bundle into the kit
-  customMcps: { name: string; url: string }[]
-}
-
-const EMPTY: KitForm = {
-  kind: 'mixin', name: '', displayName: '', description: '',
-  image: '', entrypoint: '', mcps: [], installCmds: [], allowedDomains: [], deniedDomains: [], envVars: [], agentContext: '', attachFiles: [], customMcps: []
-}
+import { AGENTS, type AgentType, type KitFile } from '../../types'
 
 const CAPS: { key: Cap; label: string }[] = [
   { key: 'mcp',     label: 'Remote MCPs' },
-  { key: 'network', label: 'Network policy' },
-  { key: 'env',     label: 'Environment variables' },
-  { key: 'memory',  label: 'Agent memory & files' }
+  { key: 'setup',   label: 'Setup' },
+  { key: 'files',   label: 'Files' },
+  { key: 'env',     label: 'Environment' },
+  { key: 'cred',    label: 'Credential' },
+  { key: 'network', label: 'Requirements' },
+  { key: 'memory',  label: 'Agent instructions' }
 ]
 
 // Base for a sandbox kit — start from a default agent (image + entrypoint are
@@ -51,120 +33,6 @@ const AGENT_BASES: Record<string, { image: string; entrypoint: string }> = {
   kiro:             { image: 'docker/sandbox-templates:kiro-docker', entrypoint: 'kiro' },
   opencode:         { image: 'docker/sandbox-templates:opencode-docker', entrypoint: 'opencode' },
   shell:            { image: 'ubuntu:24.04', entrypoint: 'bash' }
-}
-
-function buildSpec(f: KitForm): string {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`
-  const lines: string[] = ['schemaVersion: "1"', `kind: ${f.kind}`, `name: ${f.name || 'my-kit'}`]
-  if (f.displayName.trim()) lines.push(`displayName: ${f.displayName.trim()}`)
-  if (f.description.trim()) lines.push(`description: ${f.description.trim()}`)
-
-  if (f.kind === 'sandbox') {
-    const run = (f.entrypoint.trim() || 'bash').split(/\s+/).filter(Boolean).map(q).join(', ')
-    lines.push('sandbox:')
-    lines.push(`  image: ${q(f.image.trim() || 'docker/sandbox-templates:claude-code-docker')}`)
-    lines.push('  entrypoint:', `    run: [${run}]`)
-  }
-
-  // Custom MCPs the user typed (name + url).
-  const customMcps = f.customMcps.filter((c) => c.url.trim())
-  // Network: manual allow-domains + every selected MCP's host (catalog + custom).
-  const mcpServers = f.mcps.map((id) => MCP_CATALOG.find((m) => m.id === id)).filter(Boolean) as typeof MCP_CATALOG
-  const allowed = [...new Set([
-    ...f.allowedDomains.map((s) => s.trim()).filter(Boolean),
-    ...mcpServers.map((m) => mcpHost(m.url)),
-    ...customMcps.map((c) => mcpHost(c.url.trim()))
-  ])]
-  const denied = f.deniedDomains.map((s) => s.trim()).filter(Boolean)
-  if (allowed.length || denied.length) {
-    lines.push('network:')
-    if (allowed.length) { lines.push('  allowedDomains:'); allowed.forEach((d) => lines.push(`    - ${d}`)) }
-    if (denied.length) { lines.push('  deniedDomains:'); denied.forEach((d) => lines.push(`    - ${d}`)) }
-  }
-
-  const envs = f.envVars.map((s) => s.trim()).filter((s) => s.includes('='))
-  if (envs.length) {
-    lines.push('environment:', '  variables:')
-    envs.forEach((e) => { const i = e.indexOf('='); lines.push(`    ${e.slice(0, i).trim()}: ${q(e.slice(i + 1).trim())}`) })
-  }
-
-  // Commands: manual install commands + `claude mcp add` per selected MCP.
-  const installCmds = f.installCmds.map((s) => s.trim()).filter(Boolean)
-  // MCP registration must run at STARTUP (after the sandbox seeds the agent's
-  // settings) and as the agent user, with --scope user so it persists — running
-  // it as an install command gets overwritten by setup. `claude` is not on the
-  // default PATH for the startup shell (see sbx's own durable-startup script),
-  // so prepend the same PATH it uses. Idempotent via `|| true`.
-  const PATHFIX = 'export PATH="$HOME/.local/bin:$HOME/.claude/local:$PATH"; '
-  const startupCmds = [
-    ...mcpServers.map((m) => `${PATHFIX}claude mcp add ${m.id} --transport ${m.transport} ${m.url} --scope user || true`),
-    ...customMcps.map((c) => `${PATHFIX}claude mcp add ${(c.name.trim() || 'custom').replace(/\s+/g, '-')} --transport http ${c.url.trim()} --scope user || true`)
-  ]
-  if (installCmds.length || startupCmds.length) {
-    lines.push('commands:')
-    if (installCmds.length) {
-      lines.push('  install:')
-      installCmds.forEach((c) => lines.push(`    - command: ${q(c)}`))
-    }
-    if (startupCmds.length) {
-      // spec.StartupCommand.command is an ARGV array (sbx runs `exec <argv...>`),
-      // NOT shell lines — so a bare command string is exec'd as a binary name and
-      // fails with 127. Wrap each in `sh -c "<script>"` (mirrors sbx's own startup
-      // dispatcher). Runs as `user` 1000 (the agent) so `claude mcp add --scope
-      // user` lands in the agent's config, which `/mcp` reads.
-      lines.push('  startup:')
-      startupCmds.forEach((c) => {
-        lines.push('    - command:')
-        lines.push('        - "sh"')
-        lines.push('        - "-c"')
-        lines.push(`        - ${q(c)}`)
-        lines.push('      user: "1000"')
-      })
-    }
-  }
-
-  if (f.agentContext.trim()) {
-    lines.push('agentContext: |')
-    f.agentContext.trim().split('\n').forEach((l) => lines.push(`  ${l}`))
-  }
-  return lines.join('\n') + '\n'
-}
-
-// Inverse of buildSpec — best-effort parse of an existing spec.yaml back into the
-// visual form so a kit can be edited. Round-trips kits composed with this editor;
-// hand-written YAML with exotic startup commands may not fully map back.
-function specToForm(raw: string): { form: KitForm; caps: Cap[] } {
-  const p = parseKitSpec(raw)
-  // Recover MCP registrations (id/name, transport, url) from `claude mcp add`.
-  const mcps: string[] = []
-  const customMcps: { name: string; url: string }[] = []
-  for (const m of raw.matchAll(/claude\s+mcp\s+add\s+(\S+)\s+--transport\s+(\S+)\s+(\S+)/g)) {
-    const name = m[1], url = m[3]
-    if (MCP_CATALOG.some((c) => c.id === name)) { if (!mcps.includes(name)) mcps.push(name) }
-    else if (!customMcps.some((c) => c.url === url)) customMcps.push({ name, url })
-  }
-  // Real install commands exclude the auto-generated MCP registrations.
-  const installCmds = p.installCmds.filter((c) => !/claude\s+mcp\s+add\s/.test(c))
-  // Manual allow-domains exclude hosts auto-derived from the selected MCPs.
-  const mcpHosts = new Set<string>([
-    ...mcps.map((id) => { const c = MCP_CATALOG.find((x) => x.id === id); return c ? mcpHost(c.url) : '' }),
-    ...customMcps.map((c) => mcpHost(c.url))
-  ].filter(Boolean))
-  const allowedDomains = p.allowedDomains.filter((d) => !mcpHosts.has(d))
-
-  const form: KitForm = {
-    kind: p.kind === 'sandbox' ? 'sandbox' : 'mixin',
-    name: p.name, displayName: p.displayName, description: p.description,
-    image: p.image, entrypoint: p.entrypoint,
-    mcps, installCmds, allowedDomains, deniedDomains: p.deniedDomains,
-    envVars: p.envVars, agentContext: p.agentContext, attachFiles: [], customMcps
-  }
-  const caps: Cap[] = []
-  if (mcps.length || customMcps.length) caps.push('mcp')
-  if (allowedDomains.length || p.deniedDomains.length) caps.push('network')
-  if (form.envVars.length) caps.push('env')
-  if (form.agentContext.trim()) caps.push('memory')
-  return { form, caps }
 }
 
 // A list of single-line inputs with add/remove (one entry per line).
@@ -193,6 +61,45 @@ function ListField({ placeholder, items, onChange, addLabel }: {
   )
 }
 
+// Command rows with their spec flags: run as the agent (uid 1000) vs root, and —
+// for startup only — keep running in the background.
+function CmdField({ placeholder, items, onChange, addLabel, background }: {
+  placeholder: string; items: CmdRow[]; onChange: (v: CmdRow[]) => void; addLabel: string; background?: boolean
+}) {
+  const patch = (i: number, v: Partial<CmdRow>) => onChange(items.map((c, j) => (j === i ? { ...c, ...v } : c)))
+  return (
+    <>
+      {items.map((c, i) => (
+        <div className="kit-cmd-row" key={i}>
+          <input className="finput" value={c.cmd} placeholder={placeholder} onChange={(e) => patch(i, { cmd: e.target.value })} />
+          <button
+            className={`kit-cmd-flag${c.asAgent ? ' on' : ''}`}
+            onClick={() => patch(i, { asAgent: !c.asAgent })}
+            title={c.asAgent ? 'Runs as the agent (uid 1000) — click for root' : 'Runs as root — click to run as the agent (uid 1000)'}
+          >
+            {c.asAgent ? 'agent' : 'root'}
+          </button>
+          {background && (
+            <button
+              className={`kit-cmd-flag${c.background ? ' on' : ''}`}
+              onClick={() => patch(i, { background: !c.background })}
+              title="background: true — keep it running instead of waiting for it to exit"
+            >
+              bg
+            </button>
+          )}
+          <button className="btn btn-ghost btn-sm kit-list-rm" onClick={() => onChange(items.filter((_, j) => j !== i))} title="Remove">
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+      <button className="kit-add-line" onClick={() => onChange([...items, { cmd: '', asAgent: !!background }])}>
+        <Plus size={12} /> {addLabel}
+      </button>
+    </>
+  )
+}
+
 export function NewKitModal() {
   const { setModal, activePage, editKit, setEditKit } = useStore()
   const editing = !!editKit
@@ -200,13 +107,16 @@ export function NewKitModal() {
   // in edit mode it's replaced by the loaded kit's kind.
   const kind: 'mixin' | 'sandbox' = activePage === 'kits' ? 'sandbox' : 'mixin'
   const [f, setF] = useState<KitForm>({
-    ...EMPTY, kind,
+    ...EMPTY_KIT, kind,
     ...(kind === 'sandbox' ? { image: AGENT_BASES.claude.image, entrypoint: AGENT_BASES.claude.entrypoint } : {})
   })
   const [imgCustom, setImgCustom] = useState(false)
   const [agentDd, setAgentDd] = useState(false)
+  const agentDdRef = useRef<HTMLDivElement>(null)
   const [caps, setCaps] = useState<Cap[]>([])
-  const [showInfo, setShowInfo] = useState(false)
+  // Bottom preview: the capability summary, or the spec.yaml den will write.
+  // null = collapsed. Clicking the open one closes it.
+  const [infoView, setInfoView] = useState<'summary' | 'code' | null>(null)
   const [capMenu, setCapMenu] = useState(false)
   const [mcpQuery, setMcpQuery] = useState('')
   const [mcpCat, setMcpCat] = useState('All')
@@ -217,18 +127,34 @@ export function NewKitModal() {
   const set = (k: keyof KitForm, v: KitForm[keyof KitForm]) => setF((prev) => ({ ...prev, [k]: v }))
 
   // In edit mode, load the kit's spec.yaml and hydrate the form + open the
-  // capability blocks it already uses.
+  // capability blocks it already uses. Files aren't in the spec — they're the
+  // contents of <kit>/files/ — so list those separately.
   useEffect(() => {
     if (!editKit) return
     let cancelled = false
-    window.minipit?.readKit(editKit.dir).then((raw) => {
+    Promise.all([
+      window.minipit?.readKit(editKit.dir) ?? Promise.resolve(''),
+      window.minipit?.listKitFiles(editKit.dir).catch(() => []) ?? Promise.resolve([])
+    ]).then(([raw, packed]) => {
       if (cancelled || !raw) return
       const { form, caps: c } = specToForm(raw)
-      setF(form)
-      setCaps(c)
+      const files: FileRow[] = (packed ?? []).map((p) => ({ target: p.target, dest: p.dest, packed: true }))
+      setF({ ...form, files })
+      const hasFiles = files.length > 0 || form.initFiles.length > 0
+      setCaps(hasFiles && !c.includes('files') ? [...c, 'files'] : c)
     }).catch(() => {})
     return () => { cancelled = true }
   }, [editKit])
+
+  // Close the base-agent dropdown on outside click.
+  useEffect(() => {
+    if (!agentDd) return
+    const handler = (e: MouseEvent) => {
+      if (agentDdRef.current && !agentDdRef.current.contains(e.target as Node)) setAgentDd(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [agentDd])
 
   // Close and clear the edit target so the next open is a fresh "create".
   const close = () => { setModal(null); setEditKit(null) }
@@ -238,9 +164,14 @@ export function NewKitModal() {
     setCaps((c) => c.filter((k) => k !== key))
     // Clear that primitive's content so it doesn't leak into the spec.
     if (key === 'mcp') setF((p) => ({ ...p, mcps: [], customMcps: [] }))
-    if (key === 'network') setF((p) => ({ ...p, allowedDomains: [], deniedDomains: [] }))
+    if (key === 'setup') setF((p) => ({ ...p, installCmds: [], startupCmds: [] }))
+    // Files already packed into the kit folder are deleted from the Files list
+    // itself, not by closing the block; initFiles are spec-authored and stay.
+    if (key === 'files') setF((p) => ({ ...p, files: p.files.filter((x) => x.packed) }))
     if (key === 'env') set('envVars', [])
-    if (key === 'memory') setF((p) => ({ ...p, agentContext: '', attachFiles: [] }))
+    if (key === 'cred') set('creds', [])
+    if (key === 'network') setF((p) => ({ ...p, allowedDomains: [], deniedDomains: [] }))
+    if (key === 'memory') setF((p) => ({ ...p, agentContext: '', aiFilename: '' }))
   }
   const toggleMcp = (id: string) =>
     setF((p) => ({ ...p, mcps: p.mcps.includes(id) ? p.mcps.filter((m) => m !== id) : [...p.mcps, id] }))
@@ -249,16 +180,50 @@ export function NewKitModal() {
     setF((p) => ({ ...p, customMcps: p.customMcps.map((c, j) => (j === i ? { ...c, [field]: val } : c)) }))
   const removeCustomMcp = (i: number) => setF((p) => ({ ...p, customMcps: p.customMcps.filter((_, j) => j !== i) }))
 
+  const addCred = () => setF((p) => ({
+    ...p, creds: [...p.creds, { service: '', domains: [''], headerName: 'Authorization', valueFormat: 'Bearer %s', envVars: [''] }]
+  }))
+  const updateCred = (i: number, v: Partial<CredRow>) =>
+    setF((p) => ({ ...p, creds: p.creds.map((c, j) => (j === i ? { ...c, ...v } : c)) }))
+  const removeCred = (i: number) => setF((p) => ({ ...p, creds: p.creds.filter((_, j) => j !== i) }))
+
   const attach = async () => {
     const picked = await window.minipit?.pickFiles().catch(() => [])
-    if (picked?.length) setF((p) => ({ ...p, attachFiles: [...new Set([...p.attachFiles, ...picked])] }))
+    if (!picked?.length) return
+    setF((p) => ({
+      ...p,
+      files: [
+        ...p.files,
+        ...picked
+          .filter((src) => !p.files.some((x) => x.src === src))
+          .map((src) => ({ src, target: 'workspace' as const, dest: src.split('/').pop() ?? 'file' }))
+      ]
+    }))
   }
+
+  const updateFile = (i: number, v: Partial<FileRow>) =>
+    setF((p) => ({ ...p, files: p.files.map((x, j) => (j === i ? { ...x, ...v } : x)) }))
+
+  // Files already packed into the kit folder are deleted on the spot; ones picked
+  // in this session just leave the list.
+  const removeFile = async (i: number) => {
+    const row = f.files[i]
+    if (row.packed && editKit) {
+      const res = await window.minipit?.removeKitFile(editKit.dir, row.target, row.dest)
+      if (res && !res.ok) { setError(res.error || 'Failed to remove the file'); return }
+    }
+    setF((p) => ({ ...p, files: p.files.filter((_, j) => j !== i) }))
+  }
+
+  // Only newly-picked files need copying; packed ones are already in place.
+  const newFiles = (): KitFile[] =>
+    f.files.filter((x) => x.src && !x.packed).map((x) => ({ src: x.src as string, target: x.target, dest: x.dest.trim() || (x.src as string).split('/').pop() || 'file' }))
 
   const handleCreate = async () => {
     if (!f.name.trim()) { setError('Name is required'); return }
     setSaving(true); setError(''); setDone('')
     try {
-      const res = await window.minipit?.createKit(f.name.trim(), buildSpec(f), f.attachFiles)
+      const res = await window.minipit?.createKit(f.name.trim(), buildSpec(f), newFiles())
       setDone(res?.zip ? `Packed → ${res.zip}` : 'Kit created')
       setTimeout(() => close(), 1200)
     } catch (e) {
@@ -271,7 +236,7 @@ export function NewKitModal() {
   const handleSave = async () => {
     if (!editKit) return
     setSaving(true); setError(''); setDone('')
-    const res = await window.minipit?.updateKit(editKit.dir, buildSpec(f), f.attachFiles)
+    const res = await window.minipit?.updateKit(editKit.dir, buildSpec(f), newFiles())
       .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
     if (res?.ok) {
       setDone('Saved & re-packed')
@@ -282,6 +247,8 @@ export function NewKitModal() {
   }
 
   const capLabel = (key: Cap) => CAPS.find((c) => c.key === key)?.label ?? key
+  // Render blocks in CAPS order regardless of the order they were added.
+  const openCaps = CAPS.filter((c) => caps.includes(c.key)).map((c) => c.key)
 
   return (
     <div className="overlay" onClick={() => !saving && close()}>
@@ -291,7 +258,7 @@ export function NewKitModal() {
           <div className="m-sub">
             {f.kind === 'sandbox'
               ? 'Define a full agent — image, entrypoint, and capabilities. den writes the spec.yaml and packs it.'
-              : 'Compose add-ons (MCPs, commands, policy, env, memory) for an existing agent.'}
+              : 'Compose add-ons (MCPs, setup, files, policy, env, credentials, memory) for an existing agent.'}
           </div>
         </div>
 
@@ -319,7 +286,7 @@ export function NewKitModal() {
               <>
                 <div className="fg">
                   <label className="flabel">Base agent <span className="flabel-hint">image + entrypoint are editable</span></label>
-                  <div className="agent-dd">
+                  <div className="agent-dd" ref={agentDdRef}>
                     <button className="agent-dd-btn" onClick={() => setAgentDd((v) => !v)}>
                       {selAgent ? <AgentIcon agent={selAgent as AgentType} size={18} /> : <Plus size={16} />}
                       <span className="agent-dd-label">{selLabel}</span>
@@ -358,8 +325,8 @@ export function NewKitModal() {
           })()}
 
           {/* Capability composer: blocks first, then an "Add" CTA below them */}
-          {caps.length > 0 && <label className="flabel">Capabilities</label>}
-          {caps.map((key) => (
+          {openCaps.length > 0 && <label className="flabel">Capabilities</label>}
+          {openCaps.map((key) => (
             <div className="cap-block" key={key}>
               <div className="cap-block-hd">
                 <span>{capLabel(key)}</span>
@@ -423,45 +390,193 @@ export function NewKitModal() {
                       ))}
                       {shown.length === 0 && <div className="mcp-empty">No servers match.</div>}
                     </div>
-                    <div className="fhint">{f.mcps.length + f.customMcps.length || 'No'} selected — each adds an allow rule + <code>claude mcp add</code>.</div>
+                    <div className="fhint">{f.mcps.length + f.customMcps.length || 'No'} selected — each adds an allow rule + a startup <code>claude mcp add</code>.</div>
                   </>
                 )
               })()}
 
-              {key === 'network' && (
+              {key === 'setup' && (
                 <>
-                  <div className="cap-sub">Allowed domains</div>
-                  <ListField placeholder="api.example.com" addLabel="Add allowed" items={f.allowedDomains} onChange={(v) => set('allowedDomains', v)} />
-                  <div className="cap-sub" style={{ marginTop: 8 }}>Denied domains</div>
-                  <ListField placeholder="telemetry.example.com" addLabel="Add denied" items={f.deniedDomains} onChange={(v) => set('deniedDomains', v)} />
+                  <div className="cap-note">
+                    Install runs once at create, via <code>sh -c</code>. Startup runs on every start — non-interactive,
+                    before the agent attaches; author idempotent.
+                  </div>
+                  <div className="cap-sub">Install · once at create</div>
+                  <CmdField placeholder="uv tool install ruff@latest" addLabel="Add" items={f.installCmds} onChange={(v) => set('installCmds', v)} />
+                  <div className="cap-sub" style={{ marginTop: 10 }}>Startup · every start</div>
+                  <CmdField placeholder="my-daemon --serve" addLabel="Add" items={f.startupCmds} onChange={(v) => set('startupCmds', v)} background />
+                  <div className="fhint">
+                    Startup commands run as exec-style argv — shell strings are wrapped in <code>["sh", "-c", …]</code> automatically.
+                  </div>
+                </>
+              )}
+
+              {key === 'files' && (
+                <>
+                  <div className="cap-note">
+                    Static files packed with the kit and copied in at create — config, dotfiles, helper scripts.
+                    <code>files/home/</code> → <code>/home/agent/</code> · <code>files/workspace/</code> → the workspace.
+                  </div>
+                  {f.files.map((x, i) => (
+                    <div className="kit-file-row" key={`${x.target}/${x.dest}/${i}`}>
+                      <select className="kit-file-target" value={x.target} onChange={(e) => updateFile(i, { target: e.target.value as 'home' | 'workspace' })} disabled={x.packed}>
+                        <option value="home">home/</option>
+                        <option value="workspace">workspace/</option>
+                      </select>
+                      <input
+                        className="finput"
+                        value={x.dest}
+                        placeholder="ruff.toml"
+                        readOnly={x.packed}
+                        onChange={(e) => updateFile(i, { dest: e.target.value })}
+                      />
+                      {x.packed
+                        ? <span className="kit-file-tag">packed</span>
+                        : <span className="kit-file-tag" title={x.src}>{x.src?.split('/').pop()}</span>}
+                      <button className="btn btn-ghost btn-sm kit-list-rm" onClick={() => removeFile(i)} title="Remove"><X size={13} /></button>
+                    </div>
+                  ))}
+                  <button className="kit-add-line" onClick={attach}>
+                    <Paperclip size={12} /> Add
+                  </button>
+                  {f.initFiles.length > 0 && (
+                    <>
+                      {/* Written at startup with runtime values — authored in the
+                          spec, shown here so they aren't invisible in the editor. */}
+                      <div className="cap-sub" style={{ marginTop: 10 }}>Init files · from the spec</div>
+                      {f.initFiles.map((x) => (
+                        <div className="kit-file-row" key={x.path}>
+                          <input className="finput" value={x.path} readOnly />
+                          {x.onlyIfMissing && <span className="kit-file-tag">only if missing</span>}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  <div className="fhint">
+                    Contents are added when you pack the directory. For values only known at start — like <code>${'{WORKDIR}'}</code> —
+                    use <code>commands.initFiles</code> in the spec.
+                  </div>
                 </>
               )}
 
               {key === 'env' && (
-                <ListField placeholder="KEY=value" addLabel="Add variable" items={f.envVars} onChange={(v) => set('envVars', v)} />
+                <>
+                  <div className="cap-note">
+                    Static variables set in the container. Secrets don't go here — declare a credential below and its
+                    env var arrives proxy-managed.
+                  </div>
+                  {f.envVars.map((e, i) => (
+                    <div className="kit-env-row" key={i}>
+                      <input
+                        className="finput kit-env-key"
+                        value={e.key}
+                        placeholder="MY_TOOL_WORKSPACE"
+                        onChange={(ev) => set('envVars', f.envVars.map((x, j) => (j === i ? { ...x, key: ev.target.value } : x)))}
+                      />
+                      <input
+                        className="finput kit-env-val"
+                        value={e.value}
+                        placeholder="/home/agent/my-tool"
+                        onChange={(ev) => set('envVars', f.envVars.map((x, j) => (j === i ? { ...x, value: ev.target.value } : x)))}
+                      />
+                      <button className="btn btn-ghost btn-sm kit-list-rm" onClick={() => set('envVars', f.envVars.filter((_, j) => j !== i))} title="Remove"><X size={13} /></button>
+                    </div>
+                  ))}
+                  <button className="kit-add-line" onClick={() => set('envVars', [...f.envVars, { key: '', value: '' }])}>
+                    <Plus size={12} /> Add
+                  </button>
+                </>
+              )}
+
+              {key === 'cred' && (
+                <>
+                  <div className="cap-note">
+                    An authenticated service the kit talks to. The secret stays on the host — the proxy injects it on
+                    requests to the domain; the container only ever sees a sentinel.
+                  </div>
+                  {f.creds.map((c, i) => (
+                    <div className="kit-cred" key={i}>
+                      <div className="kit-cred-hd">
+                        <KeyRound size={13} />
+                        <input
+                          className="finput kit-cred-name"
+                          value={c.service}
+                          placeholder="my-service"
+                          onChange={(e) => updateCred(i, { service: e.target.value })}
+                        />
+                        <button className="cap-rm" onClick={() => removeCred(i)} title="Remove"><X size={13} /></button>
+                      </div>
+                      <div className="cap-sub">Domains it authenticates to</div>
+                      <ListField placeholder="api.example.com" addLabel="Add domain" items={c.domains} onChange={(v) => updateCred(i, { domains: v })} />
+                      <div className="frow-2" style={{ marginTop: 8 }}>
+                        <div className="fg" style={{ flex: 1 }}>
+                          <label className="flabel">Header</label>
+                          <input className="finput" value={c.headerName} placeholder="Authorization" onChange={(e) => updateCred(i, { headerName: e.target.value })} />
+                        </div>
+                        <div className="fg" style={{ flex: 1 }}>
+                          <label className="flabel">Value format</label>
+                          <input className="finput" value={c.valueFormat} placeholder="Bearer %s" onChange={(e) => updateCred(i, { valueFormat: e.target.value })} />
+                        </div>
+                      </div>
+                      <div className="cap-sub" style={{ marginTop: 8 }}>Host secret · env var</div>
+                      <ListField placeholder="MY_SERVICE_API_KEY" addLabel="Add variable" items={c.envVars} onChange={(v) => updateCred(i, { envVars: v })} />
+                    </div>
+                  ))}
+                  <button className="kit-add-line" onClick={addCred}>
+                    <Plus size={12} /> Add
+                  </button>
+                  <div className="fhint">
+                    Set the value on the host with <code>sbx secret set</code>; the agent boots with the variable set to
+                    <code>proxy-managed</code>.
+                  </div>
+                </>
+              )}
+
+              {key === 'network' && (
+                <>
+                  <div className="cap-note">
+                    What the kit needs to reach in order to work — declared in the spec's <code>network.allowedDomains</code>.
+                    Kits state needs only; they don't carry deny rules.
+                  </div>
+                  <ListField placeholder="pypi.org" addLabel="Add" items={f.allowedDomains} onChange={(v) => set('allowedDomains', v)} />
+                  {f.deniedDomains.length > 0 && (
+                    <>
+                      {/* Not authored here — kept so editing a hand-written kit
+                          doesn't silently drop its deny rules. */}
+                      <div className="cap-sub" style={{ marginTop: 10 }}>Deny rules · from the spec</div>
+                      {f.deniedDomains.map((d, i) => (
+                        <div className="kit-list-row" key={i}>
+                          <input className="finput" value={d} readOnly />
+                          <button className="btn btn-ghost btn-sm kit-list-rm" onClick={() => set('deniedDomains', f.deniedDomains.filter((_, j) => j !== i))} title="Remove"><X size={13} /></button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </>
               )}
 
               {key === 'memory' && (
                 <>
+                  <div className="cap-note">
+                    Rendered inline into the profile file the kit owns ({f.kind === 'sandbox' ? f.aiFilename.trim() || 'AGENTS.md' : 'the agent\'s own'}) —
+                    the agent reads it at session start.
+                  </div>
+                  {f.kind === 'sandbox' && (
+                    <div className="fg" style={{ marginBottom: 8 }}>
+                      <label className="flabel">Profile filename</label>
+                      <input className="finput" value={f.aiFilename} placeholder="AGENTS.md" onChange={(e) => set('aiFilename', e.target.value)} />
+                    </div>
+                  )}
                   <textarea
                     className="finput"
                     style={{ minHeight: 64, resize: 'vertical', fontFamily: 'inherit' }}
                     value={f.agentContext}
-                    placeholder="Notes appended to the agent's memory (CLAUDE.md / AGENTS.md)…"
+                    placeholder="This kit exposes X. Ensure Y is set, then call tools under the Z namespace."
                     onChange={(e) => set('agentContext', e.target.value)}
                   />
-                  <div className="cap-sub" style={{ marginTop: 10 }}>Reference files</div>
-                  {f.attachFiles.map((p, i) => (
-                    <div className="kit-file" key={p}>
-                      <Paperclip size={12} />
-                      <span className="kit-file-name">{p.split('/').pop()}</span>
-                      <button className="kit-file-rm" onClick={() => set('attachFiles', f.attachFiles.filter((_, j) => j !== i))} title="Remove"><X size={12} /></button>
-                    </div>
-                  ))}
-                  <button className="kit-add-line" onClick={attach}>
-                    <Paperclip size={12} /> Attach files (pdf, txt, md…)
-                  </button>
-                  <div className="fhint">Bundled into the kit and dropped into the sandbox workspace.</div>
+                  {f.kind === 'mixin' && (
+                    <div className="fhint">Mixin kits land in <code>kits-agent-context/{f.name || 'my-kit'}.md</code> next to the agent's profile.</div>
+                  )}
                 </>
               )}
             </div>
@@ -482,15 +597,38 @@ export function NewKitModal() {
             </div>
           )}
 
-          <button className={`kit-info-toggle${showInfo ? ' on' : ''}`} onClick={() => setShowInfo((v) => !v)}>
-            <Info size={14} /> Summary
-          </button>
-          {showInfo && (() => {
+          <div className="kit-info-bar">
+            <button
+              className={`kit-info-toggle${infoView === 'summary' ? ' on' : ''}`}
+              onClick={() => setInfoView((v) => (v === 'summary' ? null : 'summary'))}
+            >
+              <Info size={14} /> Summary
+            </button>
+            <button
+              className={`kit-info-toggle${infoView === 'code' ? ' on' : ''}`}
+              onClick={() => setInfoView((v) => (v === 'code' ? null : 'code'))}
+            >
+              <FileCode2 size={14} /> Code
+            </button>
+          </div>
+          {/* Read-only on purpose: this YAML is generated from the form on every
+              keystroke, so an edit here would be overwritten by the next one.
+              Hand-editing a spec is what the kit row's "Edit code" panel is for. */}
+          {infoView === 'code' && (
+            <pre className="kit-code-preview">{buildSpec(f)}</pre>
+          )}
+          {infoView === 'summary' && (() => {
             const mcpServers = f.mcps.map((id) => MCP_CATALOG.find((m) => m.id === id)).filter(Boolean) as typeof MCP_CATALOG
             const custom = f.customMcps.filter((c) => c.url.trim())
-            const allowed = new Set([...f.allowedDomains.map((s) => s.trim()).filter(Boolean), ...mcpServers.map((m) => mcpHost(m.url)), ...custom.map((c) => mcpHost(c.url.trim()))])
+            const { allowed } = kitDomains(f)
             const denied = f.deniedDomains.map((s) => s.trim()).filter(Boolean)
-            const envCount = f.envVars.filter((s) => s.includes('=')).length
+            const envCount = f.envVars.filter((e) => e.key.trim()).length
+            const installCount = f.installCmds.filter((c) => c.cmd.trim()).length
+            const startupCount = f.startupCmds.filter((c) => c.cmd.trim()).length + mcpStartupCmds(f).length
+            const creds = f.creds.filter((c) => c.service.trim())
+            const empty = mcpServers.length === 0 && custom.length === 0 && allowed.length === 0 && denied.length === 0 &&
+              envCount === 0 && installCount === 0 && startupCount === 0 && creds.length === 0 &&
+              f.files.length === 0 && !f.agentContext.trim()
             return (
               <div className="kit-summary">
                 <div className="ks-row"><span className="ks-k">Kind</span><span className="ks-v">{f.kind === 'sandbox' ? 'Sandbox kit — full agent' : 'Mixin kit — add-on'}</span></div>
@@ -509,16 +647,23 @@ export function NewKitModal() {
                     </div>
                   </div>
                 )}
-                {(allowed.size > 0 || denied.length > 0) && (
-                  <div className="ks-row"><span className="ks-k">Network</span><span className="ks-v">{allowed.size} allowed · {denied.length} denied</span></div>
+                {(installCount > 0 || startupCount > 0) && (
+                  <div className="ks-row"><span className="ks-k">Setup</span><span className="ks-v">{installCount} install · {startupCount} startup</span></div>
                 )}
-                {envCount > 0 && <div className="ks-row"><span className="ks-k">Env vars</span><span className="ks-v">{envCount}</span></div>}
-                {(f.agentContext.trim() || f.attachFiles.length > 0) && (
-                  <div className="ks-row"><span className="ks-k">Memory</span><span className="ks-v">{[f.agentContext.trim() ? 'notes' : '', f.attachFiles.length ? `${f.attachFiles.length} file${f.attachFiles.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</span></div>
+                {f.files.length > 0 && (
+                  <div className="ks-row"><span className="ks-k">Files</span><span className="ks-v ks-mono">{f.files.map((x) => `${x.target}/${x.dest}`).join(' · ')}</span></div>
                 )}
-                {mcpServers.length === 0 && allowed.size === 0 && denied.length === 0 && envCount === 0 && !f.agentContext.trim() && f.attachFiles.length === 0 && f.kind === 'mixin' && (
-                  <div className="ks-empty">No capabilities added yet.</div>
+                {envCount > 0 && <div className="ks-row"><span className="ks-k">Environment</span><span className="ks-v">{envCount} variable{envCount === 1 ? '' : 's'}</span></div>}
+                {creds.length > 0 && (
+                  <div className="ks-row"><span className="ks-k">Credentials</span><span className="ks-v">{creds.map((c) => c.service.trim()).join(' · ')}</span></div>
                 )}
+                {(allowed.length > 0 || denied.length > 0) && (
+                  <div className="ks-row"><span className="ks-k">Requirements</span><span className="ks-v">{allowed.length} allowed{denied.length ? ` · ${denied.length} denied` : ''}</span></div>
+                )}
+                {f.agentContext.trim() && (
+                  <div className="ks-row"><span className="ks-k">Agent instructions</span><span className="ks-v ks-mono">{f.kind === 'sandbox' ? f.aiFilename.trim() || 'AGENTS.md' : `kits-agent-context/${f.name || 'my-kit'}.md`}</span></div>
+                )}
+                {empty && f.kind === 'mixin' && <div className="ks-empty">No capabilities added yet.</div>}
               </div>
             )
           })()}

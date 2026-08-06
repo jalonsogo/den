@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plug, Globe, Variable, TerminalSquare, FileText } from 'lucide-react'
+import { Plug, Globe, Variable, TerminalSquare, FileText, KeyRound } from 'lucide-react'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 import type { ParsedKit } from '../lib/kitSpec'
 
@@ -10,7 +10,8 @@ const CAP_DEFS = [
   { key: 'mcp', icon: Plug, label: 'Remote MCP' },
   { key: 'net', icon: Globe, label: 'Policies' },
   { key: 'env', icon: Variable, label: 'Env vars' },
-  { key: 'cmd', icon: TerminalSquare, label: 'Commands' },
+  { key: 'cmd', icon: TerminalSquare, label: 'Setup' },
+  { key: 'cred', icon: KeyRound, label: 'Credentials' },
   { key: 'mem', icon: FileText, label: 'Memory' }
 ] as const
 
@@ -23,21 +24,27 @@ export function KitCaps({ p, compact }: { p?: ParsedKit; compact?: boolean }) {
   const [hover, setHover] = useState<{ key: string; top: number; left: number } | null>(null)
   if (!p) return <div className="kit-caps"><span className="kit-cap-empty">—</span></div>
   const domains = p.allowedDomains.length + p.deniedDomains.length
+  // MCP registrations are startup commands the editor generates — count the
+  // kit's own setup work, not the plumbing already shown under "Remote MCP".
+  const cmds = p.installCmds.length + p.startupCmds.filter((c) => !/claude\s+mcp\s+add\s/.test(c.cmd)).length
+  const envs = p.envVars.length + p.proxyManaged.length
   const items: { key: string; icon: typeof Plug; label: string; count?: number }[] = []
   if (p.mcps.length) items.push({ key: 'mcp', icon: Plug, label: 'Remote MCP', count: p.mcps.length })
   if (domains) items.push({ key: 'net', icon: Globe, label: 'Policies', count: domains })
-  if (p.envVars.length) items.push({ key: 'env', icon: Variable, label: 'Env vars', count: p.envVars.length })
-  if (p.installCmds.length) items.push({ key: 'cmd', icon: TerminalSquare, label: 'Commands', count: p.installCmds.length })
+  if (envs) items.push({ key: 'env', icon: Variable, label: 'Env vars', count: envs })
+  if (cmds) items.push({ key: 'cmd', icon: TerminalSquare, label: 'Setup', count: cmds })
+  if (p.credentials.length) items.push({ key: 'cred', icon: KeyRound, label: 'Credentials', count: p.credentials.length })
   if (p.agentContext) items.push({ key: 'mem', icon: FileText, label: 'Memory' })
   if (items.length === 0) return <div className="kit-caps"><span className="kit-cap-empty">No capabilities</span></div>
 
   const countByKey: Record<string, number | undefined> = {
     mcp: p.mcps.length || undefined, net: domains || undefined,
-    env: p.envVars.length || undefined, cmd: p.installCmds.length || undefined, mem: undefined
+    env: envs || undefined, cmd: cmds || undefined,
+    cred: p.credentials.length || undefined, mem: undefined
   }
   const presentByKey: Record<string, boolean> = {
-    mcp: p.mcps.length > 0, net: domains > 0, env: p.envVars.length > 0,
-    cmd: p.installCmds.length > 0, mem: !!p.agentContext
+    mcp: p.mcps.length > 0, net: domains > 0, env: envs > 0,
+    cmd: cmds > 0, cred: p.credentials.length > 0, mem: !!p.agentContext
   }
   // Compact packs only present caps; the full list renders every column in a
   // fixed order (absent ones become empty cells) so they align table-style.
@@ -73,18 +80,33 @@ export function KitCaps({ p, compact }: { p?: ParsedKit; compact?: boolean }) {
     if (key === 'env') return (
       <div className="kit-pop-list">
         {p.envVars.map((v) => <div className="kit-pop-row kit-pop-mono" key={v}>{v}</div>)}
+        {/* Proxy-managed vars carry no value in the VM — the proxy injects it. */}
+        {p.proxyManaged.map((v) => <div className="kit-pop-row kit-pop-mono" key={`pm-${v}`}>{v}=proxy-managed</div>)}
       </div>
     )
     if (key === 'cmd') return (
       <div className="kit-pop-list">
-        {p.installCmds.map((c, i) => <div className="kit-pop-row kit-pop-mono" key={i}>{c}</div>)}
+        {p.installCmds.map((c, i) => <div className="kit-pop-row kit-pop-mono" key={`i${i}`}>install · {c.cmd}</div>)}
+        {p.startupCmds.filter((c) => !/claude\s+mcp\s+add\s/.test(c.cmd)).map((c, i) => (
+          <div className="kit-pop-row kit-pop-mono" key={`s${i}`}>startup · {c.cmd}</div>
+        ))}
+      </div>
+    )
+    if (key === 'cred') return (
+      <div className="kit-pop-list">
+        {p.credentials.map((c) => (
+          <div className="kit-pop-row kit-pop-mono" key={c.service}>{c.service} → {c.domains.join(', ') || 'no domain'}</div>
+        ))}
       </div>
     )
     if (key === 'mem') return <div className="kit-pop-memo">{p.agentContext}</div>
     return null
   }
 
-  const titles: Record<string, string> = { mcp: 'Remote MCP servers', net: 'Network policies', env: 'Environment variables', cmd: 'Startup commands', mem: 'Agent memory' }
+  const titles: Record<string, string> = {
+    mcp: 'Remote MCP servers', net: 'Network policies', env: 'Environment variables',
+    cmd: 'Install & startup commands', cred: 'Credentials', mem: 'Agent instructions'
+  }
 
   return (
     <div className={`kit-caps${compact ? ' compact' : ''}`}>
