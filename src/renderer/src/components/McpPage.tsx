@@ -3,6 +3,7 @@ import {
   Plus, Trash2, KeyRound, RefreshCw, Search, X, Check, Globe, TerminalSquare, Info
 } from 'lucide-react'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
+import { bridgeError } from '../lib/utils'
 import type { McpServerEntry } from '../types'
 
 // The MCP gateway (sbx v0.38): servers are registered once on the host and
@@ -53,7 +54,7 @@ export function McpPage() {
         setServers(r?.servers ?? [])
         setError(r?.ok ? null : (r?.error ?? 'Could not read registered servers.'))
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(bridgeError(e, 'MCP servers')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -64,7 +65,7 @@ export function McpPage() {
 
   const add = async (cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean }) => {
     setBusy(cfg.name); setMsg(null)
-    const r = await window.minipit?.mcpAdd(cfg).catch(() => null)
+    const r = await window.minipit?.mcpAdd(cfg).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Register server') }))
     setBusy(null)
     if (r?.ok) {
       setMsg({ ok: true, text: `Registered "${cfg.name}". Authorize it if the server uses OAuth.` })
@@ -78,7 +79,7 @@ export function McpPage() {
   const remove = async (name: string) => {
     if (!window.confirm(`Remove the MCP server "${name}"? Sandboxes referencing it will stop finding it.`)) return
     setBusy(name); setMsg(null)
-    const r = await window.minipit?.mcpRemove(name).catch(() => null)
+    const r = await window.minipit?.mcpRemove(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Remove server') }))
     setBusy(null)
     setMsg(r?.ok ? { ok: true, text: `Removed "${name}".` } : { ok: false, text: r?.error || 'Remove failed.' })
     load()
@@ -86,7 +87,7 @@ export function McpPage() {
 
   const authorize = async (name: string) => {
     setAuthFor(name); setAuthOut(''); setBusy(name); setMsg(null)
-    const r = await window.minipit?.mcpAuth(name).catch(() => null)
+    const r = await window.minipit?.mcpAuth(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Authorize') }))
     setBusy(null)
     setMsg(r?.ok
       ? { ok: true, text: `Authorized "${name}".` }
