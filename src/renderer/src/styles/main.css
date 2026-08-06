@@ -4232,3 +4232,25 @@ html, body, #root {
 .mcp-pick-item img { width: 14px; height: 14px; border-radius: 3px; object-fit: contain; }
 .mcp-pick-item:hover { border-color: var(--border-hi); color: var(--t1); }
 .mcp-pick-item.on { border-color: var(--primary); color: var(--t1); box-shadow: 0 0 0 1px var(--primary); }
+/* Page-foot explainer, outside .page-body's scroll so it stays visible. */
+.mcp-foot {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 10px 18px; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--t3); background: var(--bg);
+}
+.mcp-foot svg { flex-shrink: 0; }
+/* Switch row in the Add-an-MCP modal — matches the Settings toggles (.s-toggle)
+   rather than a bare checkbox. */
+.mcp-sw-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 10px; padding: 8px 0;
+}
+.mcp-sw-lbl { font-size: 12.5px; color: var(--t1); }
+.mcp-sw-sub { font-size: 11px; color: var(--t3); margin-top: 1px; }
+/* Inline link inside a settings sub-line (release version → its notes). */
+.rt-relink { color: var(--primary); cursor: pointer; }
+.rt-relink:hover { text-decoration: underline; }
+/* Even vertical rhythm across settings rows — the sections had drifted to
+   different paddings as rows were added over time. */
+.ss-row { padding-top: 11px; padding-bottom: 11px; }
+.ss-row + .ss-row { border-top: 1px solid var(--border); }

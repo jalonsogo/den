@@ -1,10 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import {
-  Plus, Plug, Trash2, KeyRound, RefreshCw, Search, X, Check, Globe, TerminalSquare, Info, PackagePlus, FileSearch, ChevronDown
-} from 'lucide-react'
+import { Plus, Plug, Trash2, KeyRound, RefreshCw, Info, PackagePlus, FileSearch } from 'lucide-react'
 import { useStore } from '../store'
-import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
+import { mcpIcon } from '../lib/mcpCatalog'
 import { bridgeError } from '../lib/utils'
+import { NewMcpModal } from './modals/NewMcpModal'
 import type { McpServerEntry } from '../types'
 
 // The MCP gateway (sbx v0.38): servers are registered once on the host and
@@ -29,26 +28,14 @@ function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
 
 export function McpPage() {
   const sandboxes = useStore((s) => s.sandboxes)
+  const setModal = useStore((s) => s.setModal)
+  const modal = useStore((s) => s.modal)
   const [servers, setServers] = useState<McpServerEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
-  // Registration form: a catalog pick, or a hand-entered remote/local server.
-  const [adding, setAdding] = useState(false)
-  const [mode, setMode] = useState<'remote' | 'local'>('remote')
-  const [fName, setFName] = useState('')
-  const [fUrl, setFUrl] = useState('')
-  const [fCmd, setFCmd] = useState('')
-  const [fArgs, setFArgs] = useState('')
-  const [query, setQuery] = useState('')
-  // OAuth registration extras: scopes recorded with the server, an optional
-  // pre-registered client id, and registering without starting a browser flow.
-  const [fScopes, setFScopes] = useState('')
-  const [fClientId, setFClientId] = useState('')
-  const [fSkipAuth, setFSkipAuth] = useState(false)
-  const [oauthOpen, setOauthOpen] = useState(false)
   // Per-row: `sbx mcp inspect` output, and the attach-to-sandbox picker.
   const [inspectFor, setInspectFor] = useState<string | null>(null)
   const [inspectOut, setInspectOut] = useState('')
@@ -74,23 +61,6 @@ export function McpPage() {
   useEffect(() => window.minipit?.onMcpAuthOutput?.((c) => setAuthOut((o) => o + c)), [])
 
   const registered = new Set(servers.map((s) => s.name.toLowerCase()))
-
-  const add = async (cfg: {
-    name: string; url?: string; command?: string; args?: string; local?: boolean
-    scopes?: string; clientId?: string; skipAuth?: boolean
-  }) => {
-    setBusy(cfg.name); setMsg(null)
-    const r = await window.minipit?.mcpAdd(cfg).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Register server') }))
-    setBusy(null)
-    if (r?.ok) {
-      setMsg({ ok: true, text: `Registered "${cfg.name}". Authorize it if the server uses OAuth.` })
-      setAdding(false); setFName(''); setFUrl(''); setFCmd(''); setFArgs('')
-      setFScopes(''); setFClientId(''); setFSkipAuth(false); setOauthOpen(false)
-      load()
-    } else {
-      setMsg({ ok: false, text: r?.error || `Could not register "${cfg.name}".` })
-    }
-  }
 
   const remove = async (name: string) => {
     if (!window.confirm(`Remove the MCP server "${name}"? Sandboxes referencing it will stop finding it.`)) return
@@ -133,9 +103,6 @@ export function McpPage() {
 
   const running = sandboxes.filter((s) => s.status === 'running')
 
-  const shown = MCP_CATALOG.filter((m) =>
-    !query.trim() || `${m.name} ${m.category} ${m.description}`.toLowerCase().includes(query.toLowerCase()))
-
   return (
     <div className="page">
       {/* .page-hdr is a fixed 45px single-line row — title and actions only.
@@ -153,8 +120,8 @@ export function McpPage() {
           <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin' : undefined} /> Refresh
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setAdding((v) => !v)}>
-            <Plus size={14} /> Register server
+          <button className="btn btn-primary btn-sm" onClick={() => setModal('new-mcp')}>
+            <Plus size={14} /> Add an MCP
           </button>
         </div>
       </div>
@@ -166,96 +133,9 @@ export function McpPage() {
           </div>
         )}
 
-        {/* Registration lives behind the CTA: the catalog is 50+ entries, and as
-            permanent page furniture it buried the thing you actually came for. */}
-        {adding && (
-          <div className="mcp-add-form">
-            <div className="mcp-add-hd">
-              <span>Register a server</span>
-              <button className="mcp-add-x" onClick={() => setAdding(false)} aria-label="Close"><X size={14} /></button>
-            </div>
-
-            <div className="mcp-pick-search">
-              <Search size={13} />
-              <input value={query} placeholder="Search the catalog…" onChange={(e) => setQuery(e.target.value)} />
-              {query && <button onClick={() => setQuery('')}><X size={12} /></button>}
-            </div>
-            <div className="mcp-grid">
-              {shown.map((m) => {
-                const on = registered.has(m.id.toLowerCase())
-                return (
-                  <button
-                    key={m.id}
-                    className={`mcp-card${on ? ' on' : ''}`}
-                    disabled={on || busy === m.id}
-                    title={on ? `${m.name} is already registered` : `${m.name} — ${m.description}`}
-                    onClick={() => add({ name: m.id, url: m.url })}
-                  >
-                    <img src={mcpIcon(m.id)} alt="" />
-                    <span className="mcp-card-name">{m.name}</span>
-                    {on ? <Check size={13} className="mcp-card-on" /> : busy === m.id ? <span className="mcp-card-busy">…</span> : null}
-                  </button>
-                )
-              })}
-              {shown.length === 0 && <div className="mcp-empty">No servers match.</div>}
-            </div>
-
-            <div className="mcp-add-sep">or enter one manually</div>
-            <div className="np-dec-seg" style={{ marginBottom: 8 }}>
-              <button className={`np-dec-opt${mode === 'remote' ? ' on' : ''}`} onClick={() => setMode('remote')}>
-                <Globe size={13} /> Remote
-              </button>
-              <button className={`np-dec-opt${mode === 'local' ? ' on' : ''}`} onClick={() => setMode('local')}>
-                <TerminalSquare size={13} /> Local
-              </button>
-            </div>
-            <div className="kit-list-row">
-              <input className="finput" placeholder="name (e.g. notion)" value={fName} onChange={(e) => setFName(e.target.value)} />
-              {mode === 'remote'
-                ? <input className="finput" placeholder="https://mcp.example.com/mcp" value={fUrl} onChange={(e) => setFUrl(e.target.value)} />
-                : <>
-                    <input className="finput" placeholder="command (e.g. npx)" value={fCmd} onChange={(e) => setFCmd(e.target.value)} />
-                    <input className="finput" placeholder="args (e.g. @playwright/mcp@latest)" value={fArgs} onChange={(e) => setFArgs(e.target.value)} />
-                  </>}
-            </div>
-            <button className="mcp-oauth-toggle" onClick={() => setOauthOpen((v) => !v)}>
-              <ChevronDown size={13} style={{ transform: oauthOpen ? 'none' : 'rotate(-90deg)' }} />
-              OAuth options
-            </button>
-            {oauthOpen && (
-              <div className="kit-list-row" style={{ marginTop: 6 }}>
-                <input className="finput" placeholder="scopes (space or comma separated)"
-                       value={fScopes} onChange={(e) => setFScopes(e.target.value)} />
-                <input className="finput" placeholder="client id (if pre-registered)"
-                       value={fClientId} onChange={(e) => setFClientId(e.target.value)} />
-                <label className="mcp-skip">
-                  <input type="checkbox" checked={fSkipAuth} onChange={(e) => setFSkipAuth(e.target.checked)} />
-                  Register without authorizing
-                </label>
-              </div>
-            )}
-            <div className="np-add-form-actions" style={{ marginTop: 10 }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setAdding(false)}>Cancel</button>
-              <button
-                className="btn btn-default btn-sm"
-                disabled={!fName.trim() || (mode === 'remote' ? !fUrl.trim() : !fCmd.trim()) || busy !== null}
-                onClick={() => add({
-                  name: fName,
-                  ...(mode === 'remote'
-                    ? { url: fUrl }
-                    : { command: fCmd, args: fArgs, local: true }),
-                  scopes: fScopes, clientId: fClientId, skipAuth: fSkipAuth
-                })}
-              >
-                Register
-              </button>
-            </div>
-          </div>
-        )}
-
         {error && <div className="np-banner err" style={{ marginBottom: 12 }}><span className="np-banner-txt">{error}</span></div>}
 
-        {!error && !loading && servers.length === 0 && !adding && (
+        {!error && !loading && servers.length === 0 && (
           <div className="mcp-zero">
             <Plug size={20} />
             <div className="mcp-zero-t">No MCP servers registered</div>
@@ -263,8 +143,8 @@ export function McpPage() {
               Register one and every sandbox can reach it through the gateway — authorization happens
               here on the host, not inside a sandbox.
             </div>
-            <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
-              <Plus size={14} /> Register server
+            <button className="btn btn-primary btn-sm" onClick={() => setModal('new-mcp')}>
+              <Plus size={14} /> Add an MCP
             </button>
           </div>
         )}
@@ -333,13 +213,18 @@ export function McpPage() {
           )
         })}
 
-        {servers.length > 0 && (
-          <div className="np-note" style={{ marginTop: 14 }}>
-            <Info size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />
-            Pre-load servers into a new sandbox from <strong>New Sandbox</strong> (static mode).
-            Choose none and the agent discovers them itself through the gateway.
-          </div>
-        )}
+      </div>
+
+      {modal === 'new-mcp' && <NewMcpModal registered={registered} onDone={load} />}
+
+      {/* Docked at the foot of the page, outside the scroll area, so the
+          explanation is always in view rather than hiding under the list. */}
+      <div className="mcp-foot">
+        <Info size={13} />
+        <span>
+          Pre-load servers into a new sandbox from <strong>New Sandbox</strong> (static mode).
+          Choose none and the agent discovers them itself through the gateway.
+        </span>
       </div>
     </div>
   )

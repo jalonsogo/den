@@ -31,7 +31,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
 export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'mcp' | 'settings' | 'logs'
 export type TabType = 'terminal' | 'info'
-export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | null
+export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | 'new-mcp' | null
 
 // A named collection of sandboxes. Groups carry only a name (no folder, colour,
 // or icon); a sandbox belongs to at most one group.
