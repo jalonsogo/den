@@ -76,6 +76,7 @@ export function McpPage() {
   // Per-row: `sbx mcp inspect` output, and the attach-to-sandbox picker.
   const [inspectFor, setInspectFor] = useState<string | null>(null)
   const [inspectOut, setInspectOut] = useState('')
+  const [inspectLoading, setInspectLoading] = useState(false)
   const [attachFor, setAttachFor] = useState<string | null>(null)
 
   // Live output from `sbx mcp auth` — it opens a browser and may print a code,
@@ -157,10 +158,14 @@ export function McpPage() {
 
   const inspect = async (name: string) => {
     if (inspectFor === name) { setInspectFor(null); return }
-    setInspectFor(name); setInspectOut('Loading…')
+    // Loading is its own state, not a sentinel string: as text it fell through
+    // parseInspect (no "key: value" in "Loading…") into the raw terminal
+    // fallback, so opening Info flashed a black block before the rows landed.
+    setInspectFor(name); setInspectOut(''); setInspectLoading(true)
     const r = await window.minipit?.mcpInspect(name)
       .catch((e) => ({ ok: false as const, error: bridgeError(e, 'Inspect') }))
-    setInspectOut(r?.ok ? (r.raw || '(no output)') : (r?.error || 'Inspect failed.'))
+    setInspectLoading(false)
+    setInspectOut(r?.ok ? (r.raw ?? '') : (r?.error || 'Inspect failed.'))
   }
 
   // Attach to an ALREADY RUNNING sandbox. Creation-time attachment is a
@@ -332,28 +337,45 @@ export function McpPage() {
                   )}
                 </div>
               </div>
-              {inspectFor === s.name && (() => {
-                const rows = parseInspect(inspectOut)
-                if (!rows) {
-                  return (
-                    <div className="rt-output" style={{ margin: '2px 0 10px' }}>
-                      <pre className="logs-pre">{inspectOut}</pre>
-                    </div>
-                  )
-                }
-                return (
-                  <div className="mcp-info">
-                    {rows.map((r, i) => (
+              {inspectFor === s.name && (
+                <div className="mcp-info">
+                  {inspectLoading ? (
+                    <div className="mcp-info-row"><span className="mcp-info-k">Loading…</span></div>
+                  ) : (() => {
+                    const rows = parseInspect(inspectOut)
+                    // Not key/value — show it as it came, but in this panel
+                    // rather than a console block, with a way to hand it over.
+                    if (!rows) {
+                      return (
+                        <div className="mcp-info-rawwrap">
+                          <pre className="mcp-info-raw">
+                            {inspectOut.trim() || `sbx returned no details for "${s.name}".`}
+                          </pre>
+                          {inspectOut.trim() && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => copy(inspectOut, 'Output')}>
+                              <Copy size={13} /> Copy output
+                            </button>
+                          )}
+                        </div>
+                      )
+                    }
+                    // If inspect says nothing about authorization, say what the
+                    // probe got instead of leaving the question unanswered —
+                    // "not reported" is a different fact from "not authorized".
+                    const shown = rows.some((r) => /auth|token|credential/i.test(r.key))
+                      ? rows
+                      : [{ key: 'Authorization', value: s.auth || 'not reported by sbx', depth: 0 }, ...rows]
+                    return shown.map((r, i) => (
                       <div className={`mcp-info-row${r.depth ? ' sub' : ''}`} key={`${r.key}-${i}`}>
                         <span className="mcp-info-k">{r.key}</span>
                         {/^https?:\/\//i.test(r.value)
                           ? <a className="mcp-info-link" onClick={() => window.minipit?.openPath(r.value)}>{r.value}</a>
                           : <span className="mcp-info-v">{r.value || '—'}</span>}
                       </div>
-                    ))}
-                  </div>
-                )
-              })()}
+                    ))
+                  })()}
+                </div>
+              )}
               {authFor === s.name && authOut && (
                 <div className="rt-output" style={{ margin: '2px 0 10px' }}>
                   <pre className="logs-pre">{authOut}</pre>

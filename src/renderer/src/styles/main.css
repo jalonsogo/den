@@ -3050,6 +3050,15 @@ html, body, #root {
 /* Authorization gets a column of its own rather than a badge trailing the name:
    it's the field you scan down the list for, and inline it moved with the
    name's length. Fixed-width so the badges line up. */
+/* Inspect output den couldn't read as key/value. Kept in the same panel as the
+   parsed rows — a black console block for what is, after all, just text was den
+   showing its plumbing — and copyable, since unrecognised output is the thing
+   worth sending on. */
+.mcp-info-rawwrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 0; }
+.mcp-info-raw {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: 'SF Mono', 'Menlo', monospace; font-size: 11.5px; line-height: 1.55; color: var(--t2);
+}
 .mcp-row-auth { display: flex; align-items: center; min-width: 0; }
 .mcp-row-auth .rt-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Five equal, flexible capability columns, shared by the header labels and the
