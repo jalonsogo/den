@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Play, Trash2, MoreVertical, Info, UploadCloud } from 'lucide-react'
+import { Play, Trash2, MoreVertical, Info, UploadCloud, Plus, Box, LayoutGrid, Zap } from 'lucide-react'
 import { useStore } from '../store'
 import { AgentIcon } from './AgentIcon'
+import { EmptyState } from './EmptyState'
 import type { Template } from '../types'
 
 function fmtDate(iso: string): string {
@@ -25,7 +26,9 @@ function agentFromFlavor(flavor: string): string {
 export function TemplatesPage() {
   const { setModal, setNewSandboxTemplate, openPrompt, setInspectTemplate, dockerAccount, activeOrg } = useStore()
   const [templates, setTemplates] = useState<Template[]>([])
-  const [loading, setLoading] = useState(false)
+  // Starts true: the first paint happens before the effect that loads, so an
+  // initial `false` would flash the empty state ahead of the real list.
+  const [loading, setLoading] = useState(true)
   // Row "⋮" menu.
   const [moreFor, setMoreFor] = useState<string | null>(null)
   const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
@@ -99,6 +102,8 @@ export function TemplatesPage() {
     load()
   }
 
+  const zero = !loading && templates.length === 0
+
   return (
     <div className="page">
       <div className="page-hdr">
@@ -108,17 +113,41 @@ export function TemplatesPage() {
         </button>
       </div>
 
-      <div className="page-body">
-        <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
-          Reusable sandbox images with tools, packages, and configuration baked in — anything you'd
-          rather not reinstall on every start. Pulled when a sandbox is created.
-          {loading && ' · Loading…'}
-        </p>
+      <div className={`page-body${zero ? ' page-body-center' : ''}`}>
+        {/* The empty state covers the same ground in its own words, so the page
+            blurb stands down rather than saying it twice. */}
+        {!zero && (
+          <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
+            Reusable sandbox images with tools, packages, and configuration baked in — anything you'd
+            rather not reinstall on every start. Pulled when a sandbox is created.
+            {loading && ' · Loading…'}
+          </p>
+        )}
 
-        {templates.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>
-            {loading ? 'Loading templates…' : 'No templates found'}
-          </div>
+        {zero ? (
+          <EmptyState
+            icon={<LayoutGrid size={34} />}
+            eyebrow={<><Zap size={11} /> Template</>}
+            title="Nothing pulled yet"
+            sub={<>
+              Templates aren't authored here — a sandbox pulls the image it needs when you create
+              it, and it shows up on this page. Start one and this fills itself in.
+            </>}
+            actions={
+              <button className="btn btn-primary" onClick={() => setModal('new-sandbox')}>
+                <Plus size={15} />
+                New sandbox
+              </button>
+            }
+            features={[
+              { icon: <Box size={14} />, title: 'Tools already installed',
+                sub: 'Packages and config baked in, not reinstalled on every start' },
+              { icon: <Play size={14} />, title: 'Reuse across sandboxes',
+                sub: 'One pulled image backs as many sandboxes as you start' },
+              { icon: <UploadCloud size={14} />, title: 'Push your own',
+                sub: 'Publish a template to a registry and share the reference' },
+            ]}
+          />
         ) : (
           <div className="lib-tbl">
             <div className="lib-hdr lib-hdr-tpl">

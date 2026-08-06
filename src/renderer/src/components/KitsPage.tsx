@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Play, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen } from 'lucide-react'
+import { Plus, Play, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen, Zap } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
 import { KitCaps } from './KitCaps'
+import { EmptyState } from './EmptyState'
 import type { HubKit, RepoKit } from '../types'
 
 interface Kit { name: string; kind: string; dir: string; hasZip: boolean }
@@ -88,6 +89,7 @@ function hubRepoUrl(ref: string): string | null {
 export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const { modal, setModal, sandboxes, defaultKits, toggleDefaultKit, setEditKit, setPrefillKit, dockerAccount, activeOrg } = useStore()
   const [kits, setKits] = useState<Kit[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [specs, setSpecs] = useState<Record<string, ReturnType<typeof parseKitSpec>>>({})
   const [addFor, setAddFor] = useState<string | null>(null)
   // Fixed-position anchor for the dropdown so it escapes the table's overflow:hidden.
@@ -340,6 +342,9 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const load = useCallback(async () => {
     const list = (await window.minipit?.listKits()) ?? []
     setKits(list)
+    // Gates the empty state: `kits` starts out empty, so without this the
+    // welcome hero flashes on every mount before the real list lands.
+    setLoaded(true)
     // Read + parse each kit's spec so the table can summarize its capabilities.
     const entries = await Promise.all(
       list.map(async (k) => [k.dir, parseKitSpec((await window.minipit?.readKit(k.dir)) ?? '')] as const)
@@ -351,6 +356,9 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   useEffect(() => { if (modal === null) load() }, [modal, load])
 
   const shown = kits.filter((k) => k.kind === variant)
+  // Nothing to list, and nothing else on the page competing for the eye — an
+  // open import form is itself the call to action, so the hero stands down.
+  const zero = loaded && shown.length === 0 && !importForm && !importing
   const title = variant === 'mixin' ? 'Mixin Kits' : 'Sandbox Kits'
   const blurb = variant === 'mixin'
     ? 'Mixin kits layer extra tools, MCPs, credentials, and config onto an existing agent — stack several on a sandbox.'
@@ -469,12 +477,16 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
         </div>
       </div>
 
-      <div className="page-body home-dash">
-        <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
-          {tab === 'library'
-            ? <>{blurb} Managed by den and packed with <code>sbx kit pack</code>.</>
-            : <>{variant === 'mixin' ? 'Mixin' : 'Sandbox'} kits published to <a className="kit-repo-link" onClick={() => window.minipit?.openPath('https://hub.docker.com/search?type=sbx_kit')}>Docker Hub</a>. Import one to add it to your library.</>}
-        </p>
+      <div className={`page-body home-dash${tab === 'library' && zero ? ' page-body-center' : ''}`}>
+        {/* The empty state covers the same ground in its own words, so the page
+            blurb stands down rather than saying it twice. */}
+        {!(tab === 'library' && zero) && (
+          <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
+            {tab === 'library'
+              ? <>{blurb} Managed by den and packed with <code>sbx kit pack</code>.</>
+              : <>{variant === 'mixin' ? 'Mixin' : 'Sandbox'} kits published to <a className="kit-repo-link" onClick={() => window.minipit?.openPath('https://hub.docker.com/search?type=sbx_kit')}>Docker Hub</a>. Import one to add it to your library.</>}
+          </p>
+        )}
 
         {tab === 'library' && importForm && (
           <div className="kit-import-box">
@@ -569,10 +581,44 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
           </div>
         )}
 
-        {tab === 'library' && (shown.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--t3)', fontSize: 13, padding: '32px 0' }}>
-            No {variant} kits yet — create one to get started.
-          </div>
+        {tab === 'library' && (zero ? (
+          <EmptyState
+            icon={variant === 'mixin' ? <Layers size={34} /> : <Package size={34} />}
+            eyebrow={<><Zap size={11} /> {variant === 'mixin' ? 'Mixin kit' : 'Sandbox kit'}</>}
+            title={variant === 'mixin' ? 'Layer tools onto any agent' : 'Build an agent of your own'}
+            sub={variant === 'mixin'
+              ? <>A mixin adds tools, MCP servers, credentials and config to an agent you already
+                  use — stack as many as you need on a single sandbox.</>
+              : <>A sandbox kit is the whole agent: its base image, entrypoint, setup and network
+                  policy, packed into one reference you can run or share.</>}
+            actions={<>
+              <button className="btn btn-primary" onClick={() => { setEditKit(null); setModal('new-kit') }}>
+                <Plus size={15} />
+                New {variant === 'mixin' ? 'mixin kit' : 'sandbox kit'}
+              </button>
+              {/* Importing is as normal a start as authoring — most people's
+                  first kit comes from Hub or a repo, not the composer. */}
+              <button className="btn btn-default" onClick={() => setTab('browse')}>
+                <DownloadCloud size={15} />
+                Browse Docker Hub
+              </button>
+            </>}
+            features={variant === 'mixin' ? [
+              { icon: <Layers size={14} />, title: 'Stacks onto an agent',
+                sub: 'Claude, Codex or a sandbox kit — the base image is untouched' },
+              { icon: <Globe size={14} />, title: 'Brings its own access',
+                sub: 'Remote MCP servers and the network rules they need' },
+              { icon: <UploadCloud size={14} />, title: 'Shared as one reference',
+                sub: 'Pack, push, and anyone installs it with a single command' },
+            ] : [
+              { icon: <Box size={14} />, title: 'Any base image',
+                sub: 'Pick the image and entrypoint; the kit defines the agent' },
+              { icon: <PackagePlus size={14} />, title: 'Setup travels with it',
+                sub: 'Install steps, files and env are part of the kit, not the machine' },
+              { icon: <UploadCloud size={14} />, title: 'Shared as one reference',
+                sub: 'Pack, push, and anyone installs it with a single command' },
+            ]}
+          />
         ) : (
           <div className="lib-tbl">
             <div className="lib-hdr lib-hdr-kit">

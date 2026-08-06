@@ -7,6 +7,7 @@ import { useStore } from '../store'
 import { mcpIcon } from '../lib/mcpCatalog'
 import { bridgeError } from '../lib/utils'
 import { NewMcpModal } from './modals/NewMcpModal'
+import { EmptyState } from './EmptyState'
 import type { McpServerEntry } from '../types'
 
 // The MCP gateway (sbx v0.38): servers are registered once on the host and
@@ -177,41 +178,29 @@ export function McpPage() {
             actions (Authorize, Add to sandbox…) belong to a server — showing
             them with nothing registered was nonsense. */}
         {zero && (
-          <div className="home-empty">
-            <Plug size={34} className="mcp-zero-mark" />
-            <span className="home-empty-eyebrow">
-              <Zap size={11} />
-              Model Context Protocol
-            </span>
-            <h1 className="home-empty-title">Give your agents tools</h1>
-            <p className="home-empty-sub">
+          <EmptyState
+            icon={<Plug size={34} />}
+            eyebrow={<><Zap size={11} /> Model Context Protocol</>}
+            title="Give your agents tools"
+            sub={<>
               Add a server once here and every sandbox can reach it through the gateway —
               no per-sandbox setup, and no credentials inside the container.
-            </p>
-            <div className="home-empty-actions">
+            </>}
+            actions={
               <button className="btn btn-primary" onClick={() => setModal('new-mcp')}>
                 <Plus size={15} />
                 Add MCP server
               </button>
-            </div>
-            <div className="home-empty-features">
-              <div className="home-empty-feat">
-                <Boxes size={14} className="home-empty-feat-ic" />
-                <span className="home-empty-feat-title">Add once, use everywhere</span>
-                <span className="home-empty-feat-sub">Registered on this Mac and shared by every sandbox</span>
-              </div>
-              <div className="home-empty-feat">
-                <ShieldCheck size={14} className="home-empty-feat-ic" />
-                <span className="home-empty-feat-title">Credentials stay home</span>
-                <span className="home-empty-feat-sub">OAuth runs on the host; tokens never enter a sandbox</span>
-              </div>
-              <div className="home-empty-feat">
-                <Search size={14} className="home-empty-feat-ic" />
-                <span className="home-empty-feat-title">Static or discovered</span>
-                <span className="home-empty-feat-sub">Pre-load servers at creation, or let the agent find them</span>
-              </div>
-            </div>
-          </div>
+            }
+            features={[
+              { icon: <Boxes size={14} />, title: 'Add once, use everywhere',
+                sub: 'Registered on this Mac and shared by every sandbox' },
+              { icon: <ShieldCheck size={14} />, title: 'Credentials stay home',
+                sub: 'OAuth runs on the host; tokens never enter a sandbox' },
+              { icon: <Search size={14} />, title: 'Static or discovered',
+                sub: 'Pre-load servers at creation, or let the agent find them' },
+            ]}
+          />
         )}
 
         {servers.map((s) => {

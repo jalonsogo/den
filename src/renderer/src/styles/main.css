@@ -4254,7 +4254,9 @@ html, body, #root {
 .ss-row + .ss-row { border-top: 1px solid var(--border); }
 /* The MCP empty state reuses .home-empty; only the mark differs (an icon
    rather than den's wordmark). */
-.mcp-zero-mark { color: var(--t3); opacity: 0.8; }
+/* The mark above an empty-state hero (see EmptyState). Muted so the title, not
+   the icon, is what the eye lands on. */
+.empty-mark { color: var(--t3); opacity: 0.8; display: flex; }
 /* `sbx mcp inspect` rendered as rows. Aligned key column so the values line up
    the way the CLI's own padding does, without the terminal styling. */
 .mcp-info {
