@@ -4254,3 +4254,6 @@ html, body, #root {
    different paddings as rows were added over time. */
 .ss-row { padding-top: 11px; padding-bottom: 11px; }
 .ss-row + .ss-row { border-top: 1px solid var(--border); }
+/* The MCP empty state reuses .home-empty; only the mark differs (an icon
+   rather than den's wordmark). */
+.mcp-zero-mark { color: var(--t3); opacity: 0.8; }

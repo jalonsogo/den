@@ -1,5 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Plug, Trash2, KeyRound, RefreshCw, Info, PackagePlus, FileSearch } from 'lucide-react'
+import {
+  Plus, Plug, Trash2, KeyRound, RefreshCw, Info, PackagePlus, FileSearch,
+  Zap, Boxes, ShieldCheck, Search
+} from 'lucide-react'
 import { useStore } from '../store'
 import { mcpIcon } from '../lib/mcpCatalog'
 import { bridgeError } from '../lib/utils'
@@ -120,9 +123,12 @@ export function McpPage() {
           <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin' : undefined} /> Refresh
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setModal('new-mcp')}>
-            <Plus size={14} /> Add an MCP
-          </button>
+          {/* The empty state carries its own CTA — two would compete. */}
+          {servers.length > 0 && (
+            <button className="btn btn-primary btn-sm" onClick={() => setModal('new-mcp')}>
+              <Plus size={14} /> Add an MCP
+            </button>
+          )}
         </div>
       </div>
 
@@ -135,17 +141,45 @@ export function McpPage() {
 
         {error && <div className="np-banner err" style={{ marginBottom: 12 }}><span className="np-banner-txt">{error}</span></div>}
 
+        {/* Empty state modelled on the dashboard's welcome screen: centred, one
+            CTA, and three boxes explaining what the gateway buys you. The row
+            actions (Authorize, Add to sandbox…) belong to a server — showing
+            them with nothing registered was nonsense. */}
         {!error && !loading && servers.length === 0 && (
-          <div className="mcp-zero">
-            <Plug size={20} />
-            <div className="mcp-zero-t">No MCP servers registered</div>
-            <div className="mcp-zero-s">
-              Register one and every sandbox can reach it through the gateway — authorization happens
-              here on the host, not inside a sandbox.
+          <div className="home-empty">
+            <Plug size={34} className="mcp-zero-mark" />
+            <span className="home-empty-eyebrow">
+              <Zap size={11} />
+              Model Context Protocol
+            </span>
+            <h1 className="home-empty-title">Give your agents tools</h1>
+            <p className="home-empty-sub">
+              Add a server once here and every sandbox can reach it through the gateway —
+              no per-sandbox setup, and no credentials inside the container.
+            </p>
+            <div className="home-empty-actions">
+              <button className="btn btn-primary" onClick={() => setModal('new-mcp')}>
+                <Plus size={15} />
+                Add MCP server
+              </button>
             </div>
-            <button className="btn btn-primary btn-sm" onClick={() => setModal('new-mcp')}>
-              <Plus size={14} /> Add an MCP
-            </button>
+            <div className="home-empty-features">
+              <div className="home-empty-feat">
+                <Boxes size={14} className="home-empty-feat-ic" />
+                <span className="home-empty-feat-title">Add once, use everywhere</span>
+                <span className="home-empty-feat-sub">Registered on this Mac and shared by every sandbox</span>
+              </div>
+              <div className="home-empty-feat">
+                <ShieldCheck size={14} className="home-empty-feat-ic" />
+                <span className="home-empty-feat-title">Credentials stay home</span>
+                <span className="home-empty-feat-sub">OAuth runs on the host; tokens never enter a sandbox</span>
+              </div>
+              <div className="home-empty-feat">
+                <Search size={14} className="home-empty-feat-ic" />
+                <span className="home-empty-feat-title">Static or discovered</span>
+                <span className="home-empty-feat-sub">Pre-load servers at creation, or let the agent find them</span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -218,14 +252,18 @@ export function McpPage() {
       {modal === 'new-mcp' && <NewMcpModal registered={registered} onDone={load} />}
 
       {/* Docked at the foot of the page, outside the scroll area, so the
-          explanation is always in view rather than hiding under the list. */}
-      <div className="mcp-foot">
-        <Info size={13} />
-        <span>
-          Pre-load servers into a new sandbox from <strong>New Sandbox</strong> (static mode).
-          Choose none and the agent discovers them itself through the gateway.
-        </span>
-      </div>
+          explanation stays in view rather than hiding under the list. Hidden
+          while empty — the empty state already explains the gateway. */}
+      {servers.length > 0 && (
+        <div className="mcp-foot">
+          <Info size={13} />
+          <span>
+            Pre-load servers into a new sandbox from <strong>New Sandbox</strong> (static mode).
+            Choose none and the agent discovers them itself through the gateway.
+          </span>
+        </div>
+      )}
+
     </div>
   )
 }
