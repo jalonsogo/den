@@ -48,6 +48,33 @@ function deriveName(agent: string, workspace: string): string {
   return slugify(agent === folder ? folder : `${agent}-${folder}`)
 }
 
+// The stock agent a sandbox kit is built on, for naming only. A kit's name says
+// what it is but not what it runs, and "claude-nanoclaw" carries both.
+//
+// Two places declare it, neither as an agent id: the entrypoint is a command
+// line (`claude --dangerously-skip-permissions`) and the image is a template
+// tag (`docker/sandbox-templates:shell-docker`). Match either against the
+// canonical agent list and give up quietly when neither says anything — a wrong
+// prefix would be worse than none.
+function baseAgentOfKit(spec: ParsedKit | undefined): string {
+  if (!spec) return ''
+  const ids = AGENTS.map((a) => a.id)
+  const entry = (spec.entrypoint || '').trim().split(/\s+/)[0].split('/').pop() ?? ''
+  if (ids.includes(entry as AgentType)) return entry
+  const tag = (spec.image || '').split(':').pop() ?? ''
+  // Template tags are `<flavor>-docker`, and a flavor is an agent id with an
+  // optional suffix: claude-code-docker, shell-docker, codex-docker.
+  const flavor = tag.replace(/-docker$/, '')
+  return ids.find((id) => flavor === id || flavor.startsWith(`${id}-`)) ?? ''
+}
+
+// The name suggested for a sandbox built from an agent kit: the agent it runs,
+// then the kit. Falls back to the kit alone when the base can't be identified.
+function deriveKitName(kit: string, spec: ParsedKit | undefined): string {
+  const base = baseAgentOfKit(spec)
+  return slugify(base && base !== kit ? `${base}-${kit}` : kit)
+}
+
 export function NewSandboxModal() {
   const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup, prefillKit, setPrefillKit } = useStore()
   const feature = newSandboxFeature
@@ -113,8 +140,18 @@ export function NewSandboxModal() {
   //    invoke as `sbx create --kit <kit> X ...` instead"
   // So when one is selected its NAME becomes the positional, replacing whatever
   // the agent picker says — which otherwise defaulted to claude and failed.
-  const baseKitName = selKits.map((d) => kitKinds[d]).find((k) => k?.kind === 'sandbox')?.name ?? null
+  const baseKitDir = selKits.find((d) => kitKinds[d]?.kind === 'sandbox') ?? null
+  const baseKitName = baseKitDir ? kitKinds[baseKitDir].name : null
   const effAgent = baseKitName ?? agent
+
+  // A sandbox kit names the sandbox after itself and the agent it runs
+  // (claude-nanoclaw); everything else keeps the sbx-style <agent>-<workdir>.
+  // The kit is the more useful half here — the workspace is already visible in
+  // the field right below, and two sandboxes from one kit are told apart by the
+  // uniqueness suffix rather than by a folder that is usually the kit's own.
+  const suggestedName = (): string =>
+    baseKitName ? deriveKitName(baseKitName, baseKitDir ? kitSpecs[baseKitDir] : undefined)
+                : deriveName(effAgent, workspace)
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
   const kitDdRef = useRef<HTMLDivElement>(null)
@@ -134,6 +171,11 @@ export function NewSandboxModal() {
       setKitKinds(Object.fromEntries(all.map((x) => [x.dir, { name: x.specName || x.name, kind: x.kind }])))
       const mixins = all.filter((x) => x.kind === 'mixin').map((x) => ({ name: x.name, dir: x.dir }))
       setAvailKits(mixins)
+      // Sandbox kits are parsed too, for the base agent their suggested name
+      // is built from. Mixins get parsed below for the capability preview.
+      Promise.all(all.filter((x) => x.kind === 'sandbox').map(async (x) =>
+        [x.dir, parseKitSpec((await window.minipit?.readKit(x.dir)) ?? '')] as const
+      )).then((entries) => setKitSpecs((cur) => ({ ...cur, ...Object.fromEntries(entries) }))).catch(() => {})
       // Pre-select any kit the user starred as a default in the Kits page.
       const seed = mixins.filter((m) => defaultKits.includes(m.name)).map((m) => m.dir)
       // A sandbox kit opened via "Create sandbox" supplies the agent itself, so
@@ -143,7 +185,9 @@ export function NewSandboxModal() {
       // Load + parse each local kit's spec so we can preview its capabilities.
       Promise.all(mixins.map(async (m) =>
         [m.dir, parseKitSpec((await window.minipit?.readKit(m.dir)) ?? '')] as const
-      )).then((entries) => setKitSpecs(Object.fromEntries(entries))).catch(() => {})
+      // Merge, not replace — the sandbox-kit specs above land in the same map
+      // and whichever of the two settles last would otherwise wipe the other.
+      )).then((entries) => setKitSpecs((cur) => ({ ...cur, ...Object.fromEntries(entries) }))).catch(() => {})
     }).catch(() => {})
   }, [])
 
@@ -194,9 +238,9 @@ export function NewSandboxModal() {
   // this stays off to avoid a loop and the random name is kept.
   useEffect(() => {
     if (nameEdited || (!pinnedWs && !wsEdited)) return
-    const n = deriveName(effAgent, workspace)
+    const n = suggestedName()
     if (n) setName(n)
-  }, [agent, workspace, nameEdited, pinnedWs, wsEdited])
+  }, [agent, workspace, nameEdited, pinnedWs, wsEdited, baseKitName, kitSpecs])
 
   // --clone clones the host repo, so when it's on, check (debounced) whether the
   // workspace is a Git repo — if not, we offer to initialize one.
@@ -238,7 +282,7 @@ export function NewSandboxModal() {
   // background "creating" row, so the modal can be dismissed while it finishes.
   const handleLaunch = () => {
     if (!workspace) { setError('Workspace is required'); return }
-    const finalName = (name.trim() || deriveName(effAgent, workspace) || randomName())
+    const finalName = (name.trim() || suggestedName() || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
     localStorage.setItem('minipit:lastWorkspace', workspace)
     setError('')
