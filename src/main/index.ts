@@ -210,17 +210,25 @@ function readSbxKeychain(account: string): Promise<string | null> {
 // `sandboxes-auth` service: `docker/auth/metadata/hub/default` holds
 // {username, email}, and `docker/auth/hub/<username>` holds the OAuth tokens.
 // Returns null when signed out (sbx logout removes the entries) or off-macOS.
-async function sbxSession(): Promise<{ username: string; email?: string; accessToken?: string } | null> {
+//
+// Each entry read costs the user a macOS keychain prompt (they belong to the
+// sbx binary, not den), so the token entry is opt-in: it is only useful for
+// enriching the profile from the Hub API, which currently rejects it — see
+// resolveDockerAccount. Reading it by default meant two password prompts per
+// launch to obtain something unusable.
+async function sbxSession(withToken = false): Promise<{ username: string; email?: string; accessToken?: string } | null> {
   if (process.platform !== 'darwin') return null
   const metaRaw = await readSbxKeychain('docker/auth/metadata/hub/default')
   if (!metaRaw) return null
   try {
     const meta = JSON.parse(metaRaw) as { username?: string; email?: string }
     if (!meta.username) return null
-    const tokRaw = await readSbxKeychain(`docker/auth/hub/${meta.username}`)
     let accessToken: string | undefined
-    if (tokRaw) {
-      try { accessToken = (JSON.parse(tokRaw) as { access_token?: string }).access_token } catch { /* tokens absent → metadata-only */ }
+    if (withToken) {
+      const tokRaw = await readSbxKeychain(`docker/auth/hub/${meta.username}`)
+      if (tokRaw) {
+        try { accessToken = (JSON.parse(tokRaw) as { access_token?: string }).access_token } catch { /* tokens absent → metadata-only */ }
+      }
     }
     return { username: meta.username, email: meta.email || undefined, accessToken }
   } catch { return null }
@@ -1212,7 +1220,7 @@ async function listTemplates() {
 
 // Authored kits under <userData>/kits/<name>/ (spec.yaml). `kind` distinguishes
 // mixin kits from sandbox kits. Shared by the list-kits IPC and the app menu.
-function listKits(): { name: string; kind: string; dir: string; hasZip: boolean }[] {
+function listKits(): { name: string; specName: string; kind: string; dir: string; hasZip: boolean }[] {
   const fs = require('fs')
   const base = kitsRoot()
   try {
@@ -1221,18 +1229,27 @@ function listKits(): { name: string; kind: string; dir: string; hasZip: boolean 
       .map((d) => {
         const dir = join(base, d.name)
         let kind = 'mixin'
+        let specName = ''
         try {
           const spec = fs.readFileSync(join(dir, 'spec.yaml'), 'utf8') as string
           const m = spec.match(/kind:\s*(\w+)/)
           // sbx spells full-agent kits `agent`; den's library splits kits into
           // `mixin` vs `sandbox`, so treat `agent` as a sandbox kit for display.
           if (m) kind = m[1] === 'agent' ? 'sandbox' : m[1]
+          // The name the kit calls itself, which is NOT always the folder it
+          // landed in: an import names the folder after the repo. sbx matches
+          // an agent kit by its declared name and rejects anything else, so
+          // this is the name that has to reach the CLI.
+          // Anchored to column 0 — `name:` also appears nested under MCP
+          // servers, credentials and so on.
+          const n = /^name:[ \t]*["']?([^"'\s#]+)/m.exec(spec)
+          if (n) specName = n[1]
         } catch {
           return null
         }
-        return { name: d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
+        return { name: d.name, specName: specName || d.name, kind, dir, hasZip: fs.existsSync(join(base, `${d.name}.zip`)) }
       })
-      .filter(Boolean) as { name: string; kind: string; dir: string; hasZip: boolean }[]
+      .filter(Boolean) as { name: string; specName: string; kind: string; dir: string; hasZip: boolean }[]
   } catch {
     return []
   }
@@ -3441,12 +3458,12 @@ function setupIPC(): void {
     if (session) {
       username = session.username
       email = session.email
-      // The sbx access token is an auth0 session token that the Hub API
-      // currently rejects (401 both direct and via /v2/auth/token exchange),
-      // so enrichment usually degrades to the keychain username+email here.
-      // Still worth trying: it lights up automatically if Docker ever issues
-      // Hub-compatible tokens.
-      secret = session.accessToken
+      // No token read here on purpose. The sbx access token is an auth0 session
+      // token the Hub API rejects (401 both direct and via /v2/auth/token
+      // exchange), so it never enriched anything — but it lives in a second
+      // keychain entry, and reading it made macOS ask for the login password a
+      // second time on every launch. Username + email from the metadata entry
+      // is what actually reaches the UI.
     } else {
       try {
         const fs = require('fs')

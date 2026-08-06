@@ -42,7 +42,10 @@ const parsePorts = (raw: string): string[] =>
 // Mirror sbx's default sandbox name: <agent>-<workdir>. Empty when no folder.
 function deriveName(agent: string, workspace: string): string {
   const folder = workspace.split('/').filter(Boolean).pop() ?? ''
-  return folder ? slugify(`${agent}-${folder}`) : ''
+  if (!folder) return ''
+  // An agent kit is often checked out into a folder of the same name, and
+  // "nanoclaw-nanoclaw" reads like a bug.
+  return slugify(agent === folder ? folder : `${agent}-${folder}`)
 }
 
 export function NewSandboxModal() {
@@ -126,7 +129,9 @@ export function NewSandboxModal() {
     window.minipit?.mcpList?.().then((r) => setMcpServers((r?.servers ?? []).map((m) => m.name))).catch(() => {})
     window.minipit?.listKits().then((k) => {
       const all = k ?? []
-      setKitKinds(Object.fromEntries(all.map((x) => [x.dir, { name: x.name, kind: x.kind }])))
+      // specName, not the folder name: sbx matches an agent kit by the name it
+      // declares, and an imported kit's folder is named after its repo.
+      setKitKinds(Object.fromEntries(all.map((x) => [x.dir, { name: x.specName || x.name, kind: x.kind }])))
       const mixins = all.filter((x) => x.kind === 'mixin').map((x) => ({ name: x.name, dir: x.dir }))
       setAvailKits(mixins)
       // Pre-select any kit the user starred as a default in the Kits page.

@@ -431,7 +431,10 @@ declare global {
       templatePush(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       createKit(name: string, spec: string, files?: KitFile[]): Promise<{ dir: string; zip: string; output: string }>
       pickFiles(): Promise<string[]>
-      listKits(): Promise<{ name: string; kind: string; dir: string; hasZip: boolean }[]>
+      // `name` is the folder in den's library; `specName` is what the kit calls
+      // itself in spec.yaml. They differ for an imported kit, and sbx only
+      // accepts the latter as an agent kit's name.
+      listKits(): Promise<{ name: string; specName: string; kind: string; dir: string; hasZip: boolean }[]>
       kitAdd(sandbox: string, dir: string): Promise<{ ok: boolean; output?: string; error?: string }>
       appliedKits(sandbox: string): Promise<string[]>
       readKit(dir: string): Promise<string>

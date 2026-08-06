@@ -182,6 +182,22 @@ Template:
   (`sbx` has no `mount ls`).
 - **Status:** worked around; local state can drift from reality.
 
+### An agent kit must be named by its spec, not its folder
+- **Version:** v0.38.0
+- **Symptom:** creating a sandbox from an imported agent kit fails with
+  `ERROR: agent name "sbx-nanoclaw-kits" does not match agent kit name
+  "nanoclaw" (use "nanoclaw" as the agent name)`.
+- **Cause:** the positional agent name must equal the `name:` declared in the
+  kit's `spec.yaml`. den's kit library keys everything on the *directory* name,
+  which for an imported kit is derived from the repository
+  (`sbx-nanoclaw-kits`), not from the kit (`nanoclaw`). They coincide for kits
+  authored in den, which is why this only shows up after an import.
+- **Fix:** `listKits()` also returns `specName`, read from the first
+  column-0 `name:` in `spec.yaml` (nested `name:` keys exist under MCP servers
+  and credentials, hence the anchor), and the agent positional uses that.
+  `src/main/index.ts` → `listKits()`; `NewSandboxModal.tsx` → `kitKinds`.
+- **Status:** fixed.
+
 ## Secrets & skills
 
 ### `sbx secret ls` column layout isn't pinned
