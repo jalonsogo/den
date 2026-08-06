@@ -192,11 +192,20 @@ Template:
   which for an imported kit is derived from the repository
   (`sbx-nanoclaw-kits`), not from the kit (`nanoclaw`). They coincide for kits
   authored in den, which is why this only shows up after an import.
-- **Fix:** `listKits()` also returns `specName`, read from the first
-  column-0 `name:` in `spec.yaml` (nested `name:` keys exist under MCP servers
-  and credentials, hence the anchor), and the agent positional uses that.
-  `src/main/index.ts` → `listKits()`; `NewSandboxModal.tsx` → `kitKinds`.
-- **Status:** fixed.
+- **Fix:** two layers, because the first can only see what's on disk.
+  1. `listKits()` also returns `specName`, read from the first column-0 `name:`
+     in `spec.yaml` (nested `name:` keys exist under MCP servers and
+     credentials, hence the anchor), and the agent positional uses that.
+  2. The error names the correct value — *use "nanoclaw" as the agent name* —
+     so `create-sandbox` parses it and retries once with that name. Anything
+     that makes the two disagree (a folder renamed by hand, a kit edited
+     outside den, a spec shape the reader doesn't recognise) then still works
+     instead of dead-ending on an error carrying its own fix.
+  `src/main/index.ts` → `listKits()`, `minipit:create-sandbox`;
+  `NewSandboxModal.tsx` → `kitKinds`.
+- **Status:** fixed. Worth remembering as a pattern: sbx errors of the form
+  "X does not match Y (use Y)" are machine-readable, and acting on them beats
+  re-deriving the value.
 
 ## Secrets & skills
 

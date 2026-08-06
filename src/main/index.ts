@@ -3007,46 +3007,73 @@ function setupIPC(): void {
     // won't have been created yet (no-op for existing project/clone folders).
     try { require('fs').mkdirSync(config.workspace, { recursive: true }) }
     catch (err) { console.error('could not create workspace folder:', err) }
-    const args = ['create']
-    if (config.name) args.push('--name', config.name)
-    if (config.memory) args.push('-m', config.memory)
-    if (config.branch) args.push('--clone')
-    if (config.template) args.push('-t', config.template)
-    // -p is honoured at creation only (sbx v0.37+); re-attaching ignores it, so
-    // later changes go through `sbx ports` (see port-publish below).
-    for (const spec of config.ports ?? []) args.push('-p', spec)
-    // The shared skills store is mounted by default, so only the opt-out is ever
-    // passed. Hidden from `sbx create --help` in v0.37.0 but accepted.
-    if (config.noShareSkills) args.push('--no-share-skills')
-    // --kit can only be passed at creation; stack one flag per kit directory.
-    for (const dir of config.kits ?? []) args.push('--kit', dir)
-    // Static MCP mode: pre-load these registered servers. Passing none leaves the
-    // agent in dynamic mode, discovering servers itself via the gateway.
-    for (const m of config.staticMcps ?? []) args.push('--static-mcp', m)
-    args.push(config.agent, config.workspace)
+    const buildArgs = (agent: string): string[] => {
+      const args = ['create']
+      if (config.name) args.push('--name', config.name)
+      if (config.memory) args.push('-m', config.memory)
+      if (config.branch) args.push('--clone')
+      if (config.template) args.push('-t', config.template)
+      // -p is honoured at creation only (sbx v0.37+); re-attaching ignores it, so
+      // later changes go through `sbx ports` (see port-publish below).
+      for (const spec of config.ports ?? []) args.push('-p', spec)
+      // The shared skills store is mounted by default, so only the opt-out is ever
+      // passed. Hidden from `sbx create --help` in v0.37.0 but accepted.
+      if (config.noShareSkills) args.push('--no-share-skills')
+      // --kit can only be passed at creation; stack one flag per kit directory.
+      for (const dir of config.kits ?? []) args.push('--kit', dir)
+      // Static MCP mode: pre-load these registered servers. Passing none leaves the
+      // agent in dynamic mode, discovering servers itself via the gateway.
+      for (const m of config.staticMcps ?? []) args.push('--static-mcp', m)
+      args.push(agent, config.workspace)
+      return args
+    }
     // Stream output so the New Sandbox modal can show live progress (image pull,
     // kit injection, startup) instead of a silent "Creating…" spinner.
     const send = (chunk: string) => mainWindow?.webContents.send('minipit:create-output', chunk)
-    send(`$ sbx ${args.join(' ')}\n`)
-    const out = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(getSbxPath(), args, { env: guiEnv() })
-      let buf = ''
-      let err = ''
-      proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
-      proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
-      proc.on('error', (e) => reject(e))
-      const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx create timed out')) }, 120000)
-      proc.on('close', (code) => {
-        clearTimeout(timer)
-        if (code === 0) resolve(buf.trim())
-        else reject(new Error(err.trim() || buf.trim() || `sbx create exited ${code}`))
+    const run = (args: string[]): Promise<string> => {
+      send(`$ sbx ${args.join(' ')}\n`)
+      return new Promise<string>((resolve, reject) => {
+        const proc = spawn(getSbxPath(), args, { env: guiEnv() })
+        let buf = ''
+        let err = ''
+        proc.stdout?.on('data', (d) => { const s = d.toString(); buf += s; send(s) })
+        proc.stderr?.on('data', (d) => { const s = d.toString(); err += s; send(s) })
+        proc.on('error', (e) => reject(e))
+        const timer = setTimeout(() => { proc.kill(); reject(new Error('sbx create timed out')) }, 120000)
+        proc.on('close', (code) => {
+          clearTimeout(timer)
+          if (code === 0) resolve(buf.trim())
+          else reject(new Error(err.trim() || buf.trim() || `sbx create exited ${code}`))
+        })
       })
-    })
+    }
+
+    let agent = config.agent
+    let out: string
+    try {
+      out = await run(buildArgs(agent))
+    } catch (err) {
+      // An agent kit must be named by the `name:` in its spec.yaml, which is not
+      // always the folder den keeps it in — an import names that after the repo.
+      // sbx doesn't just reject this, it names the right one:
+      //   agent name "sbx-nanoclaw-kits" does not match agent kit name
+      //   "nanoclaw" (use "nanoclaw" as the agent name)
+      // Take it at its word and retry once. den resolves the name up front too,
+      // but that reads spec.yaml from disk; this covers every other way the two
+      // can disagree (a renamed folder, a kit edited outside den) rather than
+      // dead-ending on an error that carries its own fix.
+      const msg = err instanceof Error ? err.message : String(err)
+      const suggested = /use ["']([^"']+)["'] as the agent name/i.exec(msg)?.[1]
+      if (!suggested || suggested === agent) throw err
+      send(`\nThe kit calls itself "${suggested}" — retrying with that name.\n`)
+      agent = suggested
+      out = await run(buildArgs(agent))
+    }
     // `sbx create` prints e.g. "✓ Created sandbox 'claude-foo'" plus extra lines,
     // so parse the quoted name rather than using the whole message.
     const match = out.match(/sandbox ['"]([^'"]+)['"]/i)
     const sandboxName =
-      config.name ?? match?.[1] ?? `${config.agent}-${config.workspace.split('/').pop()}`
+      config.name ?? match?.[1] ?? `${agent}-${config.workspace.split('/').pop()}`
     recordKits(sandboxName, config.kits ?? [])
     recordIsolation(sandboxName, !!config.branch)
     // Brand-new sandbox: its first agent session must start fresh, never
