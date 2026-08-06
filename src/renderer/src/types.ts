@@ -517,7 +517,7 @@ declare global {
       // known=false while the probe is still running or the daemon is down.
       sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
       apiTraces(): Promise<{ path: string; count: number }>
-      revealApiTraces(): Promise<{ ok: boolean; empty: boolean }>
+      revealApiTraces(): Promise<{ ok: boolean; empty: boolean; error?: string }>
       onSandboxError(cb: (err: SandboxError) => void): () => void
       onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
       onAgentAttention(cb: (name: string) => void): () => void

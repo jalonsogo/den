@@ -238,6 +238,7 @@ export function SbxRuntimePanel({
   // whether or not anyone is looking — the failure is intermittent, so the count
   // here is usually the first sign one happened.
   const [traces, setTraces] = useState<{ path: string; count: number } | null>(null)
+  const [traceErr, setTraceErr] = useState<string | null>(null)
   useEffect(() => {
     const load = () => { void window.minipit?.apiTraces?.().then(setTraces).catch(() => {}) }
     load()
@@ -922,13 +923,18 @@ export function SbxRuntimePanel({
               long the request had been running and whether this Mac had just woken or changed network.
               That’s what tells a connection-lifetime cap apart from a whole-path reset.
             </div>
+            {traceErr && <div className="ss-sub" style={{ color: 'var(--destruct)' }}>{traceErr}</div>}
           </div>
           <button
             className="btn btn-default btn-sm"
-            onClick={() => window.minipit?.revealApiTraces?.()}
+            onClick={async () => {
+              const r = await window.minipit?.revealApiTraces?.().catch(() => null)
+              // Don't fail silently: if the folder can't be opened, say why.
+              setTraceErr(r && !r.ok ? (r.error || 'Could not open the traces folder.') : null)
+            }}
             title={traces?.path}
           >
-            <Bug size={13} /> Reveal
+            <Bug size={13} /> {traces?.count ? 'Reveal' : 'Show folder'}
           </button>
         </div>
         <div className="ss-row">

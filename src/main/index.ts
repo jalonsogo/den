@@ -3914,13 +3914,25 @@ function setupIPC(): void {
   // Debug traces for agent API failures — where the file is, how much is in it,
   // and a way to get at it. See docs/errors.md for how to read one.
   ipcMain.handle('minipit:api-traces', () => ({ path: traceFile(), count: traceCount() }))
-  ipcMain.handle('minipit:reveal-api-traces', () => {
+  ipcMain.handle('minipit:reveal-api-traces', async () => {
     const fs = require('fs')
     const file = traceFile()
-    // Nothing recorded yet: reveal the folder rather than no-op on a missing file.
-    if (!fs.existsSync(file)) { void shell.openPath(traceDir()); return { ok: true, empty: true } }
-    shell.showItemInFolder(file)
-    return { ok: true, empty: false }
+    if (fs.existsSync(file)) {
+      shell.showItemInFolder(file)
+      return { ok: true, empty: false }
+    }
+    // No trace recorded yet. The folder is created lazily on the first write, so
+    // it doesn't exist either — and `openPath` on a missing path fails silently,
+    // which is what made this button look dead in the common "None recorded"
+    // case. Create it, so Reveal always shows where traces will appear.
+    try {
+      fs.mkdirSync(traceDir(), { recursive: true })
+    } catch (err) {
+      return { ok: false, empty: true, error: (err instanceof Error ? err.message : String(err)) }
+    }
+    // openPath resolves to '' on success, or a message explaining the refusal.
+    const problem = await shell.openPath(traceDir())
+    return { ok: !problem, empty: true, error: problem || undefined }
   })
 
   // Open the built-in file editor in its own window.
