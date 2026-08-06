@@ -4367,6 +4367,9 @@ html, body, #root {
 </style>
 <style>
 /* ═══ Capture-specific additions ═══ */
+.tb-acct-menu { max-width: 260px; }
+.tb-acct-item-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-acct-item svg { flex-shrink: 0; margin-left: auto; }
 /* Brand marks in kit capability chips and MCP rows (the app uses PNG assets
    from src/renderer/src/assets/mcp; this capture inlines SVG instead). */
 .ks-mcp .mcp-logo { width: 15px; height: 15px; flex-shrink: 0; color: var(--t1); }
@@ -4524,6 +4527,8 @@ const LUCIDE = {
  "monitor": "<rect width=\"20\" height=\"14\" x=\"2\" y=\"3\" rx=\"2\"/><line x1=\"8\" x2=\"16\" y1=\"21\" y2=\"21\"/><line x1=\"12\" x2=\"12\" y1=\"17\" y2=\"21\"/>",
  "scale": "<path d=\"m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z\"/><path d=\"m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z\"/><path d=\"M7 21h10\"/><path d=\"M12 3v18\"/><path d=\"M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2\"/>",
  "lock": "<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/>",
+ "network": "<rect x=\"16\" y=\"16\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"2\" y=\"16\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"9\" y=\"2\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3\"/><path d=\"M12 12V8\"/>",
+ "git-compare": "<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M13 6h3a2 2 0 0 1 2 2v7\"/><path d=\"M11 18H8a2 2 0 0 1-2-2V9\"/>",
  "key-round": "<path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/>",
  "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>"
 };
@@ -4541,6 +4546,11 @@ const AGENT_SVG = {
   shell: (s) => ic('terminal', s)
 };
 function agentIcon(agent, size) { return (AGENT_SVG[agent] || AGENT_SVG.shell)(size); }
+function agentIconMono(agent, size) {
+  return agentIcon(agent, size)
+    .replace(/fill="#fff"/gi, 'fill="none"')
+    .replace(/fill="(?:#[0-9a-fA-F]{3,8}|url\([^)]*\))"/g, 'fill="currentColor"');
+}
 const AGENTS = [
   { id: 'claude', label: 'Claude Code' }, { id: 'claude-bedrock', label: 'Claude (Bedrock)' },
   { id: 'codex', label: 'Codex' }, { id: 'copilot', label: 'Copilot' }, { id: 'cursor', label: 'Cursor' },
@@ -4840,7 +4850,7 @@ function renderToolbar() {
     <div class="tb-acct-wrap">
       <button class="tb-acct" data-act="acct-menu">
         <span class="tb-acct-avatar">IB</span>
-        <span class="tb-acct-idy"><span class="tb-acct-name">Isabella Bird</span><span class="tb-acct-org">Docker</span></span>
+        <span class="tb-acct-idy"><span class="tb-acct-name">Isabella Bird</span><span class="tb-acct-org" title="Royal Geographical Society">Royal Geographical Society</span></span>
         ${ic('chevron-down', 13)}
       </button>
     </div>
@@ -4986,11 +4996,6 @@ function renderFilesDock(s) {
   const stopped = s.status !== 'running';
   const folder = s.workspace.split('/').pop();
   return `<div class="files-panel">
-    <div class="files-tabs">
-      <button class="files-tab${state.filesTab === 'files' ? ' on' : ''}" data-files-tab="files">Files</button>
-      <button class="files-tab${state.filesTab === 'changes' ? ' on' : ''}" data-files-tab="changes">Changes${changes.length ? `<span class="files-tab-badge">${changes.length}</span>` : ''}</button>
-      <button class="info-dock-x" data-act="dock-close" title="Close">${ic('x', 15)}</button>
-    </div>
     ${state.filesTab === 'files' ? `
     <div class="files-bar">
       <div class="files-crumbs">
@@ -5031,7 +5036,10 @@ function infoAccSection(id, title, badge, bodyHtml) {
     ${open ? `<div class="info-acc-body">${bodyHtml}</div>` : ''}
   </div>`;
 }
-function renderInfoDock(s) {
+function renderInfoDock(s, mode) {
+  // The rail's Network button opens the same panel narrowed to ports + policy,
+  // which is what the app splits into its own dock.
+  const net = mode === 'network';
   const info = INFO[s.id] || { kits: [], secrets: [], ports: [], rules: [], preset: 'balanced' };
   const PRESETS = [
     { v:'allow-all', l:'Allow all', d:'All outbound', icon:'globe' },
@@ -5040,22 +5048,21 @@ function renderInfoDock(s) {
   ];
   return `<div class="info-dock">
     <div class="info-dock-hd">
-      <span class="info-dock-title">Sandbox info</span>
-      <button class="info-dock-x" data-act="dock-close" title="Close">${ic('x', 15)}</button>
+      <span class="info-dock-title">${net ? 'Network' : 'Sandbox info'}</span>
     </div>
     <div class="info-panel">
-      <div class="info-stats">
+      ${net ? '' : `<div class="info-stats">
         <div class="info-stat"><span class="is-k">Status</span><span class="is-v" style="text-transform:capitalize">${s.status}${s.status === 'running' && s.uptime ? ` <span class="is-sub">· ${s.uptime}</span>` : ''}</span></div>
         <div class="info-stat"><span class="is-k">Agent</span><span class="is-v is-agent">${agentIcon(s.agent, 14)}${s.agentLabel}</span></div>
         <div class="info-stat"><span class="is-k">Memory</span><span class="is-v">${info.memory === 'default' ? '—' : info.memory} <span class="is-sub">· max 32g</span></span></div>
         <div class="info-stat"><span class="is-k">Branch</span><span class="is-v">${s.branch} <span class="is-sub">· worktree</span></span></div>
-      </div>
-      ${infoAccSection('workspaces', 'Workspaces', null, `
+      </div>`}
+      ${net ? '' : infoAccSection('workspaces', 'Workspaces', null, `
         <div class="info-row info-row-stack"><span class="ir-label">Primary (read-write)</span><span class="ir-val">${s.workspace}</span></div>
         <div class="info-row info-row-stack"><span class="ir-label">Read-only</span><span class="ir-val">~/Code/shared-fixtures</span></div>`)}
-      ${info.kits.length ? infoAccSection('kits', 'Kits', info.kits.length, `
+      ${!net && info.kits.length ? infoAccSection('kits', 'Kits', info.kits.length, `
         <div class="info-kits">${info.kits.map((k) => `<span class="info-kit">${ic('layers', 12)}${k}</span>`).join('')}</div>`) : ''}
-      ${info.secrets.length ? infoAccSection('secrets', 'Injected secrets', info.secrets.length, `
+      ${!net && info.secrets.length ? infoAccSection('secrets', 'Injected secrets', info.secrets.length, `
         ${info.authMode ? `<div class="ss-sub" style="margin-bottom:6px">Auth mode: <strong>${info.authMode}</strong></div>` : ''}
         <div class="info-kits">${info.secrets.map((x) => `<span class="info-kit">${ic('lock', 12)}${x.n}${x.src ? `<span style="opacity:0.6"> · ${x.src}</span>` : ''}</span>`).join('')}</div>
         <div class="ss-sub" style="margin-top:6px">Credentials this sandbox receives via the proxy (from <code>sbx inspect</code>). Values are never exposed.</div>`) : ''}
@@ -5150,22 +5157,20 @@ function renderDetail() {
     <div class="detail-body">
       <div class="detail-main">
         <div class="term">
-          <div class="term-bar">
-            <div class="term-seg">
-              <div class="term-seg-item${state.termTab === 'agent' ? ' active' : ''}" data-term-tab="agent">Agent</div>
-              <div class="term-seg-item${state.termTab === 'shell' ? ' active' : ''}" data-term-tab="shell">Shell</div>
-            </div>
-            <div class="term-right">
-              <button class="term-files" title="Redraw terminal">${ic('refresh-cw', 13)}</button>
-              <button class="term-files${state.dock === 'info' ? ' active' : ''}" data-act="dock-info" title="Sandbox info">${ic('info', 14)} Info</button>
-              <button class="term-files${state.dock === 'files' ? ' active' : ''}" data-act="dock-files" title="Show files">${ic('panel-right', 14)} Files</button>
-            </div>
+          <div class="term-main"><div class="mock-term-view">${body}</div></div>
+          <div class="term-rail">
+            <button class="term-rail-btn${state.termTab === 'agent' ? ' active' : ''}" data-term-tab="agent" title="${s.agentLabel} — agent terminal">${agentIconMono(s.agent, 17)}</button>
+            <button class="term-rail-btn${state.termTab === 'shell' ? ' active' : ''}" data-term-tab="shell" title="Shell — interactive shell in the sandbox">${ic('square-terminal', 17)}</button>
+            <div class="term-rail-sep"></div>
+            <button class="term-rail-btn${state.dock === 'info' ? ' active' : ''}" data-act="dock-info" title="Info — status, workspaces, kits & secrets">${ic('info', 17)}</button>
+            <button class="term-rail-btn${state.dock === 'network' ? ' active' : ''}" data-act="dock-network" title="Network — ports & network policy">${ic('network', 17)}</button>
+            <button class="term-rail-btn${state.dock === 'files' && state.filesTab === 'files' ? ' active' : ''}" data-act="dock-files" title="${state.dock === 'files' ? 'Hide the file browser' : 'Browse the workspace'}">${ic('folder', 17)}</button>
+            <button class="term-rail-btn${state.dock === 'files' && state.filesTab === 'changes' ? ' active' : ''}" data-act="open-changes" title="Changes — review & merge${s.changes ? ` · ${s.changes} changed` : ''}">${ic('git-compare', 17)}${s.changes ? `<span class="term-rail-badge">${s.changes}</span>` : ''}</button>
           </div>
-          <div class="mock-term-view">${body}</div>
         </div>
       </div>
       ${state.dock ? `<div class="files-resize"></div><div class="files-side" style="width:340px">
-        ${state.dock === 'files' ? renderFilesDock(s) : renderInfoDock(s)}
+        ${state.dock === 'files' ? renderFilesDock(s) : renderInfoDock(s, state.dock)}
       </div>` : ''}
     </div>
   </div>`;
@@ -6009,11 +6014,11 @@ function openAcctMenu(btn) {
   el.className = 'tb-acct-menu';
   el.style.position = 'fixed';
   el.innerHTML = `
-    <div class="tb-acct-hd"><div class="tb-acct-hd-name">Isabella Bird</div><div class="tb-acct-hd-sub">isabella.bird@docker.com</div></div>
+    <div class="tb-acct-hd"><div class="tb-acct-hd-name">Isabella Bird</div><div class="tb-acct-hd-sub">isabella.bird@rgs.org.uk</div></div>
     <div class="tb-acct-divider"></div>
     <div class="tb-acct-label">Organizations</div>
-    <div class="tb-acct-item">Docker ${ic('check', 13)}</div>
-    <div class="tb-acct-item">Personal</div>
+    <div class="tb-acct-item"><span class="tb-acct-item-name">Royal Geographical Society</span>${ic('check', 13)}</div>
+    <div class="tb-acct-item"><span class="tb-acct-item-name">Personal</span></div>
     <div class="tb-acct-divider"></div>
     <button class="tb-acct-signout">${ic('log-out', 13)} Sign out</button>`;
   overlays().appendChild(el);
@@ -6190,9 +6195,20 @@ document.addEventListener('click', (e) => {
 
   /* Docks */
   if ((el = hit('[data-act="dock-info"]'))) { state.dock = state.dock === 'info' ? null : 'info'; render(); return; }
-  if ((el = hit('[data-act="dock-files"]'))) { state.dock = state.dock === 'files' ? null : 'files'; state.filesTab = 'files'; render(); return; }
+  if ((el = hit('[data-act="dock-network"]'))) {
+    state.dock = state.dock === 'network' ? null : 'network';
+    state.infoAcc = { ...state.infoAcc, ports: true, network: true };
+    render(); return;
+  }
+  if ((el = hit('[data-act="dock-files"]'))) {
+    const showing = state.dock === 'files' && state.filesTab === 'files';
+    state.dock = showing ? null : 'files'; state.filesTab = 'files'; render(); return;
+  }
   if ((el = hit('[data-act="dock-close"]'))) { state.dock = null; render(); return; }
-  if ((el = hit('[data-act="open-changes"]'))) { state.dock = 'files'; state.filesTab = 'changes'; render(); return; }
+  if ((el = hit('[data-act="open-changes"]'))) {
+    const showing = state.dock === 'files' && state.filesTab === 'changes';
+    state.dock = showing ? null : 'files'; state.filesTab = 'changes'; render(); return;
+  }
   if ((el = hit('[data-files-tab]'))) { state.filesTab = el.dataset.filesTab; render(); return; }
   if ((el = hit('[data-info-acc]'))) { const k = el.dataset.infoAcc; state.infoAcc[k] = !state.infoAcc[k]; render(); return; }
   if ((el = hit('[data-np-preset]'))) {
