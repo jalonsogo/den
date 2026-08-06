@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Plus, Plug, Trash2, KeyRound, RefreshCw, Info, PackagePlus,
-  Zap, Boxes, ShieldCheck, Search
+  Zap, Boxes, ShieldCheck, Search, MoreVertical, Copy, TerminalSquare, FolderOpen
 } from 'lucide-react'
 import { useStore } from '../store'
 import { mcpIcon } from '../lib/mcpCatalog'
@@ -49,13 +49,18 @@ const isServer = (s: McpServerEntry): boolean => !!s.name && !/\s/.test(s.name)
 function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
   const t = (s || '').toLowerCase()
   if (!t) return { label: '', tone: 'none' }
-  if (/expired|invalid|fail/.test(t)) return { label: 'Reauthorize', tone: 'warn' }
+  if (/expired|invalid|fail|revoked/.test(t)) return { label: 'Reauthorize', tone: 'warn' }
   // Negatives first: "not authorized" and "unauthorized" both contain
   // "authorized", so the positive test below would otherwise claim success for
   // a server that has none.
-  if (/not authorized|unauthori[sz]ed|pending|required|needs/.test(t)) return { label: 'Not authorized', tone: 'warn' }
-  if (/\bok\b|valid|authorized|active/.test(t)) return { label: 'Authorized', tone: 'ok' }
-  return { label: s, tone: 'none' }
+  if (/not authorized|unauthori[sz]ed|pending|required|needs|^(no|none|never)$/.test(t)) {
+    return { label: 'Not authorized', tone: 'warn' }
+  }
+  if (/\b(ok|yes)\b|valid|authorized|active|connected/.test(t)) return { label: 'Authorized', tone: 'ok' }
+  // Something we don't recognise — show it verbatim rather than swallowing it.
+  // Silence is what made an authorized server look like it had never been
+  // authorized, so an odd-looking badge is the better failure.
+  return { label: s.length > 24 ? `${s.slice(0, 23)}…` : s, tone: 'none' }
 }
 
 export function McpPage() {
@@ -77,6 +82,40 @@ export function McpPage() {
   // so it streams rather than being swallowed.
   const [authOut, setAuthOut] = useState('')
   const [authFor, setAuthFor] = useState<string | null>(null)
+
+  // Row "⋮" menu — same mechanism as the kit and template rows.
+  const [moreFor, setMoreFor] = useState<string | null>(null)
+  const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
+
+  const toggleMore = (name: string, e: React.MouseEvent) => {
+    if (moreFor === name) { setMoreFor(null); return }
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setMorePos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+    setMoreFor(name)
+  }
+
+  useEffect(() => {
+    if (!moreFor) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (!t?.closest('.kit-more-menu') && !t?.closest('.kit-more-btn')) setMoreFor(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [moreFor])
+
+  const copy = (text: string, what: string) => {
+    if (!text) return
+    navigator.clipboard.writeText(text)
+      .then(() => setMsg({ ok: true, text: `${what} copied.` }))
+      .catch(() => setMsg({ ok: false, text: 'Could not copy to the clipboard.' }))
+  }
+
+  // The `sbx mcp add` line that would recreate this registration elsewhere.
+  const addCommand = (s: McpServerEntry): string =>
+    s.url
+      ? `sbx mcp add ${s.name} --url ${s.url}`
+      : `sbx mcp add ${s.name} --local --command ${s.command}`
 
   const load = useCallback(() => {
     setLoading(true)
@@ -203,8 +242,20 @@ export function McpPage() {
           />
         )}
 
+        {servers.length > 0 && (
+        <div className="lib-tbl">
+          <div className="lib-hdr lib-hdr-mcp">
+            <span>SERVER</span>
+            <span>TARGET</span>
+            <span>AUTH</span>
+            <span />
+          </div>
         {servers.map((s) => {
           const st = authState(s.auth)
+          const local = !s.url && !!s.command
+          // Only offer Finder for a command that is an actual path on this Mac.
+          // `npx @playwright/mcp@latest` has no folder to open.
+          const localPath = local && s.command.startsWith('/') ? s.command.split(/\s+/)[0] : ''
           return (
             <div key={s.name}>
               <div className="lib-row lib-row-mcp">
@@ -212,13 +263,16 @@ export function McpPage() {
                   <img src={mcpIcon(s.name.toLowerCase())} alt="" className="mcp-row-ic"
                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
                   <span>{s.name}</span>
-                  {st.label && (
-                    <span className={`rt-badge ${st.tone === 'ok' ? 'rt-badge-ok' : st.tone === 'warn' ? 'rt-badge-update' : ''}`}>
-                      {st.label}
-                    </span>
-                  )}
                 </div>
-                <span className="mcp-row-target">{s.url || s.command || '—'}</span>
+                <span className="mcp-row-target" title={s.url || s.command}>{s.url || s.command || '—'}</span>
+                <span className="mcp-row-auth">
+                  {st.label
+                    // The raw string sits in the tooltip: when sbx words it in
+                    // some way den doesn't know, the badge is still checkable.
+                    ? <span className={`rt-badge ${st.tone === 'ok' ? 'rt-badge-ok' : st.tone === 'warn' ? 'rt-badge-update' : ''}`}
+                            title={s.auth}>{st.label}</span>
+                    : <span className="lib-muted">—</span>}
+                </span>
                 <div className="mcp-row-actions">
                   <div className="kit-add-wrap">
                     <button
@@ -244,13 +298,38 @@ export function McpPage() {
                   <button className="btn btn-ghost btn-sm" title="sbx mcp inspect" onClick={() => inspect(s.name)}>
                     <Info size={13} /> Info
                   </button>
-                  <button className="btn btn-ghost btn-sm" disabled={busy === s.name} onClick={() => authorize(s.name)}>
-                    <KeyRound size={13} /> {busy === s.name && authFor === s.name ? 'Authorizing…' : 'Authorize'}
+                  <button
+                    className={`btn btn-ghost btn-sm tpl-icon-btn kit-more-btn${moreFor === s.name ? ' active' : ''}`}
+                    title="More…"
+                    disabled={busy === s.name}
+                    onClick={(e) => toggleMore(s.name, e)}
+                  >
+                    <MoreVertical size={15} />
                   </button>
-                  <button className="btn btn-ghost btn-sm tpl-icon-btn" title="Remove" disabled={busy === s.name}
-                          onClick={() => remove(s.name)}>
-                    <Trash2 size={15} />
-                  </button>
+                  {moreFor === s.name && morePos && (
+                    <div className="kit-more-menu" style={{ top: morePos.top, right: morePos.right }}>
+                      <button className="kit-more-item" onClick={() => { setMoreFor(null); authorize(s.name) }}>
+                        <KeyRound size={14} /> {st.tone === 'ok' ? 'Reauthorize' : 'Authorize'}
+                      </button>
+                      <button className="kit-more-item" onClick={() => { setMoreFor(null); copy(s.url || s.command, 'Endpoint') }}>
+                        <Copy size={14} /> Copy {local ? 'command' : 'endpoint'}
+                      </button>
+                      {/* Reproduces this registration on another machine — the
+                          same idea as a kit's "Copy install command". */}
+                      <button className="kit-more-item" onClick={() => { setMoreFor(null); copy(addCommand(s), 'Command') }}>
+                        <TerminalSquare size={14} /> Copy add command
+                      </button>
+                      {localPath && (
+                        <button className="kit-more-item" onClick={() => { setMoreFor(null); window.minipit?.openInFinder(localPath) }}>
+                          <FolderOpen size={14} /> Open in Finder
+                        </button>
+                      )}
+                      <div className="kit-more-sep" />
+                      <button className="kit-more-item danger" onClick={() => { setMoreFor(null); remove(s.name) }}>
+                        <Trash2 size={14} /> Remove server
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
               {inspectFor === s.name && (() => {
@@ -283,6 +362,8 @@ export function McpPage() {
             </div>
           )
         })}
+        </div>
+        )}
 
       </div>
 

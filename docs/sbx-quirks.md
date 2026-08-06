@@ -204,6 +204,50 @@ Template:
   `src/main/index.ts` → `parseSkillsImport()`.
 - **Status:** unverified — confirm the real-run wording against a live import.
 
+## MCP gateway
+
+### An authorized server shows no authorization state
+- **Version:** v0.38.0
+- **Symptom:** a server authorized through the browser flow (Vercel) still
+  showed a blank Auth cell — indistinguishable, on screen, from never having
+  been authorized.
+- **Cause:** three separate ways to miss it, and den hit at least one:
+  1. `sbx mcp ls` doesn't reliably carry authorization as a column, and when it
+     does the value can be a bare `yes` / `valid` / `active` — den only looked
+     for words containing *auth*, *token*, *expired*, *pending*.
+  2. `sbx mcp ls --json` can express it as a **boolean** (`"authorized": true`)
+     or a nested object (`"auth": {"status": …}`). den read string fields only,
+     so a boolean `true` was dropped on the floor.
+  3. `sbx mcp auth status <name>` is **docs-derived and unverified**. On a build
+     without that subcommand the call fails, and den treated any failure as
+     "not an OAuth server" → report nothing.
+- **Fix:** probe in cost order and never let "no answer" mean "no". The JSON
+  reader accepts strings, booleans and nested `{status}`; the table reader also
+  matches bare `yes|no|ok|valid|active|none|never`; and when `mcp auth status`
+  fails *specifically because the subcommand is unknown*, den falls back to
+  `sbx mcp inspect <name>` and takes any key matching `/auth|token|credential/`.
+  A value den can't classify is now rendered verbatim as the badge (raw text in
+  the tooltip) rather than swallowed.
+  `src/main/index.ts` → `probeAuth()`, `authFromInspect()`, `withAuthState()`,
+  `parseMcpTable()`; `McpPage.tsx` → `authState()`.
+- **Status:** worked around — the fallback chain is version-proof, but the
+  actual wording of `mcp auth status` (and whether it exists) is still
+  unconfirmed. Capture `sbx mcp auth status <name>` and `sbx mcp ls --json`
+  against a live authorized server and pin the real shape.
+
+### `"No MCP servers registered"` parses as a server
+- **Version:** v0.38.0
+- **Symptom:** an empty registry produced one row named `No`, with working
+  Authorize / Add-to-sandbox / Remove buttons.
+- **Cause:** with nothing registered sbx prints a sentence where the table would
+  be, and the column splitter took its first field as a name. `mcp add` / `auth`
+  emit `INFO:` / `ERROR:` lines that hit the same path.
+- **Fix:** skip prose — a row must be multi-column or a bare identifier — and,
+  in the renderer, drop any entry whose name contains whitespace, so a future
+  parse failure can only ever render less rather than a fake server.
+  `src/main/index.ts` → `parseMcpTable()`; `McpPage.tsx` → `isServer()`.
+- **Status:** fixed.
+
 ## Open / unverified
 
 - **Governance support message key** (v0.37) — the field name in

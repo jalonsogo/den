@@ -735,19 +735,51 @@ interface McpServerEntry {
 // status` does. Ask it per server so an authorized server actually reads as
 // one; the list is short, and a server whose status can't be read keeps
 // whatever `ls` said rather than being mislabelled.
-async function withAuthState(servers: McpServerEntry[]): Promise<McpServerEntry[]> {
-  return Promise.all(servers.map(async (m) => {
-    if (m.auth) return m
-    try {
-      const raw = await sbx(['mcp', 'auth', 'status', m.name], { timeout: 10000 })
-      return { ...m, auth: raw.trim().split('\n').filter(Boolean).pop() ?? '' }
-    } catch (err) {
-      // A non-OAuth server may reject the subcommand outright — that's not an
-      // auth failure, so say nothing rather than showing a scary state.
-      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
-      return { ...m, auth: /expired|unauthor|not authorized|required/.test(msg) ? 'not authorized' : '' }
+// Pull an authorization state out of `sbx mcp inspect` output — the one place
+// it is always written down. Any key mentioning auth/token/credential counts,
+// because the field name varies by build and a wrong guess reads to the user as
+// "den thinks I never authorized this".
+const AUTH_KEY_RE = /auth|token|credential/i
+function authFromInspect(raw: string): string {
+  for (const line of raw.split('\n')) {
+    const m = /^\s*([^:]{1,40}):\s*(.+?)\s*$/.exec(line)
+    if (!m || !AUTH_KEY_RE.test(m[1])) continue
+    // A bare "OAuth:" heading carries no state — its children do.
+    const v = m[2].trim()
+    if (!v) continue
+    if (/^(true|yes)$/i.test(v)) return 'authorized'
+    if (/^(false|no|none|never)$/i.test(v)) return 'not authorized'
+    return v
+  }
+  return ''
+}
+
+// sbx reports authorization differently across builds: `mcp ls` may carry a
+// column, `mcp auth status` may or may not exist, and `mcp inspect` always has
+// something. Try them in cost order and only give up at the end — reporting
+// nothing is indistinguishable, on screen, from "not authorized".
+async function probeAuth(name: string): Promise<string> {
+  try {
+    const raw = await sbx(['mcp', 'auth', 'status', name], { timeout: 10000 })
+    const last = raw.trim().split('\n').filter(Boolean).pop() ?? ''
+    if (last) return last
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // A build that has no such subcommand says so; that's not a verdict on the
+    // server, so keep looking. Anything else is the server's actual answer.
+    if (!/unknown (command|subcommand|flag)|unknown shorthand|usage:|invalid argument|help for/i.test(msg)) {
+      return /expired|unauthor|not authorized|required/i.test(msg) ? 'not authorized' : ''
     }
-  }))
+  }
+  try {
+    return authFromInspect(await sbx(['mcp', 'inspect', name], { timeout: 10000 }))
+  } catch {
+    return ''
+  }
+}
+
+async function withAuthState(servers: McpServerEntry[]): Promise<McpServerEntry[]> {
+  return Promise.all(servers.map(async (m) => (m.auth ? m : { ...m, auth: await probeAuth(m.name) })))
 }
 
 function parseMcpTable(out: string): McpServerEntry[] {
@@ -771,7 +803,9 @@ function parseMcpTable(out: string): McpServerEntry[] {
       url: rest.find((c) => /^https?:\/\//i.test(c)) ?? '',
       command: rest.find((c) => !/^https?:\/\//i.test(c) && /\s|\//.test(c)) ?? '',
       transport: rest.find((c) => /^(http|sse|stdio|local|remote)$/i.test(c)) ?? '',
-      auth: rest.find((c) => /auth|token|expired|ok|none|pending/i.test(c)) ?? ''
+      // Widened past the obvious words: a column can just as well read "yes",
+      // "valid" or "active", and missing it shows an authorized server as blank.
+      auth: rest.find((c) => /^(yes|no|ok|valid|active|none|never)$/i.test(c) || /auth|token|expired|pending/i.test(c)) ?? ''
     })
   }
   return rows
@@ -3110,12 +3144,39 @@ function setupIPC(): void {
             for (const k of keys) { const v = r[k]; if (typeof v === 'string' && v.trim()) return v.trim() }
             return ''
           }
+          // Authorization is the one field whose shape varies: a string on some
+          // builds, a bare boolean or a nested {status} object on others. A
+          // string-only read silently dropped `"authorized": true`, so an
+          // authorized server looked unauthorized.
+          const authOf = (): string => {
+            const say = (v: unknown): string => {
+              if (typeof v === 'string' && v.trim()) return v.trim()
+              if (typeof v === 'boolean') return v ? 'authorized' : 'not authorized'
+              return ''
+            }
+            for (const k of ['auth', 'authStatus', 'auth_status', 'authorization', 'status', 'state']) {
+              const direct = say(r[k])
+              if (direct) return direct
+              const nested = r[k]
+              if (nested && typeof nested === 'object') {
+                for (const kk of ['status', 'state', 'authorized', 'valid']) {
+                  const inner = say((nested as Record<string, unknown>)[kk])
+                  if (inner) return inner
+                }
+              }
+            }
+            for (const k of ['authorized', 'isAuthorized', 'hasToken', 'tokenValid']) {
+              const v = r[k]
+              if (typeof v === 'boolean') return v ? 'authorized' : 'not authorized'
+            }
+            return ''
+          }
           return {
             name: pick('name', 'id', 'server'),
             url: pick('url', 'endpoint'),
             command: pick('command', 'cmd'),
             transport: pick('transport', 'type'),
-            auth: pick('auth', 'authStatus', 'auth_status', 'status')
+            auth: authOf()
           }
         }).filter((m) => m.name)
       } catch { return null }

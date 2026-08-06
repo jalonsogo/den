@@ -3046,7 +3046,12 @@ html, body, #root {
 /* name+state | target | actions. Without a variant class these rows inherited
    the 4-column default and left a gap where a fourth cell would have been.
    Actions is fixed so the flexible target column can absorb the slack. */
-.lib-hdr-mcp, .lib-row-mcp { grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) 300px; }
+.lib-hdr-mcp, .lib-row-mcp { grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) 116px 240px; }
+/* Authorization gets a column of its own rather than a badge trailing the name:
+   it's the field you scan down the list for, and inline it moved with the
+   name's length. Fixed-width so the badges line up. */
+.mcp-row-auth { display: flex; align-items: center; min-width: 0; }
+.mcp-row-auth .rt-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Five equal, flexible capability columns, shared by the header labels and the
    KitCaps cells so they align and shrink together. */
 .kit-caps-hdr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
