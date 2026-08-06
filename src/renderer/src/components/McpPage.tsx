@@ -36,6 +36,13 @@ function parseInspect(raw: string): InspectRow[] | null {
   return rows.length ? rows : null
 }
 
+// Second line of defence behind the main-process parser. A server name is an
+// identifier — notion, vercel, playwright — never a sentence. When sbx says
+// "No MCP servers registered" and something upstream mistakes that for a row,
+// the damage is a fake server offering Authorize and Remove; dropping anything
+// with whitespace in its name means the worst case is showing nothing.
+const isServer = (s: McpServerEntry): boolean => !!s.name && !/\s/.test(s.name)
+
 // Auth wording varies by sbx build, so classify loosely rather than matching
 // exact strings — and treat "no idea" as its own state instead of guessing.
 function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
@@ -74,7 +81,7 @@ export function McpPage() {
     setLoading(true)
     void window.minipit?.mcpList()
       .then((r) => {
-        setServers(r?.servers ?? [])
+        setServers((r?.servers ?? []).filter(isServer))
         setError(r?.ok ? null : (r?.error ?? 'Could not read registered servers.'))
       })
       .catch((e) => setError(bridgeError(e, 'MCP servers')))
