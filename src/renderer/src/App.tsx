@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useStore } from './store'
 import { Toolbar } from './components/Toolbar'
@@ -14,6 +14,7 @@ import { PolicyBlockToaster } from './components/PolicyBlockToaster'
 import { OutdatedRuntimeBanner } from './components/OutdatedRuntimeBanner'
 import { McpPage } from './components/McpPage'
 import { EnvironmentsPage } from './components/EnvironmentsPage'
+import { RuntimeSetup } from './components/RuntimeSetup'
 import { playFinalizeSound, playAskSound } from './lib/sound'
 import { termTheme as resolveTermTheme } from './lib/termThemes'
 import { NewSandboxModal } from './components/modals/NewSandboxModal'
@@ -202,6 +203,15 @@ export function App() {
 
   // Cmd shortcuts. Cmd (not Ctrl) so terminal/shell control keys are untouched.
   // Sandbox actions act on the open sandbox; New Sandbox works anywhere.
+  // Deliberately starts false: flashing the setup gate on every launch while the
+  // probe is in flight would be worse than showing it a beat late.
+  const [needsRuntimeSetup, setNeedsRuntimeSetup] = useState(false)
+  useEffect(() => {
+    void window.minipit?.runtimeSetupState?.()
+      .then((r) => { if (r?.needsSetup) setNeedsRuntimeSetup(true) })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey || e.ctrlKey || e.altKey) return
@@ -250,6 +260,13 @@ export function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // Nothing in den works without a runtime, so the choice comes before the app
+  // rather than as a broken-looking dashboard the user has to diagnose. Shown
+  // only when there's no explicit choice and no managed runtime installed.
+  if (needsRuntimeSetup) {
+    return <RuntimeSetup onDone={() => setNeedsRuntimeSetup(false)} />
+  }
 
   return (
     <div className="app-root" onContextMenu={(e) => e.preventDefault()}>

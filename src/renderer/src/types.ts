@@ -543,6 +543,17 @@ declare global {
         /** sbx >= 0.39: prune, env files, dynamic secrets, kit signing. */
         hasEnvFiles?: boolean
       }>
+      pickSbxBinary(): Promise<{ ok: boolean; path: string; version?: string; error?: string }>
+      runtimeSetupState(): Promise<{
+        needsSetup: boolean
+        supported: boolean
+        unsupportedReason: string
+        pinned: string
+        managedInstalled: boolean
+        /** An sbx the user installed themselves, '' when none found. */
+        systemPath: string
+        defaultSource: 'managed' | 'system'
+      }>
       runtimeStatus(): Promise<{
         source: 'managed' | 'system'
         supported: boolean

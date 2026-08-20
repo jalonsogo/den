@@ -76,31 +76,48 @@ const AGENT_BUF_MAX = 1_000_000
 // 0 Dark · 1 Light · 2 Dark(colorblind) · 3 Light(colorblind) · 4 Dark ANSI · 5 Light ANSI.
 const claudeThemeId = (): number => (termMode === 'light' ? 1 : 0)
 
+/** An sbx the user installed themselves, or '' when none can be found. */
+export function systemSbxPath(): string {
+  const stored = store.get('sbxPath') as string | undefined
+  // Only honour a stored path that still exists — otherwise fall through to
+  // discovery instead of spawning something that isn't there.
+  if (stored && isFile(stored)) return stored
+  const candidates = process.platform === 'win32'
+    ? [
+        join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Docker', 'sbx', 'sbx.exe'),
+        join(process.env.LOCALAPPDATA ?? '', 'Programs', 'sbx', 'sbx.exe')
+      ]
+    : process.platform === 'linux'
+      ? ['/usr/local/bin/sbx', '/usr/bin/sbx']
+      : ['/opt/homebrew/bin/sbx', '/usr/local/bin/sbx', '/usr/bin/sbx']
+  return candidates.find(isFile) ?? ''
+}
+
+/**
+ * Which runtime den should use when the user hasn't said.
+ *
+ * Managed is the default: it is the version den was built and tested against,
+ * which is the whole point of pinning. Where a managed runtime can't exist
+ * (Intel Mac, Windows, Linux) the only answer is the user's own install.
+ */
+function runtimeSourcePref(): 'managed' | 'system' {
+  const stored = store.get('runtimeSource') as string | undefined
+  if (stored === 'managed' || stored === 'system') return stored
+  return managedRuntimeSupport().ok ? 'managed' : 'system'
+}
+
 function getSbxPath(): string {
   // A den-managed runtime wins when it's selected and actually present. The
   // fallback is deliberate: a managed install that went missing (userData
   // cleared, a half-finished upgrade) should degrade to the user's own sbx
   // rather than brick every feature in the app.
-  if ((store.get('runtimeSource') as string | undefined) === 'managed') {
+  if (runtimeSourcePref() === 'managed') {
     const managed = managedSbxPath()
     if (managed) return managed
   }
-  const stored = store.get('sbxPath') as string | undefined
-  // Only honour a stored path that still exists — otherwise fall through to
-  // discovery instead of spawning something that isn't there.
-  if (stored && isFile(stored)) return stored
-  const candidates = ['/opt/homebrew/bin/sbx', '/usr/local/bin/sbx', '/usr/bin/sbx']
-  const fs = require('fs')
-  return (
-    candidates.find((p) => {
-      try {
-        fs.accessSync(p)
-        return true
-      } catch {
-        return false
-      }
-    }) ?? 'sbx'
-  )
+  // Last resort is the bare name, resolved through PATH — which is all Windows
+  // has until its own discovery lands.
+  return systemSbxPath() || 'sbx'
 }
 
 // GUI apps don't inherit the shell PATH, so resolve brew by its known prefixes.
@@ -3438,6 +3455,60 @@ function setupIPC(): void {
       )
     }
   }
+
+  // Does den have a runtime to talk to, and has the user ever been asked?
+  //
+  // The gate appears when there's no explicit choice AND no managed runtime
+  // installed. That covers the fresh machine, and it also covers someone
+  // updating with brew's sbx already working: managed is the default, but
+  // "default" must not mean a silent 127 MB download replacing something that
+  // already works. So den asks once, with their existing install offered right
+  // there as the alternative.
+  ipcMain.handle('minipit:runtime-setup-state', async () => {
+    const support = managedRuntimeSupport()
+    const chosen = (() => {
+      const v = store.get('runtimeSource') as string | undefined
+      return v === 'managed' || v === 'system'
+    })()
+    const managed = managedSbxPath()
+    const system = systemSbxPath()
+    return {
+      needsSetup: !chosen && !managed,
+      supported: support.ok,
+      unsupportedReason: support.reason,
+      pinned: PINNED_SBX.version,
+      managedInstalled: !!managed,
+      systemPath: system,
+      defaultSource: runtimeSourcePref()
+    }
+  })
+
+  // Locate an sbx the user installed somewhere den doesn't look. Verified before
+  // it's stored, so a wrong pick fails here rather than as a stream of ENOENTs
+  // spread across every feature.
+  ipcMain.handle('minipit:pick-sbx-binary', async () => {
+    const res = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Locate the sbx binary',
+      properties: ['openFile'],
+      defaultPath: process.platform === 'darwin' ? '/opt/homebrew/bin' : undefined
+    })
+    const picked = res.canceled ? '' : (res.filePaths[0] ?? '')
+    if (!picked) return { ok: false as const, path: '', error: '' }
+    try {
+      const out = await new Promise<string>((resolve, reject) => {
+        execFile(picked, ['version'], { timeout: 20000, env: guiEnv() }, (err, stdout, stderr) =>
+          err ? reject(new Error((stderr || err.message).toString().trim())) : resolve(stdout.toString()))
+      })
+      store.set('sbxPath', picked)
+      return { ok: true as const, path: picked, version: out.trim().split('\n')[0] }
+    } catch (err) {
+      return {
+        ok: false as const,
+        path: '',
+        error: `That file didn't answer \`sbx version\` — ${(err instanceof Error ? err.message : String(err)).trim()}`
+      }
+    }
+  })
 
   ipcMain.handle('minipit:runtime-status', async () => {
     const support = managedRuntimeSupport()

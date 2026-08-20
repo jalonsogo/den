@@ -184,6 +184,8 @@ const api = {
   sbxVersionCheck: ()  => ipcRenderer.invoke('minipit:sbx-version-check'),
   // den-managed sbx runtime: den downloads and runs a pinned copy instead of
   // whatever is installed. See docs/managed-runtime-plan.md.
+  runtimeSetupState: ()                     => ipcRenderer.invoke('minipit:runtime-setup-state'),
+  pickSbxBinary: ()                         => ipcRenderer.invoke('minipit:pick-sbx-binary'),
   runtimeStatus:  ()                        => ipcRenderer.invoke('minipit:runtime-status'),
   runtimeSetSource: (source: 'managed' | 'system') => ipcRenderer.invoke('minipit:runtime-source', source),
   runtimeInstall: ()                        => ipcRenderer.invoke('minipit:runtime-install'),
