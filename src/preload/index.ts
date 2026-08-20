@@ -182,6 +182,12 @@ const api = {
   // Is the installed sbx new enough for the CLI dialect den speaks?
   mainBuildId: ()      => ipcRenderer.invoke('minipit:build-id'),
   sbxVersionCheck: ()  => ipcRenderer.invoke('minipit:sbx-version-check'),
+  // den-managed sbx runtime: den downloads and runs a pinned copy instead of
+  // whatever is installed. See docs/managed-runtime-plan.md.
+  runtimeStatus:  ()                        => ipcRenderer.invoke('minipit:runtime-status'),
+  runtimeSetSource: (source: 'managed' | 'system') => ipcRenderer.invoke('minipit:runtime-source', source),
+  runtimeInstall: ()                        => ipcRenderer.invoke('minipit:runtime-install'),
+  runtimeRevert:  ()                        => ipcRenderer.invoke('minipit:runtime-revert'),
   // sbx v0.39, all additive — den still runs on 0.38, these just aren't offered
   // there. See MIN_SBX_VERSION in main for why the floor didn't move.
   pruneSandboxes: (olderThan?: string) => ipcRenderer.invoke('minipit:prune-sandboxes', olderThan),

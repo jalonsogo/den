@@ -76,8 +76,18 @@ const AGENT_BUF_MAX = 1_000_000
 const claudeThemeId = (): number => (termMode === 'light' ? 1 : 0)
 
 function getSbxPath(): string {
+  // A den-managed runtime wins when it's selected and actually present. The
+  // fallback is deliberate: a managed install that went missing (userData
+  // cleared, a half-finished upgrade) should degrade to the user's own sbx
+  // rather than brick every feature in the app.
+  if ((store.get('runtimeSource') as string | undefined) === 'managed') {
+    const managed = managedSbxPath()
+    if (managed) return managed
+  }
   const stored = store.get('sbxPath') as string | undefined
-  if (stored) return stored
+  // Only honour a stored path that still exists — otherwise fall through to
+  // discovery instead of spawning something that isn't there.
+  if (stored && isFile(stored)) return stored
   const candidates = ['/opt/homebrew/bin/sbx', '/usr/local/bin/sbx', '/usr/bin/sbx']
   const fs = require('fs')
   return (
@@ -2542,6 +2552,71 @@ export async function sbxHasCommand(args: string[]): Promise<boolean> {
   return !/unknown command|unrecognized|did you mean/i.test(help)
 }
 
+// ── den-managed sbx runtime ──────────────────────────────────────────────────
+// den can run its own copy of sbx instead of whatever is installed, so the UI
+// maps 1:1 to a runtime it was actually built against. See
+// docs/managed-runtime-plan.md for the reasoning; the short version:
+//
+//   · The binary is downloaded, never bundled — Docker's releases carry a bare
+//     copyright notice with no redistribution grant.
+//   · Only the binary is contained in den's data dir. sandboxd keeps writing to
+//     its own global state directory, which is deliberate: sandboxes stay
+//     visible from the user's terminal.
+//   · macOS/arm64 only. The darwin tarball has no x86_64 payload, and Windows
+//     ships an MSI with no portable archive to pin.
+export const PINNED_SBX = {
+  version: '0.39.0',
+  minor: '0.39',
+  asset: 'DockerSandboxes-darwin.tar.gz',
+  // sha256 of the published asset. NOT the digest inside provenance.json —
+  // that attests `sandboxes-v0.39.0.darwin-arm64.tar.gz`, a differently-named
+  // build artifact whose hash never matches what we download. Recompute by
+  // downloading the asset whenever this pin moves.
+  sha256: 'd12fa06aeece298d96dae058101f256537770a00ef46e6584762e0f27b06a5a3'
+}
+
+function runtimeRoot(): string { return join(app.getPath('userData'), 'runtime') }
+function runtimeDir(v: string): string { return join(runtimeRoot(), `sbx-${v}`) }
+// The tarball is a tree (bin/ + libexec/ with the VM kernel and rootfs) and the
+// binary resolves its siblings relative to itself, so it runs where it landed.
+function runtimeBin(v: string): string { return join(runtimeDir(v), 'bin', 'sbx') }
+
+/** Can this machine run a den-managed runtime at all? */
+export function managedRuntimeSupport(): { ok: boolean; reason: string } {
+  if (process.platform !== 'darwin') {
+    return { ok: false, reason: 'The managed runtime is macOS only — Docker ships no portable archive for this platform.' }
+  }
+  if (process.arch !== 'arm64') {
+    return { ok: false, reason: 'The managed runtime is Apple Silicon only — Docker’s macOS build contains no x86_64 payload.' }
+  }
+  return { ok: true, reason: '' }
+}
+
+// Declared, not assigned to a const: getSbxPath() sits ~2500 lines above this
+// and would hit the temporal dead zone if anything ever called it during module
+// evaluation. Hoisting removes the hazard rather than relying on call order.
+function isFile(p: string): boolean {
+  try { return require('fs').statSync(p).isFile() } catch { return false }
+}
+
+/** Versions under the runtime root that actually have a binary. */
+function installedRuntimes(): string[] {
+  try {
+    return (require('fs').readdirSync(runtimeRoot()) as string[])
+      .filter((d) => d.startsWith('sbx-'))
+      .map((d) => d.slice(4))
+      .filter((v) => isFile(runtimeBin(v)))
+      .sort()
+  } catch { return [] }
+}
+
+/** The adopted managed binary, or '' when there isn't a usable one. */
+function managedSbxPath(): string {
+  const v = (store.get('managedVersion') as string | undefined) ?? ''
+  if (v && isFile(runtimeBin(v))) return runtimeBin(v)
+  return ''
+}
+
 let cachedSbxVersion = ''
 // Both menus retry the read while the version is still unknown (a down runtime
 // never fills it), so keep one probe in flight rather than stacking an exec per
@@ -3343,7 +3418,173 @@ function setupIPC(): void {
     }
   })
 
-  // ── Sandbox environments (sbx v0.39, experimental) ─────────────────────────
+    // ── den-managed runtime ────────────────────────────────────────────────────
+  const runSync = (bin: string, args: string[], timeout = 120000): Promise<string> =>
+    new Promise((resolve, reject) => {
+      execFile(bin, args, { timeout, env: guiEnv(), maxBuffer: 8 * 1024 * 1024 }, (err, out, errOut) =>
+        err ? reject(new Error((errOut || out || err.message).toString().trim())) : resolve(out.toString()))
+    })
+
+  // Stream to disk while hashing in the same pass — a second read of 127 MB to
+  // verify would be pure waste, and the hash has to be checked before anything
+  // is extracted, not after.
+  async function downloadVerified(
+    url: string, dest: string, expected: string, onProgress: (got: number, total: number) => void
+  ): Promise<void> {
+    const res = await fetch(url)
+    if (!res.ok || !res.body) throw new Error(`Download failed — HTTP ${res.status}`)
+    const total = Number(res.headers.get('content-length') || 0)
+    const fs = require('fs')
+    const hash = createHash('sha256')
+    const out = fs.createWriteStream(dest)
+    const reader = res.body.getReader()
+    let got = 0
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        hash.update(value)
+        got += value.length
+        if (!out.write(Buffer.from(value))) {
+          await new Promise<void>((r) => out.once('drain', r))
+        }
+        onProgress(got, total)
+      }
+      await new Promise<void>((r, j) => out.end((e: Error | null) => (e ? j(e) : r())))
+    } catch (err) {
+      out.destroy()
+      throw err
+    }
+    const actual = hash.digest('hex')
+    if (actual !== expected) {
+      throw new Error(
+        `Checksum mismatch — refusing to install.\n` +
+        `  expected ${expected}\n  got      ${actual}\n` +
+        `The download was corrupted or the release was changed after den pinned it.`
+      )
+    }
+  }
+
+  ipcMain.handle('minipit:runtime-status', async () => {
+    const support = managedRuntimeSupport()
+    const source = ((store.get('runtimeSource') as string | undefined) ?? 'system') as 'managed' | 'system'
+    const adopted = (store.get('managedVersion') as string | undefined) ?? ''
+    return {
+      source,
+      supported: support.ok,
+      unsupportedReason: support.reason,
+      pinned: PINNED_SBX.version,
+      minor: PINNED_SBX.minor,
+      adopted: adopted && isFile(runtimeBin(adopted)) ? adopted : '',
+      installed: installedRuntimes(),
+      path: getSbxPath()
+    }
+  })
+
+  // Switching source does not restart anything. The sandbox state directory is
+  // global, so which binary serves the daemon only changes when the daemon next
+  // starts — the UI says so rather than letting it look instant.
+  ipcMain.handle('minipit:runtime-source', async (_, source: 'managed' | 'system') => {
+    if (source === 'managed') {
+      const support = managedRuntimeSupport()
+      if (!support.ok) return { ok: false as const, error: support.reason }
+      if (!managedSbxPath()) {
+        return { ok: false as const, error: 'No managed runtime is installed yet.', needsInstall: true }
+      }
+    }
+    store.set('runtimeSource', source)
+    return { ok: true as const, restartNeeded: true }
+  })
+
+  ipcMain.handle('minipit:runtime-install', async (event) => {
+    const support = managedRuntimeSupport()
+    if (!support.ok) return { ok: false as const, error: support.reason }
+
+    const fs = require('fs')
+    const { version, asset, sha256 } = PINNED_SBX
+    const send = (chunk: string) => event.sender.send('minipit:runtime-output', chunk)
+    const dir = runtimeDir(version)
+    const tmp = join(runtimeRoot(), `.${asset}.part`)
+    const url = `https://github.com/docker/sbx-releases/releases/download/v${version}/${asset}`
+
+    try {
+      fs.mkdirSync(runtimeRoot(), { recursive: true })
+
+      // Already there and working? Adopt it rather than re-downloading 127 MB.
+      if (isFile(runtimeBin(version))) {
+        send(`sbx ${version} is already installed — verifying…\n`)
+      } else {
+        send(`Downloading sbx ${version}…\n`)
+        let lastPct = -1
+        await downloadVerified(url, tmp, sha256, (got, total) => {
+          const pct = total ? Math.floor((got / total) * 100) : 0
+          if (pct !== lastPct && pct % 5 === 0) { lastPct = pct; send(`  ${pct}%\n`) }
+        })
+        send(`Checksum verified.\nExtracting…\n`)
+
+        // Extract into a staging dir and move into place, so an interrupted
+        // extraction can never look like a complete install.
+        const staging = `${dir}.incoming`
+        fs.rmSync(staging, { recursive: true, force: true })
+        fs.mkdirSync(staging, { recursive: true })
+        await runSync('/usr/bin/tar', ['-xzf', tmp, '-C', staging], 300000)
+        fs.rmSync(dir, { recursive: true, force: true })
+        fs.renameSync(staging, dir)
+        fs.rmSync(tmp, { force: true })
+      }
+
+      if (!isFile(runtimeBin(version))) {
+        throw new Error(`The archive did not contain bin/sbx — Docker may have changed its layout.`)
+      }
+      fs.chmodSync(runtimeBin(version), 0o755)
+      // Downloaded files are quarantined; without this the first exec is
+      // blocked by Gatekeeper with a dialog den can't answer.
+      try { await runSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', dir], 60000) }
+      catch { /* absent attribute is not an error */ }
+
+      // Prove it runs before adopting it. A binary that can't answer `version`
+      // must never become the one den depends on.
+      send('Verifying the binary runs…\n')
+      const out = await runSync(runtimeBin(version), ['version'], 60000)
+      if (!out.includes(version)) {
+        throw new Error(`Installed sbx reports "${out.trim().split('\n')[0]}", expected ${version}.`)
+      }
+
+      store.set('managedVersion', version)
+      store.set('runtimeSource', 'managed')
+
+      // Retention: one adopted version is enough. 331 MB each is too much to
+      // accumulate silently.
+      for (const old of installedRuntimes()) {
+        if (old !== version) {
+          send(`Removing old runtime ${old}…\n`)
+          fs.rmSync(runtimeDir(old), { recursive: true, force: true })
+        }
+      }
+      send(`sbx ${version} is ready.\n`)
+      return { ok: true as const, version, path: runtimeBin(version), restartNeeded: true }
+    } catch (err) {
+      // Never leave a partial install behind: it would satisfy isFile() checks
+      // on the next launch and be adopted as if it were good.
+      try {
+        require('fs').rmSync(tmp, { force: true })
+        require('fs').rmSync(`${dir}.incoming`, { recursive: true, force: true })
+        if (!isFile(runtimeBin(version))) require('fs').rmSync(dir, { recursive: true, force: true })
+      } catch { /* best effort */ }
+      const msg = (err instanceof Error ? err.message : String(err)).trim()
+      send(`\nFailed: ${msg}\n`)
+      return { ok: false as const, error: msg }
+    }
+  })
+
+  // Back to the user's own sbx. The managed copy is left on disk — switching
+  // back shouldn't cost another 127 MB download.
+  ipcMain.handle('minipit:runtime-revert', async () => {
+    store.set('runtimeSource', 'system')
+    return { ok: true as const, path: getSbxPath(), restartNeeded: true }
+  })
+
+// ── Sandbox environments (sbx v0.39, experimental) ─────────────────────────
   // A `.sbxenv.yaml` commits the whole sandbox definition — agent, workspace,
   // kits, env, secrets, ports, limits — next to the project, so a contributor
   // gets the same environment rather than a README telling them how to build

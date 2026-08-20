@@ -131,8 +131,9 @@ into `/usr/local/bin` risks breaking `../libexec` resolution depending on how sb
 path. Use a wrapper script that execs the real path, not a symlink.
 
 **331 MB extracted** from a 127 MB tarball. Keeping the previous version for revert doubles that, so
-retention is a policy, not an afterthought: keep exactly one previous version and prune anything
-older on successful adoption.
+retention is a policy, not an afterthought. Phase 1 keeps **only the adopted version** and prunes
+every other on successful adoption — there is no patch-update flow yet, so a second copy would be
+331 MB held for a revert path that doesn't exist. Revisit when patch updates land.
 
 **arm64 only.** The darwin tarball contains no x86_64 payload (`nerdbox-kernel-arm64`,
 `nerdbox-rootfs-arm64.erofs`). The managed runtime is therefore Apple Silicon only; an Intel Mac must

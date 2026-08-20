@@ -543,6 +543,22 @@ declare global {
         /** sbx >= 0.39: prune, env files, dynamic secrets, kit signing. */
         hasEnvFiles?: boolean
       }>
+      runtimeStatus(): Promise<{
+        source: 'managed' | 'system'
+        supported: boolean
+        unsupportedReason: string
+        pinned: string
+        minor: string
+        /** Installed and adopted managed version, '' when none. */
+        adopted: string
+        installed: string[]
+        path: string
+      }>
+      runtimeSetSource(source: 'managed' | 'system'): Promise<{
+        ok: boolean; error?: string; needsInstall?: boolean; restartNeeded?: boolean
+      }>
+      runtimeInstall(): Promise<{ ok: boolean; version?: string; path?: string; error?: string; restartNeeded?: boolean }>
+      runtimeRevert(): Promise<{ ok: boolean; path?: string; restartNeeded?: boolean }>
       pruneSandboxes(olderThan?: string): Promise<{
         ok: boolean; output?: string; error?: string; filtered?: boolean
         /** Names that actually disappeared, by list diff — not den's prediction. */

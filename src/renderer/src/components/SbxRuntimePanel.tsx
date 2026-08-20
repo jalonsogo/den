@@ -257,6 +257,10 @@ export function SbxRuntimePanel({
   const [imagePaste, setImagePaste] = useState(false)
   const [settingBusy, setSettingBusy] = useState(false)
   const caps = useSbxCaps()
+  type RtStatus = Awaited<ReturnType<NonNullable<typeof window.minipit>['runtimeStatus']>>
+  const [rt, setRt] = useState<RtStatus | null>(null)
+  const [rtBusy, setRtBusy] = useState(false)
+  const [rtMsg, setRtMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [remoteControl, setRemoteControl] = useState(false)
   const [remoteKnown, setRemoteKnown] = useState(false)
   const [remoteBusy, setRemoteBusy] = useState(false)
@@ -437,6 +441,39 @@ export function SbxRuntimePanel({
     setMirrorSaved(res?.ok ? 'ok' : 'fail')
     setMirrorBusy(false)
     setTimeout(() => setMirrorSaved(null), 2500)
+  }
+
+  const loadRuntime = () => {
+    void window.minipit?.runtimeStatus?.().then(setRt).catch(() => {})
+  }
+  useEffect(loadRuntime, [])
+
+  // Installing adopts the runtime as a side effect, so there's no separate
+  // "switch" step to forget. Output streams on the existing runtime channel.
+  const installManaged = async () => {
+    if (rtBusy) return
+    setRtBusy(true); setRtMsg(null)
+    const r = await window.minipit?.runtimeInstall()
+      .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
+    setRtBusy(false)
+    setRtMsg(r?.ok
+      ? { ok: true, text: `sbx ${r.version} installed and in use. Restart the daemon to apply it.` }
+      : { ok: false, text: r?.error || 'Install failed.' })
+    loadRuntime()
+  }
+
+  const setRuntimeSource = async (source: 'managed' | 'system') => {
+    if (rtBusy || rt?.source === source) return
+    setRtBusy(true); setRtMsg(null)
+    const r = source === 'system'
+      ? await window.minipit?.runtimeRevert().catch(() => null)
+      : await window.minipit?.runtimeSetSource('managed').catch(() => null)
+    setRtBusy(false)
+    if (source === 'managed' && r && 'needsInstall' in r && r.needsInstall) { void installManaged(); return }
+    setRtMsg(r?.ok
+      ? { ok: true, text: 'Runtime source changed. Restart the daemon to apply it.' }
+      : { ok: false, text: (r && 'error' in r && r.error) || 'Could not change the runtime source.' })
+    loadRuntime()
   }
 
   const changeLogLevel = async (level: string) => {
@@ -647,11 +684,75 @@ export function SbxRuntimePanel({
             </div>
           </div>
         )}
+        {/* Which sbx den runs. Managed = a pinned copy den downloaded and owns;
+            system = whatever is installed. The pin is what makes den's UI match
+            the runtime, so it's stated on screen rather than left in the code. */}
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Runtime source</div>
+            <div className="ss-sub">
+              {rt && <>den is built for <strong>sbx {rt.minor}.x</strong>. </>}
+              {rt?.supported === false
+                ? <> {rt.unsupportedReason}</>
+                : <> A managed runtime is downloaded from Docker’s releases and kept inside den —
+                    your own install is left untouched.</>}
+            </div>
+          </div>
+          <div className="seg" role="group">
+            <button
+              className={`seg-opt${rt?.source === 'managed' ? ' on' : ''}`}
+              disabled={rtBusy || rt?.supported === false}
+              title={rt?.supported === false ? rt.unsupportedReason : `Use sbx ${rt?.pinned ?? ''} managed by den`}
+              onClick={() => void setRuntimeSource('managed')}
+            >
+              Managed by den
+            </button>
+            <button
+              className={`seg-opt${rt?.source === 'system' ? ' on' : ''}`}
+              disabled={rtBusy}
+              onClick={() => void setRuntimeSource('system')}
+            >
+              My own install
+            </button>
+          </div>
+        </div>
+
+        {rt?.source === 'managed' && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div>
+              <div className="ss-lbl">Managed runtime</div>
+              <div className="ss-sub">
+                {rt.adopted
+                  ? <>Running <code>sbx {rt.adopted}</code> from den’s own folder.
+                      {rt.adopted !== rt.pinned && <> This build pins {rt.pinned}.</>}</>
+                  : <>Not downloaded yet — about 127 MB, roughly 330 MB once unpacked.</>}
+              </div>
+            </div>
+            <button className="btn btn-default btn-sm" disabled={rtBusy} onClick={() => void installManaged()}>
+              {rtBusy ? 'Working…' : rt.adopted === rt.pinned ? 'Reinstall' : `Install ${rt.pinned}`}
+            </button>
+          </div>
+        )}
+
+        {rtMsg && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div className={`np-banner ${rtMsg.ok ? 'ok' : 'err'}`} style={{ width: '100%' }}>
+              <span className="np-banner-txt" style={{ whiteSpace: 'pre-wrap' }}>{rtMsg.text}</span>
+            </div>
+          </div>
+        )}
+
         <div className="ss-row">
           <div>
             <div className="ss-lbl">sbx binary path</div>
             <div className="ss-sub">
-              {install ? `Installed via ${MANAGER_LABEL[install.manager]}. ` : ''}Click Save to persist.
+              {rt?.source === 'managed'
+                ? <>Only used when the source is <em>My own install</em>. </>
+                : install ? `Installed via ${MANAGER_LABEL[install.manager]}. ` : ''}
+              {install?.updateCmd && rt?.source !== 'managed'
+                ? <>Update with <code>{install.updateCmd}</code>. </>
+                : ''}
+              Click Save to persist.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 7 }}>

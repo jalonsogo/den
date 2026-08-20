@@ -19,7 +19,9 @@ import {
 import type { AppSettings } from '../types'
 
 const DEFAULT_SETTINGS: AppSettings = {
-  sbxPath: '/opt/homebrew/bin/sbx',
+  // Empty rather than a macOS literal: main discovers the real path, and a
+  // brew path shown on Windows is just wrong.
+  sbxPath: '',
   pollFocused: '5s',
   pollBackground: '30s',
   launchAtLogin: true,
