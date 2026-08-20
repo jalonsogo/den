@@ -203,6 +203,48 @@ On the managed path the version is known exactly, so `hasEnvFiles`-style gating 
 holds the `system` path together, and that path is now explicitly best-effort. Removing them is a
 separate change once managed is the common case.
 
+## Deferred to the next version
+
+Decided in discussion, deliberately not in Phase 1. Recorded so the reasoning
+doesn't have to be rebuilt.
+
+**Managed becomes the default source.** Phase 1 ships `system` as the default so
+that taking a den update changes nothing. Next version flips it — the managed
+runtime is the combination den is built and tested against, so it should be what
+you get unless you say otherwise.
+
+One safeguard makes that safe to do: **don't switch a user who already installed
+sbx themselves.** The rule is not "always managed", it's
+
+```
+stored preference?            → honour it
+no preference, sbx on disk?   → system   (they installed it deliberately)
+no preference, nothing there? → managed where supported, else system
+```
+
+Otherwise every existing user gets a surprise 127 MB download on update, to
+replace a runtime that was already working. A fresh Mac with no sbx gets managed,
+which is the case the default is for.
+
+**Platform-aware discovery for the `system` path.** `getSbxPath()` only knows
+macOS locations (`/opt/homebrew/bin/sbx`, `/usr/local/bin/sbx`, `/usr/bin/sbx`).
+Windows needs its own candidates and `sbx.exe`; Linux needs `/usr/local/bin`,
+`/usr/bin`. Until then, Windows relies entirely on inheriting PATH.
+
+**`guiEnv()` corrupts PATH off macOS.** It appends `:/usr/local/bin:/opt/homebrew/bin`
+unconditionally, and Windows separates PATH with `;` — so the suffix glues onto
+the last real entry and invalidates it, for every process den spawns. Pre-existing
+and unrelated to this feature; fix it in its own commit.
+
+**Auto-update for den itself.** `electron-updater` isn't installed and
+`autoUpdater` is unused, yet every release already publishes `latest-mac.yml`,
+`latest.yml` and `.blockmap` files — electron-builder emits them because `publish`
+is configured, and nothing consumes them. Wiring it up would make a den patch a
+few MB in the background instead of a manual 137 MB download, and it composes
+well with the pin: a patch reuses the installed runtime, so only den's own bundle
+moves. Kept out of this release to avoid shipping two untested subsystems under
+one tag.
+
 ## Risks
 
 - **Global state, one daemon.** `~/Library/Application Support/com.docker.sandboxes/…` is shared, so
