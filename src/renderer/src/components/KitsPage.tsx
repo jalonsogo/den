@@ -353,7 +353,13 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       confirmText: 'Sign',
       onSubmit: async (ref) => {
         setMsg({ ok: true, text: `Signing ${ref} — complete the browser login if one opens…` })
-        const res = await window.minipit?.kitSign(ref).catch(() => null)
+        // Keyless signing prints an authorization URL and then waits, so show
+        // the last thing it said rather than a silent "Working…" for minutes.
+        const off = window.minipit?.onKitSignOutput?.((chunk) => {
+          const line = chunk.split('\n').map((l) => l.trim()).filter(Boolean).pop()
+          if (line) setMsg({ ok: true, text: `Signing ${ref} — ${line}` })
+        })
+        const res = await window.minipit?.kitSign(ref).catch(() => null).finally(() => off?.())
         // Throwing keeps the modal open with the message, which is what the
         // caller wants for a signature that didn't take.
         if (!res?.ok) throw new Error(res?.error || `Could not sign ${ref}.`)
@@ -374,7 +380,21 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   }
 
   const runVerify = async (ref: string) => {
-    const res = await window.minipit?.kitVerify(ref).catch(() => null)
+    // Distinguish "couldn't run the check" from "the check failed". The
+    // realistic trigger is the one mainBuildId already warns about — renderer
+    // rebuilt, main not restarted, so the handler doesn't exist and invoke
+    // rejects. Reporting that as a bad signature is a false alarm on exactly
+    // the question signing exists to answer.
+    let res: Awaited<ReturnType<NonNullable<typeof window.minipit>['kitVerify']>> | null = null
+    try { res = (await window.minipit?.kitVerify(ref)) ?? null }
+    catch (e) {
+      throw new Error(
+        `Couldn't check ${ref} — den could not reach the signing command` +
+        `${e instanceof Error && e.message ? `: ${e.message}` : '.'} ` +
+        `This is not a verdict on the signature.`
+      )
+    }
+    if (!res) throw new Error(`Couldn't check ${ref} — no answer from sbx. This is not a verdict on the signature.`)
     // "Unsigned" is not a failure — most kits aren't signed, and colouring that
     // red would train people to ignore the one state that does matter.
     if (res?.state === 'verified') setMsg({ ok: true, text: `${ref} — signature verified.` })

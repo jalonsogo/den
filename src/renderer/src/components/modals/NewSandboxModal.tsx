@@ -45,6 +45,12 @@ const parsePorts = (raw: string): string[] =>
 const parseEnv = (raw: string): string[] =>
   raw.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && l.includes('='))
 
+// Lines that look like an attempt but can't be passed as KEY=value. Surfaced
+// rather than dropped: a sandbox starting without a variable the user believes
+// they set is invisible otherwise, and the command preview omits it too.
+const badEnvLines = (raw: string): string[] =>
+  raw.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.includes('='))
+
 // Mirror sbx's default sandbox name: <agent>-<workdir>. Empty when no folder.
 function deriveName(agent: string, workspace: string): string {
   const folder = workspace.split('/').filter(Boolean).pop() ?? ''
@@ -716,6 +722,11 @@ export function NewSandboxModal() {
                     onChange={(e) => setEnvRaw(e.target.value)}
                     style={{ resize: 'vertical', fontFamily: 'var(--mono)' }}
                   />
+                  {badEnvLines(envRaw).length > 0 && (
+                    <div className="fhint" style={{ color: 'var(--destruct)' }}>
+                      Ignored — no <code>=</code>: {badEnvLines(envRaw).map((l) => `"${l}"`).join(', ')}
+                    </div>
+                  )}
                   <div className="fhint">
                     Passed as <code>-e</code> (sbx v0.39+). <strong>Not for secrets</strong> — a value here
                     goes on the command line, where any process on this Mac can read it. Use{' '}

@@ -35,9 +35,14 @@ export function SandboxesPage() {
     const r = await window.minipit?.pruneSandboxes()
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setPruning(false)
-    setPruneMsg(r?.ok
-      ? { ok: true, text: `Removed ${n} stopped sandbox${n === 1 ? '' : 'es'}.` }
-      : { ok: false, text: r?.error || 'Could not prune.' })
+    if (!r?.ok) { setPruneMsg({ ok: false, text: r?.error || 'Could not prune.' }); return }
+    // The count comes from what actually disappeared, not from den's idea of
+    // "stopped" — that includes states (errored, mid-stop) sbx may decline to
+    // prune, and claiming five when three went is worse than saying nothing.
+    const gone = r.removed?.length ?? 0
+    setPruneMsg(gone === n
+      ? { ok: true, text: `Removed ${gone} stopped sandbox${gone === 1 ? '' : 'es'}.` }
+      : { ok: true, text: `Removed ${gone} of ${n}. sbx kept the rest — they may be mid-stop or errored.` })
   }
 
   const sorted = [...sandboxes].sort((a, b) => {

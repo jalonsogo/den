@@ -484,14 +484,15 @@ async function extractKitArchive(archive: string, name: string): Promise<void> {
 function ptyRun(
   args: string[],
   send: (chunk: string) => void,
-  timeoutMs: number
+  timeoutMs: number,
+  cwd?: string
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolve, reject) => {
     const proc = pty.spawn(getSbxPath(), args, {
       name: 'xterm-256color',
       cols: 100,
       rows: 50,
-      cwd: process.env.HOME ?? '/',
+      cwd: cwd ?? process.env.HOME ?? '/',
       env: { ...guiEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
     })
     let buf = ''
@@ -2511,7 +2512,10 @@ async function sbxHelp(args: string[]): Promise<string> {
     // worth keeping; an empty string just means "couldn't tell".
     text = err instanceof Error ? err.message : ''
   }
-  helpCache.set(key, text)
+  // Only a probe that actually saw usage is cached. A read taken while the
+  // daemon was down would otherwise be remembered for the life of the process,
+  // and every gated feature would stay refused long after sbx came back.
+  if (/(^|\n)\s*(-|usage:|flags:|options:)/i.test(text)) helpCache.set(key, text)
   return text
 }
 
@@ -3105,13 +3109,30 @@ function setupIPC(): void {
             `every stopped sandbox.` }
         }
       }
+      const before = (await listSandboxes()).map((x) => x.name)
       const output = await sbx(args, { timeout: 120000 })
       // Forget per-sandbox state for anything that's now gone. Cheap to do by
       // reconciling against a fresh list rather than parsing prune's output,
       // whose format isn't pinned.
-      const alive = new Set((await listSandboxes()).map((x) => x.name))
-      for (const name of [...uptimeMap.keys()]) if (!alive.has(name)) uptimeMap.delete(name)
-      return { ok: true as const, output: output.trim(), filtered }
+      // Everything delete-sandbox forgets has to be forgotten here too. sbx
+      // derives names deterministically from agent + folder, so a later sandbox
+      // on the same folder takes the same name and would inherit these records:
+      // the Environments page would show it as provisioned and offer to
+      // `env rm` a sandbox that environment never created.
+      const after = await listSandboxes()
+      const alive = new Set(after.map((x) => x.name))
+      const removed = before.filter((n) => !alive.has(n))
+      for (const name of removed) {
+        uptimeMap.delete(name)
+        forgetIsolation(name)
+        forgetEnvSandbox(name)
+        setAutoSyncFlag(name, false)
+        const t = autoSyncTimers.get(name)
+        if (t) { clearTimeout(t); autoSyncTimers.delete(name) }
+      }
+      // Report what sbx actually removed, not what den predicted: den's idea of
+      // "stopped" includes states sbx may decline to prune.
+      return { ok: true as const, output: output.trim(), filtered, removed }
     } catch (err) {
       return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
@@ -3382,6 +3403,16 @@ function setupIPC(): void {
 
   /** Raw text of an environment file, for the renderer's YAML reader. */
   ipcMain.handle('minipit:env-read', async (_, path: string) => {
+    // The renderer supplies this path, so constrain it the way every other
+    // filesystem entry point here is constrained. Without the check this handler
+    // reads any file the user can — `~/.ssh/id_rsa` included — on behalf of
+    // whatever is driving the renderer.
+    // Extension, not exact name: the picker accepts any .yaml/.yml, and a local
+    // override layered over a shared base won't be called `.sbxenv.yaml`. That
+    // still keeps this from being a general "read any file" handler.
+    if (!/\.(ya?ml)$/i.test(path)) {
+      return { ok: false as const, error: 'Only YAML environment files can be read here.' }
+    }
     try {
       return { ok: true as const, text: require('fs').readFileSync(path, 'utf8') as string }
     } catch (err) {
@@ -3418,6 +3449,11 @@ function setupIPC(): void {
     const args = ['env', 'create']
     if (fileFlag) for (const p of paths) args.push(fileFlag, p)
     if (name) args.push('--name', name)
+    // Without a file flag sbx has to find the file by convention, which means
+    // the working directory decides which environment gets provisioned. ptyRun
+    // otherwise runs in $HOME — where a stray `.sbxenv.yaml` would be picked up
+    // instead of the one the user clicked, and then recorded against theirs.
+    const cwd = fileFlag ? undefined : paths[paths.length - 1].replace(/\/[^/]+$/, '')
     try {
       const send = (chunk: string) => event.sender.send('minipit:env-output', chunk)
       send(`$ sbx ${args.join(' ')}\n`)
@@ -3426,7 +3462,7 @@ function setupIPC(): void {
       // provisioning transcript would be guessing at an unpinned format.
       const before = new Set((await listSandboxes()).map((x) => x.name))
       // Provisioning pulls images and runs setup, same budget as create.
-      const { code, output } = await ptyRun(args, send, 300000)
+      const { code, output } = await ptyRun(args, send, 300000, cwd)
       if (code !== 0) {
         return { ok: false as const, error: output.trim() || `sbx env create exited ${code}` }
       }

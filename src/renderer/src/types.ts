@@ -543,7 +543,11 @@ declare global {
         /** sbx >= 0.39: prune, env files, dynamic secrets, kit signing. */
         hasEnvFiles?: boolean
       }>
-      pruneSandboxes(olderThan?: string): Promise<{ ok: boolean; output?: string; error?: string; filtered?: boolean }>
+      pruneSandboxes(olderThan?: string): Promise<{
+        ok: boolean; output?: string; error?: string; filtered?: boolean
+        /** Names that actually disappeared, by list diff — not den's prediction. */
+        removed?: string[]
+      }>
       setSecretDynamic(opts: {
         service: string; scope?: string; source: string
         kind: 'reference' | 'command'; refresh?: string; custom?: boolean

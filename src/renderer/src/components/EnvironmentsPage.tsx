@@ -6,6 +6,7 @@ import {
 import { useStore } from '../store'
 import { EmptyState } from './EmptyState'
 import { parseSbxEnv, envItemCount, hostRefs, type EnvSummary } from '../lib/sbxEnv'
+import { useSbxCaps } from '../lib/useSbx'
 import type { SbxEnvFile } from '../types'
 
 // Sandbox environments (sbx v0.39, experimental).
@@ -27,17 +28,26 @@ interface Row extends SbxEnvFile {
 
 export function EnvironmentsPage() {
   const setActivePage = useStore((s) => s.setActivePage)
+  const caps = useSbxCaps()
   const [rows, setRows] = useState<Row[]>([])
-  const [supported, setSupported] = useState(true)
+  // Tri-state on purpose: `null` is "haven't been told yet". Rendering the
+  // too-old screen for a runtime whose version simply hasn't been read yet
+  // strands a 0.39 user on it, since that screen has nothing to retry with.
+  const [supported, setSupported] = useState<boolean | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [log, setLog] = useState('')
-  // Files layered over the one being run: a shared base plus a local override.
+  // Files layered under the one being run: a shared base plus a local override.
+  // Cleared whenever a different row is expanded — the checkboxes live inside a
+  // row's panel, so carrying them to another row's Create button would layer a
+  // base with nothing on screen saying so.
   const [layered, setLayered] = useState<string[]>([])
   // file path -> the sandbox it provisioned, for anything still alive.
   const [provisioned, setProvisioned] = useState<Record<string, string>>({})
+
+  useEffect(() => { setLayered([]) }, [open])
 
   const readInto = useCallback(async (file: SbxEnvFile): Promise<Row> => {
     const r = await window.minipit?.envRead(file.path)
@@ -48,7 +58,7 @@ export function EnvironmentsPage() {
 
   const load = useCallback(async () => {
     const res = await window.minipit?.envDiscover().catch(() => null)
-    setSupported(res?.supported !== false)
+    setSupported(res ? res.supported : null)
     const found = res?.files ?? []
     setRows(await Promise.all(found.map(readInto)))
     setProvisioned(await window.minipit?.envProvisioned().catch(() => ({})) ?? {})
@@ -56,6 +66,11 @@ export function EnvironmentsPage() {
   }, [readInto])
 
   useEffect(() => { void load() }, [load])
+
+  // The version read needs the daemon and can land after the first paint; when
+  // it says 0.39, re-run discovery so the page moves off the unsupported state
+  // on its own rather than waiting to be navigated away from and back.
+  useEffect(() => { if (caps.hasEnvFiles && supported === false) void load() }, [caps.hasEnvFiles, supported, load])
 
   useEffect(() => {
     const off = window.minipit?.onEnvOutput?.((chunk) => setLog((prev) => (prev + chunk).slice(-4000)))
@@ -105,7 +120,7 @@ export function EnvironmentsPage() {
 
   const zero = loaded && rows.length === 0
 
-  if (!supported) {
+  if (supported === false && caps.known && !caps.hasEnvFiles) {
     return (
       <div className="page">
         <div className="page-hdr"><span className="page-title">Environments</span></div>
@@ -121,6 +136,22 @@ export function EnvironmentsPage() {
                 Open Settings → Runtime
               </button>
             }
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (supported !== true && !caps.hasEnvFiles) {
+    return (
+      <div className="page">
+        <div className="page-hdr"><span className="page-title">Environments</span></div>
+        <div className="page-body page-body-center">
+          <EmptyState
+            icon={<FileCode2 size={34} />}
+            title="Checking your runtime…"
+            sub={<>den is reading the sbx version. If this stays here, the daemon may not be running.</>}
+            actions={<button className="btn btn-default" onClick={() => void load()}>Try again</button>}
           />
         </div>
       </div>

@@ -344,6 +344,14 @@ Template:
     resolves, it just won't re-resolve.
   - **`env create -f`**: needed only to layer several files; a single file can
     fall back to convention.
+  A probe is only cached when its output actually looks like usage. Caching a
+  failure would be worse than not caching: one read taken while the daemon was
+  restarting would refuse every gated feature for the life of the process.
+
+  Where no flag is documented and the command can still run, the *working
+  directory* becomes the input — `env create` without a file flag resolves
+  `.sbxenv.yaml` by convention, so den runs it in the file's own folder rather
+  than the default `$HOME`, where a stray file would be picked up instead.
 - **Status:** unverified — every spelling above is a candidate list, not a
   confirmed flag. When a v0.39 binary is to hand, run each command's `--help`
   and replace the candidate lists with what's really there.

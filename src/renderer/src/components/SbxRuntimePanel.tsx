@@ -261,6 +261,8 @@ export function SbxRuntimePanel({
   const [remoteKnown, setRemoteKnown] = useState(false)
   const [remoteBusy, setRemoteBusy] = useState(false)
   const [mirror, setMirror] = useState('')
+  const [mirrorKnown, setMirrorKnown] = useState(false)
+  const [mirrorTouched, setMirrorTouched] = useState(false)
   const [mirrorBusy, setMirrorBusy] = useState(false)
   const [mirrorSaved, setMirrorSaved] = useState<'ok' | 'fail' | null>(null)
   // den-managed runtime env overrides (proxy / virtiofs cache). Take effect on
@@ -383,7 +385,8 @@ export function SbxRuntimePanel({
       .then((r) => { if (r?.ok) { setRemoteControl(/^(true|1|yes|on)$/i.test(r.value)); setRemoteKnown(true) } })
       .catch(() => {})
     void window.minipit?.sbxSettingGet?.('platform.images.registryMirror')
-      .then((r) => { if (r?.ok) setMirror(r.value) })
+      // Don't clobber something already being typed if the read lands late.
+      .then((r) => { if (r?.ok) { setMirrorKnown(true); setMirror((cur) => (cur ? cur : r.value)) } })
       .catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -410,7 +413,10 @@ export function SbxRuntimePanel({
     setRemoteBusy(true)
     setRemoteControl(next)
     const res = await window.minipit?.sbxSettingSet('claude.remoteControl', String(next)).catch(() => null)
-    if (!res?.ok) setRemoteControl(!next) // revert on failure
+    // A successful write is itself knowledge of the current value, so the
+    // "couldn't read it" caveat should stop contradicting a value den just set.
+    if (res?.ok) setRemoteKnown(true)
+    else setRemoteControl(!next) // revert on failure
     setRemoteBusy(false)
   }
 
@@ -418,6 +424,13 @@ export function SbxRuntimePanel({
   // (v0.39). Empty clears it, which is the documented way back to Hub.
   const saveMirror = async () => {
     if (mirrorBusy) return
+    // Saving an empty box clears the org's mirror. That's a legitimate action,
+    // but only if den could actually read what's there — otherwise "empty"
+    // means "unknown", and Save would silently wipe a configured mirror.
+    if (!mirror.trim() && !mirrorKnown && !window.confirm(
+      'den could not read the current registry mirror from sbx.\n\n' +
+      'Saving an empty value clears any mirror your organisation has configured. Continue?'
+    )) return
     setMirrorBusy(true)
     const res = await window.minipit?.sbxSettingSet('platform.images.registryMirror', mirror.trim())
       .catch(() => null)
@@ -796,6 +809,8 @@ export function SbxRuntimePanel({
             <div className="ss-sub">
               Resolve template and kit images through your organisation’s mirror instead of
               Docker Hub (<code>platform.images.registryMirror</code>). Leave empty for Hub.
+              {!mirrorKnown && !mirrorTouched && <> This sbx didn’t report a current value, so the
+              box may look empty even if a mirror is set.</>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 7 }}>
@@ -803,7 +818,7 @@ export function SbxRuntimePanel({
               className="s-input"
               value={mirror}
               placeholder="mirror.example.com"
-              onChange={(e) => setMirror(e.target.value)}
+              onChange={(e) => { setMirror(e.target.value); setMirrorTouched(true) }}
               style={{ width: 192 }}
             />
             <button className="btn btn-default btn-sm" onClick={saveMirror} disabled={mirrorBusy}>
