@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSbxCaps } from '../../lib/useSbx'
 import { Globe, Box } from 'lucide-react'
 import { useStore } from '../../store'
 import { SECRET_SERVICES, GLOBAL_SCOPE, isGlobalScope, serviceLabel, type SecretService, type StoredSecret } from '../../types'
@@ -31,6 +32,12 @@ export function NewSecretModal() {
   // 1Password: pull the value from a vault reference instead of pasting it.
   const [useOp, setUseOp] = useState(false)
   const [opRef, setOpRef] = useState('')
+  // Dynamic secrets (sbx v0.39): sbx resolves the value itself and can refresh
+  // it, so a rotated credential reaches the sandbox without den re-reading it.
+  // den's own `op read` path captures a value once, and it goes stale silently.
+  const [dynamic, setDynamic] = useState(false)
+  const [dynKind, setDynKind] = useState<'reference' | 'command'>('reference')
+  const [dynRefresh, setDynRefresh] = useState('')
   const [opAvail, setOpAvail] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -108,9 +115,11 @@ export function NewSecretModal() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, stored, editing])
+  const caps = useSbxCaps()
+
 
   const handleSave = async () => {
-    if (useOp ? !opRef.trim() : !apiKey) return
+    if ((useOp || dynamic) ? !opRef.trim() : !apiKey) return
     if (useOp && typeof window.minipit?.setSecretOp !== 'function') {
       setError('1Password support needs an app restart to load. Quit den and relaunch, then try again.')
       return
@@ -126,7 +135,16 @@ export function NewSecretModal() {
     try {
       // Write the new scope first, then remove the old one — a failure never
       // loses the secret.
-      if (useOp) await window.minipit?.setSecretOp(service, opRef.trim(), scope)
+      if (dynamic) {
+        // sbx owns resolution here, so a failure is its message, not a thrown
+        // bridge error — surface it rather than closing on a write that failed.
+        const r = await window.minipit?.setSecretDynamic({
+          service, scope, source: opRef.trim(), kind: dynKind,
+          refresh: dynRefresh.trim() || undefined
+        })
+        if (!r?.ok) { setError(r?.error || 'sbx could not store that dynamic secret.'); setSaving(false); return }
+      }
+      else if (useOp) await window.minipit?.setSecretOp(service, opRef.trim(), scope)
       else await window.minipit?.setSecret(service, apiKey, scope)
       if (moving) await window.minipit?.removeSecret(service, oldScope)
       setModal(null)
@@ -194,7 +212,7 @@ export function NewSecretModal() {
                 aria-label="Load from 1Password"
                 disabled={opAvail === false || saving}
                 title={opAvail === false ? '1Password CLI (op) not found' : 'Load the value from 1Password'}
-                onClick={() => setUseOp((v) => !v)}
+                onClick={() => { setUseOp((v) => !v); if (!useOp) setDynamic(false) }}
               />
             </div>
             {opAvail === false && (
@@ -202,7 +220,68 @@ export function NewSecretModal() {
             )}
           </div>
 
-          {useOp ? (
+          {caps.hasEnvFiles && (
+            <div className="fg">
+              <div className="secret-op-row">
+                <span className="secret-op-label">
+                  <span className="flabel" style={{ marginBottom: 0 }}>Let sbx resolve it</span>
+                </span>
+                <button
+                  type="button"
+                  className={`s-toggle${dynamic ? ' on' : ''}`}
+                  role="switch"
+                  aria-checked={dynamic}
+                  aria-label="Let sbx resolve it"
+                  disabled={saving}
+                  onClick={() => { setDynamic((v) => !v); if (!dynamic) setUseOp(false) }}
+                />
+              </div>
+              <div className="fhint">
+                sbx stores the <em>reference</em>, not the value, and re-resolves it — so a rotated
+                secret reaches sandboxes on its own. Loading from 1Password above captures the value
+                once, and it goes stale when the secret changes.
+              </div>
+            </div>
+          )}
+
+          {dynamic && (
+            <div className="fg">
+              <div className="np-dec-seg" style={{ marginBottom: 10 }}>
+                <button type="button" className={`np-dec-opt${dynKind === 'reference' ? ' on' : ''}`}
+                        onClick={() => setDynKind('reference')}>Reference</button>
+                <button type="button" className={`np-dec-opt${dynKind === 'command' ? ' on' : ''}`}
+                        onClick={() => setDynKind('command')}>Command</button>
+              </div>
+              <label className="flabel">
+                {dynKind === 'reference' ? 'Secret reference' : 'Command'}
+              </label>
+              <input
+                className="finput"
+                placeholder={dynKind === 'reference' ? 'op://Work/Anthropic/credential' : 'my-vault read anthropic'}
+                value={opRef}
+                onChange={(e) => setOpRef(e.target.value)}
+                autoFocus
+                spellCheck={false}
+                autoCapitalize="off"
+              />
+              <label className="flabel" style={{ marginTop: 10 }}>
+                Refresh <span className="flabel-hint">optional</span>
+              </label>
+              <input
+                className="finput"
+                placeholder="1h"
+                value={dynRefresh}
+                onChange={(e) => setDynRefresh(e.target.value)}
+                spellCheck={false}
+              />
+              <div className="fhint">
+                How often sbx re-resolves it. Leave empty to resolve once per use.
+                {dynKind === 'command' && <> The command runs on this Mac, with your environment.</>}
+              </div>
+            </div>
+          )}
+
+          {dynamic ? null : useOp ? (
             <div className="fg">
               <label className="flabel">1Password secret reference</label>
               <input
@@ -247,7 +326,7 @@ export function NewSecretModal() {
 
         <div className="m-ftr">
           <button className="btn btn-ghost" onClick={() => setModal(null)} disabled={saving}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving || (useOp ? !opRef.trim() : !apiKey)}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || ((useOp || dynamic) ? !opRef.trim() : !apiKey)}>
             {saving ? (useOp ? 'Fetching…' : 'Saving…') : 'Save'}
           </button>
         </div>

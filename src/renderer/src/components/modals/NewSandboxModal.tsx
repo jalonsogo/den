@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { useSbxCaps } from '../../lib/useSbx'
 import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
@@ -38,6 +39,11 @@ const slugify = (s: string): string =>
 // grammar, and duplicating that here would only drift).
 const parsePorts = (raw: string): string[] =>
   raw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+
+// Env vars are one per line, not comma-separated: a value can legitimately
+// contain a comma, and splitting on it would quietly truncate.
+const parseEnv = (raw: string): string[] =>
+  raw.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && l.includes('='))
 
 // Mirror sbx's default sandbox name: <agent>-<workdir>. Empty when no folder.
 function deriveName(agent: string, workspace: string): string {
@@ -100,7 +106,9 @@ export function NewSandboxModal() {
   const [memIdx, setMemIdx]           = useState(0)
   // Ports to publish at creation (sbx v0.37+ accepts -p on create). Free text so
   // the full sbx form works; split on commas/whitespace into one -p per mapping.
+  const caps = useSbxCaps()
   const [portsRaw, setPortsRaw]       = useState('')
+  const [envRaw, setEnvRaw]           = useState('')
   // The shared skills store is mounted read-write into new sandboxes by default
   // (sbx v0.37+); this opts the sandbox out via --no-share-skills.
   const [shareSkills, setShareSkills] = useState(true)
@@ -309,6 +317,7 @@ export function NewSandboxModal() {
           kits: selKits,
           staticMcps: selMcps,
           ports: parsePorts(portsRaw),
+          env: parseEnv(envRaw),
           // Only sent when opting out — the store is mounted by default.
           noShareSkills: !shareSkills
         })
@@ -342,6 +351,7 @@ export function NewSandboxModal() {
     ...(memValue !== 'default' ? ['-m', memValue] : []),
     ...(clone ? ['--clone'] : []),
     ...parsePorts(portsRaw).flatMap((p) => ['-p', p]),
+    ...parseEnv(envRaw).flatMap((e) => ['-e', e]),
     ...(shareSkills ? [] : ['--no-share-skills']),
     ...selKits.flatMap((entry) => ['--kit', q(entry)]),
     ...selMcps.flatMap((m) => ['--static-mcp', m]),
@@ -689,6 +699,30 @@ export function NewSandboxModal() {
                     (sbx v0.37+) — add or remove them later from the Network panel.
                   </div>
                 </div>
+
+                {/* Environment variables (sbx v0.39). Hidden on an older runtime,
+                    where -e isn't accepted by create. */}
+                {caps.hasEnvFiles && (
+                <div className="fg">
+                  <label className="flabel">
+                    Environment variables <span className="flabel-hint">one KEY=value per line</span>
+                  </label>
+                  <textarea
+                    className="finput"
+                    value={envRaw}
+                    spellCheck={false}
+                    rows={3}
+                    placeholder={'NODE_ENV=development\nLOG_LEVEL=debug'}
+                    onChange={(e) => setEnvRaw(e.target.value)}
+                    style={{ resize: 'vertical', fontFamily: 'var(--mono)' }}
+                  />
+                  <div className="fhint">
+                    Passed as <code>-e</code> (sbx v0.39+). <strong>Not for secrets</strong> — a value here
+                    goes on the command line, where any process on this Mac can read it. Use{' '}
+                    <strong>Settings → Secrets</strong>, which injects through the proxy instead.
+                  </div>
+                </div>
+                )}
 
                 {/* Shared skills store (sbx v0.37+). Default on, matching sbx. */}
                 <div className="fg">

@@ -601,6 +601,25 @@ function recordKits(sandbox: string, kitDirs: string[]): void {
   store.set('appliedKits', map)
 }
 
+// Which sandbox a `.sbxenv.yaml` provisioned. sbx tracks environments, but not
+// in anything den can query back to a file path, and the association is what
+// makes "remove this environment" possible from the page that started it.
+// Persisted so it survives a relaunch, and cleared whenever the sandbox goes.
+function recordEnvSandbox(path: string, sandbox: string): void {
+  if (!path || !sandbox) return
+  const map = (store.get('envSandboxes') as Record<string, string>) ?? {}
+  map[path] = sandbox
+  store.set('envSandboxes', map)
+}
+function forgetEnvSandbox(sandbox: string): void {
+  const map = (store.get('envSandboxes') as Record<string, string>) ?? {}
+  let touched = false
+  for (const [path, name] of Object.entries(map)) {
+    if (name === sandbox) { delete map[path]; touched = true }
+  }
+  if (touched) store.set('envSandboxes', map)
+}
+
 // Record whether a sandbox isolates its working tree (`--clone`) or mounts the
 // host folder directly. sbx doesn't report this back, so we track it locally to
 // warn when several direct-mount sandboxes share one folder.
@@ -2461,6 +2480,64 @@ function semverLt(a: string, b: string): boolean {
   return a3 < b3
 }
 
+// ── sbx v0.39 capabilities ───────────────────────────────────────────────────
+// v0.39 is purely additive for den: nothing it deprecated is anything den calls
+// (`SANDBOX_VM_ID`, the `ollama/` model prefix), it doesn't parse `kit inspect`,
+// and the credential blocks den writes already carry the `proxyManaged`
+// sentinels `kit validate` started requiring. So the floor stays at 0.38 and the
+// new surface is gated instead — forcing an upgrade buys a 0.38 user nothing.
+export const SBX_ENV_VERSION = '0.39.0'
+
+/** True when the installed runtime is at least `want`. False while unknown. */
+export function sbxAtLeast(want: string): boolean {
+  return !!cachedSbxVersion && !semverLt(cachedSbxVersion, want)
+}
+
+// Flags are the part of a CLI that moves most, and den is written against
+// release notes that name commands without always spelling their flags. Rather
+// than hard-code a guess and fail with "unknown flag", ask the binary: `--help`
+// is cheap, stable in a way flag names aren't, and definitive. Used both to
+// choose between candidate spellings and to hide an affordance the runtime
+// can't actually honour.
+const helpCache = new Map<string, string>()
+async function sbxHelp(args: string[]): Promise<string> {
+  const key = args.join(' ')
+  const hit = helpCache.get(key)
+  if (hit !== undefined) return hit
+  let text = ''
+  try { text = await sbx([...args, '--help'], { timeout: 10000 }) }
+  catch (err) {
+    // A non-zero exit still usually prints usage on stderr, and that's the part
+    // worth keeping; an empty string just means "couldn't tell".
+    text = err instanceof Error ? err.message : ''
+  }
+  helpCache.set(key, text)
+  return text
+}
+
+/** First of `candidates` that `sbx <args> --help` actually documents, else ''. */
+export async function sbxFlag(args: string[], candidates: string[]): Promise<string> {
+  const help = await sbxHelp(args)
+  if (!help) return ''
+  for (const flag of candidates) {
+    // Word-boundary match: `--env` must not be satisfied by `--env-file`.
+    if (new RegExp(`(^|[\\s,])${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s,=]|$)`, 'm').test(help)) {
+      return flag
+    }
+  }
+  return ''
+}
+
+/** True when `sbx <args>` exists at all (an unknown command prints no usage). */
+export async function sbxHasCommand(args: string[]): Promise<boolean> {
+  const help = await sbxHelp(args)
+  if (!help) return false
+  // v0.39 made an unrecognised command a clear error instead of printing help
+  // and exiting 0, so this is only reliable from that release on — which is
+  // exactly where every command it's asked about was introduced.
+  return !/unknown command|unrecognized|did you mean/i.test(help)
+}
+
 let cachedSbxVersion = ''
 // Both menus retry the read while the version is still unknown (a down runtime
 // never fills it), so keep one probe in flight rather than stacking an exec per
@@ -2987,8 +3064,57 @@ function setupIPC(): void {
     await sbx(['rm', '--force', name])
     uptimeMap.delete(name)
     forgetIsolation(name)
+    forgetEnvSandbox(name)
     setAutoSyncFlag(name, false)
     const t = autoSyncTimers.get(name); if (t) { clearTimeout(t); autoSyncTimers.delete(name) }
+  })
+
+  // Bulk-remove stopped sandboxes (`sbx prune`, v0.39). sbx never touches a
+  // running one, so this can't take a sandbox out from under an agent — but it
+  // is still irreversible, so the renderer confirms with a count first.
+  //
+  // The "stopped longer than" filter is asked for rather than assumed: the
+  // release notes say prune can filter on how long each has been stopped
+  // without naming the flag, and guessing wrong costs an "unknown flag" on a
+  // destructive command. When no candidate is documented, den prunes everything
+  // stopped and says so, instead of silently dropping the filter.
+  ipcMain.handle('minipit:prune-sandboxes', async (_, olderThan?: string) => {
+    try {
+      // Probe rather than assume: a destructive command that prompts, run
+      // without a PTY, would hang on the confirmation until the timeout rather
+      // than failing. If no force flag is documented, don't run it at all.
+      const force = await sbxFlag(['prune'], ['--force', '-f', '--yes', '-y'])
+      if (!force) {
+        return { ok: false as const, error:
+          `This sbx build doesn't document a non-interactive flag for \`prune\`, and den can't ` +
+          `answer a confirmation prompt. Run \`sbx prune\` in a terminal instead.` }
+      }
+      const args = ['prune', force]
+      let filtered = false
+      if (olderThan) {
+        const flag = await sbxFlag(['prune'], ['--until', '--stopped-for', '--older-than'])
+        if (flag) { args.push(flag, olderThan); filtered = true }
+        else {
+          const filterFlag = await sbxFlag(['prune'], ['--filter'])
+          if (filterFlag) { args.push(filterFlag, `until=${olderThan}`); filtered = true }
+        }
+        if (!filtered) {
+          return { ok: false as const, error:
+            `This sbx build doesn't document a "stopped longer than" filter for prune, so den ` +
+            `won't guess at one on a destructive command. Prune without the filter to remove ` +
+            `every stopped sandbox.` }
+        }
+      }
+      const output = await sbx(args, { timeout: 120000 })
+      // Forget per-sandbox state for anything that's now gone. Cheap to do by
+      // reconciling against a fresh list rather than parsing prune's output,
+      // whose format isn't pinned.
+      const alive = new Set((await listSandboxes()).map((x) => x.name))
+      for (const name of [...uptimeMap.keys()]) if (!alive.has(name)) uptimeMap.delete(name)
+      return { ok: true as const, output: output.trim(), filtered }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
   })
 
   ipcMain.handle('minipit:create-sandbox', async (_, config: {
@@ -3002,6 +3128,8 @@ function setupIPC(): void {
     staticMcps?: string[]
     ports?: string[]
     noShareSkills?: boolean
+    env?: string[]
+    envFile?: string
   }) => {
     // Ensure the target workspace folder exists — defaults like ~/den/<name>
     // won't have been created yet (no-op for existing project/clone folders).
@@ -3024,6 +3152,17 @@ function setupIPC(): void {
       // Static MCP mode: pre-load these registered servers. Passing none leaves the
       // agent in dynamic mode, discovering servers itself via the gateway.
       for (const m of config.staticMcps ?? []) args.push('--static-mcp', m)
+      // Environment variables (v0.39), following docker run precedence: a later
+      // -e wins over an earlier one, and both win over --env-file. den passes
+      // the file first so the UI's explicit rows override it, which is the
+      // order the modal presents them in.
+      //
+      // Only ever non-secret values reach here: -e puts a value on argv, where
+      // any process that can list this one's command line can read it. The
+      // modal says so and points at Secrets, which injects through the proxy
+      // instead of the process table.
+      if (config.envFile) args.push('--env-file', config.envFile)
+      for (const pair of config.env ?? []) args.push('-e', pair)
       args.push(agent, config.workspace)
       return args
     }
@@ -3175,7 +3314,153 @@ function setupIPC(): void {
       version,
       min: MIN_SBX_VERSION,
       known: !!version,
-      outdated: !!version && semverLt(version, MIN_SBX_VERSION)
+      outdated: !!version && semverLt(version, MIN_SBX_VERSION),
+      // Additive v0.39 surface (prune, env files, dynamic secrets, kit signing,
+      // per-sandbox env vars). Gated rather than required: a 0.38 runtime keeps
+      // working, it just doesn't show what it can't do.
+      hasEnvFiles: sbxAtLeast(SBX_ENV_VERSION)
+    }
+  })
+
+  // ── Sandbox environments (sbx v0.39, experimental) ─────────────────────────
+  // A `.sbxenv.yaml` commits the whole sandbox definition — agent, workspace,
+  // kits, env, secrets, ports, limits — next to the project, so a contributor
+  // gets the same environment rather than a README telling them how to build
+  // one. sbx marks it experimental, so den labels it the same way and keeps it
+  // to the lifecycle: it never writes these files, only reads and runs them.
+  //
+  // den provisions with `env create`, not `env run`. `run` provisions *and*
+  // opens an interactive session, which is the right shape for a terminal and
+  // the wrong one here — den already has terminals, and a sandbox created this
+  // way lands in the normal list where every existing action works on it.
+  const ENV_FILENAMES = ['.sbxenv.yaml', '.sbxenv.yml']
+
+  /** Environment files in a folder (not recursive — these live at project root). */
+  const envFilesIn = (dir: string): string[] => {
+    try {
+      return ENV_FILENAMES
+        .map((n) => join(dir, n))
+        .filter((p) => { try { return require('fs').statSync(p).isFile() } catch { return false } })
+    } catch { return [] }
+  }
+
+  // Look where the user already works: the workspace of every sandbox den knows
+  // about. Cheap (one stat per candidate) and it means the page has content
+  // without anyone hunting for a file.
+  ipcMain.handle('minipit:env-discover', async () => {
+    if (!sbxAtLeast(SBX_ENV_VERSION)) return { supported: false as const, files: [] }
+    const seen = new Set<string>()
+    const files: Array<{ path: string; dir: string; project: string }> = []
+    let roots: string[] = []
+    try {
+      // normalizeSandbox falls back to '~' when sbx reports no workspace; that's
+      // a placeholder, not a path to go stat'ing.
+      roots = (await listSandboxes()).map((x) => x.workspace).filter((w) => !!w && w !== '~')
+    } catch { roots = [] }
+    for (const dir of roots) {
+      if (seen.has(dir)) continue
+      seen.add(dir)
+      for (const path of envFilesIn(dir)) {
+        files.push({ path, dir, project: dir.split('/').filter(Boolean).pop() || dir })
+      }
+    }
+    return { supported: true as const, files }
+  })
+
+  /** file path -> the sandbox it provisioned, for anything still present. */
+  ipcMain.handle('minipit:env-provisioned', async () => {
+    const map = (store.get('envSandboxes') as Record<string, string>) ?? {}
+    let alive: Set<string>
+    try { alive = new Set((await listSandboxes()).map((x) => x.name)) }
+    // Can't confirm: report the record rather than wrongly claiming nothing is
+    // provisioned, which would hide a live sandbox's Remove button.
+    catch { return map }
+    const out: Record<string, string> = {}
+    for (const [path, name] of Object.entries(map)) if (alive.has(name)) out[path] = name
+    return out
+  })
+
+  /** Raw text of an environment file, for the renderer's YAML reader. */
+  ipcMain.handle('minipit:env-read', async (_, path: string) => {
+    try {
+      return { ok: true as const, text: require('fs').readFileSync(path, 'utf8') as string }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Add a file den didn't find on its own — a checkout outside any existing
+  // sandbox's workspace, or a second file layered over a shared base.
+  ipcMain.handle('minipit:env-pick', async () => {
+    const res = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Choose a sandbox environment file',
+      properties: ['openFile'],
+      filters: [{ name: 'Sandbox environment', extensions: ['yaml', 'yml'] }]
+    })
+    if (res.canceled || !res.filePaths[0]) return { ok: false as const, path: '' }
+    return { ok: true as const, path: res.filePaths[0] }
+  })
+
+  // Provision from one or more environment files. Several are meaningful and
+  // ordered: a shared base plus a local override, with the last winning — so
+  // den passes them in the order the UI lists them and never reorders.
+  ipcMain.handle('minipit:env-create', async (event, paths: string[], name?: string) => {
+    if (!sbxAtLeast(SBX_ENV_VERSION)) {
+      return { ok: false as const, error: `Sandbox environments need sbx ${SBX_ENV_VERSION} or newer.` }
+    }
+    if (!paths.length) return { ok: false as const, error: 'No environment file selected.' }
+    const fileFlag = await sbxFlag(['env', 'create'], ['-f', '--file', '--env-file'])
+    if (!fileFlag && paths.length > 1) {
+      return { ok: false as const, error:
+        `This sbx build doesn't document a file flag for \`env create\`, so den can't layer ` +
+        `several environment files. Run it from the project folder with a single file instead.` }
+    }
+    const args = ['env', 'create']
+    if (fileFlag) for (const p of paths) args.push(fileFlag, p)
+    if (name) args.push('--name', name)
+    try {
+      const send = (chunk: string) => event.sender.send('minipit:env-output', chunk)
+      send(`$ sbx ${args.join(' ')}\n`)
+      // Snapshot first so the new sandbox can be identified by difference. sbx
+      // names it from the environment file, and parsing that name out of the
+      // provisioning transcript would be guessing at an unpinned format.
+      const before = new Set((await listSandboxes()).map((x) => x.name))
+      // Provisioning pulls images and runs setup, same budget as create.
+      const { code, output } = await ptyRun(args, send, 300000)
+      if (code !== 0) {
+        return { ok: false as const, error: output.trim() || `sbx env create exited ${code}` }
+      }
+      const created = (await listSandboxes()).map((x) => x.name).find((n) => !before.has(n)) ?? ''
+      // Only the last file is the one the page ran; the earlier ones are the
+      // base it layered over, and shouldn't each claim the sandbox.
+      if (created) recordEnvSandbox(paths[paths.length - 1], created)
+      return { ok: true as const, output: output.trim(), created }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Tear an environment down. Separate from `delete-sandbox` because sbx tracks
+  // it as an environment, and removing it as a plain sandbox can leave the
+  // environment's own bookkeeping behind.
+  ipcMain.handle('minipit:env-rm', async (_, name: string) => {
+    if (!sbxAtLeast(SBX_ENV_VERSION)) {
+      return { ok: false as const, error: `Sandbox environments need sbx ${SBX_ENV_VERSION} or newer.` }
+    }
+    try {
+      const force = await sbxFlag(['env', 'rm'], ['--force', '-f', '--yes', '-y'])
+      if (!force) {
+        return { ok: false as const, error:
+          `This sbx build doesn't document a non-interactive flag for \`env rm\`, and den can't ` +
+          `answer a confirmation prompt. Run \`sbx env rm ${name}\` in a terminal instead.` }
+      }
+      const output = await sbx(['env', 'rm', name, force], { timeout: 120000 })
+      uptimeMap.delete(name)
+      forgetIsolation(name)
+      forgetEnvSandbox(name)
+      return { ok: true as const, output: output.trim() }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
@@ -3721,6 +4006,44 @@ function setupIPC(): void {
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Kit signing (v0.39): cosign-compatible Sigstore signatures, so a kit pulled
+  // from a registry can be checked against who published it. Signing is
+  // keyless-by-default in Sigstore, which means a browser flow on the host — so
+  // it streams like `mcp auth` rather than returning a single result.
+  ipcMain.handle('minipit:kit-sign', async (event, ref: string) => {
+    if (!sbxAtLeast(SBX_ENV_VERSION)) {
+      return { ok: false as const, error: `Kit signing needs sbx ${SBX_ENV_VERSION} or newer.` }
+    }
+    try {
+      const send = (chunk: string) => event.sender.send('minipit:kit-sign-output', chunk)
+      // 5 minutes: a keyless signature waits on an interactive OIDC login.
+      const { code, output } = await ptyRun(['kit', 'sign', ref], send, 300000)
+      return code === 0
+        ? { ok: true as const, output: output.trim() }
+        : { ok: false as const, error: output.trim() || `sbx kit sign exited ${code}` }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Verify a kit's signature. Distinguishes "unsigned" from "signature doesn't
+  // check out": the first is the common case for a kit you wrote yourself and
+  // isn't a problem, the second means the artifact doesn't match its publisher
+  // and is. Collapsing them into one red state would make signing useless.
+  ipcMain.handle('minipit:kit-verify', async (_, ref: string) => {
+    if (!sbxAtLeast(SBX_ENV_VERSION)) {
+      return { ok: false as const, state: 'unsupported' as const, detail: '' }
+    }
+    try {
+      const output = await sbx(['kit', 'verify', ref], { timeout: 60000 })
+      return { ok: true as const, state: 'verified' as const, detail: output.trim() }
+    } catch (err) {
+      const detail = (err instanceof Error ? err.message : String(err)).trim()
+      const unsigned = /no signature|not signed|unsigned|no matching signatures/i.test(detail)
+      return { ok: false as const, state: unsigned ? ('unsigned' as const) : ('invalid' as const), detail }
     }
   })
 
@@ -4344,6 +4667,50 @@ function setupIPC(): void {
     await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
   })
 
+  // Dynamic secrets (v0.39): sbx resolves the value itself, from a reference or
+  // a command, and can refresh it. This supersedes what den had been doing for
+  // 1Password — shelling out to `op read` and storing the result — which
+  // captured a value that then went stale the moment it rotated. Here sbx owns
+  // resolution, so a rotated secret reaches the sandbox without den involved.
+  //
+  // The 1Password path stays for 0.38 runtimes and is still the right answer for
+  // a one-off paste; this is offered alongside it, not instead of it.
+  ipcMain.handle('minipit:set-secret-dynamic', async (_, opts: {
+    service: string
+    scope?: string
+    /** `op://…`-style reference resolved by sbx, or a command whose stdout is the value. */
+    source: string
+    kind: 'reference' | 'command'
+    refresh?: string
+    custom?: boolean
+  }) => {
+    if (!sbxAtLeast(SBX_ENV_VERSION)) {
+      return { ok: false as const, error: `Dynamic secrets need sbx ${SBX_ENV_VERSION} or newer.` }
+    }
+    // `secret set-custom` is the non-catalog form; both take the same options.
+    const verb = opts.custom ? 'set-custom' : 'set'
+    const kindFlag = await sbxFlag(['secret', verb],
+      opts.kind === 'command' ? ['--command', '--exec', '--from-command'] : ['--reference', '--ref', '--from'])
+    if (!kindFlag) {
+      return { ok: false as const, error:
+        `This sbx build doesn't document a ${opts.kind} option for \`secret ${verb}\`. ` +
+        `Store the value directly instead, or update sbx.` }
+    }
+    const args = ['secret', verb, ...secretScopeArgs(opts.scope), opts.service, kindFlag, opts.source]
+    if (opts.refresh) {
+      const refreshFlag = await sbxFlag(['secret', verb], ['--refresh', '--refresh-interval', '--ttl'])
+      // A missing refresh flag is not worth failing the whole write over: the
+      // secret still resolves, it just won't re-resolve on a timer.
+      if (refreshFlag) args.push(refreshFlag, opts.refresh)
+    }
+    try {
+      const output = await sbx(args, { timeout: 60000 })
+      return { ok: true as const, output: output.trim(), refreshing: !!opts.refresh }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   ipcMain.handle('minipit:remove-secret', async (_, service: string, scope?: string) => {
     await sbx(['secret', 'rm', ...secretScopeArgs(scope), service, '-f'])
   })
@@ -4434,6 +4801,33 @@ function setupIPC(): void {
     runtimeNoProxy: (store.get('runtimeNoProxy') as string) ?? '',
     runtimeVirtiofsCache: (store.get('runtimeVirtiofsCache') as boolean) ?? true
   }))
+
+  // Read a runtime setting back. den used to seed its toggles from whatever it
+  // last wrote, which is only right until someone changes the setting from the
+  // terminal — and a security-relevant switch showing the wrong state is worse
+  // than showing none. `settings get` is preferred; `settings ls` is parsed as a
+  // fallback because the subcommand set isn't pinned across versions.
+  ipcMain.handle('minipit:sbx-setting-get', async (_, key: string) => {
+    const clean = (v: string): string => v.trim().replace(/^["']|["']$/g, '')
+    try {
+      const out = await sbx(['settings', 'get', key], { timeout: 15000 })
+      const line = out.trim()
+      if (line) {
+        // `get` may echo `key: value` or just the value.
+        const m = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[:=]\\s*(.*)$`).exec(line)
+        return { ok: true as const, value: clean(m ? m[1] : line) }
+      }
+    } catch { /* fall through to ls */ }
+    try {
+      const out = await sbx(['settings', 'ls'], { timeout: 15000 })
+      for (const line of out.split('\n')) {
+        const m = new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[:=]\\s+(.*)$`).exec(line)
+        if (m) return { ok: true as const, value: clean(m[1]) }
+      }
+    } catch { /* unknown */ }
+    // Unknown is its own answer — the caller must not render it as "off".
+    return { ok: false as const, value: '' }
+  })
 
   // Write a runtime setting via `sbx settings set <key> <value>` (e.g.
   // clipboard.imagePaste). Distinct from den's own app settings above.

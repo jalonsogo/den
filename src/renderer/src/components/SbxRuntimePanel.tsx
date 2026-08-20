@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
+import { useSbxCaps } from '../lib/useSbx'
 import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { AccordionSection } from './AccordionSection'
@@ -255,6 +256,13 @@ export function SbxRuntimePanel({
   // Runtime settings (`sbx settings set`) + reset (`sbx reset`).
   const [imagePaste, setImagePaste] = useState(false)
   const [settingBusy, setSettingBusy] = useState(false)
+  const caps = useSbxCaps()
+  const [remoteControl, setRemoteControl] = useState(false)
+  const [remoteKnown, setRemoteKnown] = useState(false)
+  const [remoteBusy, setRemoteBusy] = useState(false)
+  const [mirror, setMirror] = useState('')
+  const [mirrorBusy, setMirrorBusy] = useState(false)
+  const [mirrorSaved, setMirrorSaved] = useState<'ok' | 'fail' | null>(null)
   // den-managed runtime env overrides (proxy / virtiofs cache). Take effect on
   // the next daemon restart.
   const [runtimeProxy, setRuntimeProxy] = useState('')
@@ -369,6 +377,14 @@ export function SbxRuntimePanel({
       setVirtiofsCache(s?.runtimeVirtiofsCache ?? true)
     }).catch(() => {})
     window.minipit?.daemonLogLevel().then((r) => { if (r?.ok && r.level) setLogLevel(r.level) }).catch(() => {})
+    // Read the two v0.39 settings back from sbx rather than trusting what den
+    // last wrote — they can be changed from the terminal.
+    void window.minipit?.sbxSettingGet?.('claude.remoteControl')
+      .then((r) => { if (r?.ok) { setRemoteControl(/^(true|1|yes|on)$/i.test(r.value)); setRemoteKnown(true) } })
+      .catch(() => {})
+    void window.minipit?.sbxSettingGet?.('platform.images.registryMirror')
+      .then((r) => { if (r?.ok) setMirror(r.value) })
+      .catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -383,6 +399,31 @@ export function SbxRuntimePanel({
     if (res?.ok) window.minipit?.saveSettings({ imagePaste: next }).catch(() => {})
     else setImagePaste(!next) // revert on failure
     setSettingBusy(false)
+  }
+
+  // Claude Code's /remote-control inside a sandbox (v0.39). Off by default in
+  // sbx: it opens a control channel into the sandbox, which is exactly the kind
+  // of thing that should be a deliberate choice rather than a default.
+  const toggleRemoteControl = async () => {
+    if (remoteBusy) return
+    const next = !remoteControl
+    setRemoteBusy(true)
+    setRemoteControl(next)
+    const res = await window.minipit?.sbxSettingSet('claude.remoteControl', String(next)).catch(() => null)
+    if (!res?.ok) setRemoteControl(!next) // revert on failure
+    setRemoteBusy(false)
+  }
+
+  // Redirect Docker Hub-resolving template and kit images to an org mirror
+  // (v0.39). Empty clears it, which is the documented way back to Hub.
+  const saveMirror = async () => {
+    if (mirrorBusy) return
+    setMirrorBusy(true)
+    const res = await window.minipit?.sbxSettingSet('platform.images.registryMirror', mirror.trim())
+      .catch(() => null)
+    setMirrorSaved(res?.ok ? 'ok' : 'fail')
+    setMirrorBusy(false)
+    setTimeout(() => setMirrorSaved(null), 2500)
   }
 
   const changeLogLevel = async (level: string) => {
@@ -730,6 +771,47 @@ export function SbxRuntimePanel({
             disabled={settingBusy}
           />
         </div>
+        {caps.hasEnvFiles && (
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Claude remote control</div>
+            <div className="ss-sub">
+              Lets Claude Code’s <code>/remote-control</code> work inside a sandbox
+              (<code>claude.remoteControl</code>). Off unless you need it.
+              {!remoteKnown && <> This sbx didn’t report its current value — the switch shows
+              what den will set, not what’s in force.</>}
+            </div>
+          </div>
+          <button
+            className={`s-toggle${remoteControl ? ' on' : ''}`}
+            onClick={toggleRemoteControl}
+            disabled={remoteBusy}
+          />
+        </div>
+        )}
+        {caps.hasEnvFiles && (
+        <div className="ss-row">
+          <div>
+            <div className="ss-lbl">Registry mirror</div>
+            <div className="ss-sub">
+              Resolve template and kit images through your organisation’s mirror instead of
+              Docker Hub (<code>platform.images.registryMirror</code>). Leave empty for Hub.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <input
+              className="s-input"
+              value={mirror}
+              placeholder="mirror.example.com"
+              onChange={(e) => setMirror(e.target.value)}
+              style={{ width: 192 }}
+            />
+            <button className="btn btn-default btn-sm" onClick={saveMirror} disabled={mirrorBusy}>
+              {mirrorBusy ? '…' : mirrorSaved === 'ok' ? '✓ Saved' : mirrorSaved === 'fail' ? '✗ Failed' : 'Save'}
+            </button>
+          </div>
+        </div>
+        )}
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Filesystem cache (virtiofs)</div>

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Play, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen, Zap } from 'lucide-react'
+import { useSbxCaps } from '../lib/useSbx'
+import { Plus, Play, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen, Zap, PenLine, ShieldCheck } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
 import { MCP_CATALOG, mcpIcon } from '../lib/mcpCatalog'
@@ -321,6 +322,9 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       setMsg({ ok: false, text: res?.error || 'Push failed — make sure you are logged in (docker login) and the reference is valid.' })
     }
   }
+  const caps = useSbxCaps()
+  const openPrompt = useStore((st) => st.openPrompt)
+
 
   const doValidate = async (k: Kit) => {
     setMoreFor(null)
@@ -328,6 +332,57 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     const res = await window.minipit?.kitValidate(k.dir).catch(() => null)
     if (res?.ok) setMsg({ ok: true, text: `"${k.name}" is valid.` })
     else setMsg({ ok: false, text: res?.error || `"${k.name}" failed validation.` })
+  }
+
+  // Same reference the push dialog prefills: den doesn't record where a kit was
+  // pushed, so the best guess is where it would push it.
+  const defaultRef = (k: Kit): string =>
+    `docker.io/${activeOrg ?? docker.username ?? 'your-namespace'}/${k.name}:latest`
+
+  // Kit signing (sbx v0.39). Both act on an OCI reference, not a local folder:
+  // a signature covers the published artifact, so an unpushed kit has nothing to
+  // sign yet. den asks for the reference the same way Upload to Hub does.
+  // Electron disables window.prompt (it returns null and logs), so this goes
+  // through den's own prompt modal — the same one rename and push-to-hub use.
+  const doSign = (k: Kit) => {
+    setMoreFor(null); setMsg(null)
+    openPrompt({
+      title: 'Sign kit',
+      label: `Reference of the published kit — signing covers what's in the registry, so push "${k.name}" first if you haven't.`,
+      defaultValue: defaultRef(k),
+      confirmText: 'Sign',
+      onSubmit: async (ref) => {
+        setMsg({ ok: true, text: `Signing ${ref} — complete the browser login if one opens…` })
+        const res = await window.minipit?.kitSign(ref).catch(() => null)
+        // Throwing keeps the modal open with the message, which is what the
+        // caller wants for a signature that didn't take.
+        if (!res?.ok) throw new Error(res?.error || `Could not sign ${ref}.`)
+        setMsg({ ok: true, text: `Signed ${ref}.` })
+      }
+    })
+  }
+
+  const doVerify = (k: Kit) => {
+    setMoreFor(null); setMsg(null)
+    openPrompt({
+      title: 'Verify kit signature',
+      label: 'Reference of the kit to verify',
+      defaultValue: defaultRef(k),
+      confirmText: 'Verify',
+      onSubmit: async (ref) => { await runVerify(ref) }
+    })
+  }
+
+  const runVerify = async (ref: string) => {
+    const res = await window.minipit?.kitVerify(ref).catch(() => null)
+    // "Unsigned" is not a failure — most kits aren't signed, and colouring that
+    // red would train people to ignore the one state that does matter.
+    if (res?.state === 'verified') setMsg({ ok: true, text: `${ref} — signature verified.` })
+    else if (res?.state === 'unsigned') setMsg({ ok: true, text: `${ref} carries no signature.` })
+    else if (res?.state === 'unsupported') setMsg({ ok: false, text: 'Kit signing needs sbx 0.39 or newer.' })
+    // A signature that doesn't check out is the one state worth interrupting
+    // for, so it throws and holds the dialog open rather than closing quietly.
+    else throw new Error(res?.detail || `${ref} — signature did NOT verify.`)
   }
 
   const doExport = async (k: Kit) => {
@@ -737,6 +792,14 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                         <button className="kit-more-item" onClick={() => openPush(k)}>
                           <UploadCloud size={14} /> Upload to Hub…
                         </button>
+                        {caps.hasEnvFiles && <>
+                          <button className="kit-more-item" onClick={() => doSign(k)}>
+                            <PenLine size={14} /> Sign kit…
+                          </button>
+                          <button className="kit-more-item" onClick={() => doVerify(k)}>
+                            <ShieldCheck size={14} /> Verify signature…
+                          </button>
+                        </>}
                         <div className="kit-more-sep" />
                         <button className="kit-more-item danger" onClick={() => { setMoreFor(null); remove(k) }}>
                           <Trash2 size={14} /> Delete kit

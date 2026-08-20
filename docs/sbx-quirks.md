@@ -315,6 +315,54 @@ Template:
   (`support_message`, `supportMessage`, `contact`, …) and shows nothing if none
   match. Pin the key against a real governed host.
 
+### v0.39 flag spellings den guesses at, and how it avoids guessing
+- **Version:** sbx v0.39 (written against the release notes, not a binary).
+- **Symptom:** none yet — this is the failure mode being pre-empted. The v0.39
+  notes name new commands (`prune`, `env run/create/exec/rm`, `secret set`
+  dynamic options, `kit sign`/`kit verify`) without spelling most of their
+  flags. Hard-coding a guess produces "unknown flag" at the worst moment: on a
+  destructive command, or halfway through provisioning.
+- **Cause:** flags are the least stable part of this CLI (see every other entry
+  in this file), and den was written for v0.39 before its binary was available
+  here.
+- **Fix:** ask the binary instead of guessing. `sbxFlag(args, candidates)` in
+  `src/main/index.ts` runs `sbx <args> --help` once, caches it, and returns the
+  first candidate the help text actually documents — matched on a word boundary
+  so `--env` isn't satisfied by `--env-file`. Callers then either use the flag
+  they were given or degrade honestly:
+  - **`prune`** and **`env rm`**: if no force flag (`--force`/`-f`/`--yes`/`-y`)
+    is documented, den refuses to run and says to use a terminal. Without a PTY
+    a confirmation prompt would hang until the timeout rather than fail, and
+    guessing wrong on a destructive command is the worst case.
+  - **`prune --until`**: the notes say prune can filter on how long a sandbox
+    has been stopped but don't name the flag. den tries `--until`,
+    `--stopped-for`, `--older-than`, then `--filter until=<v>`; with none
+    documented it declines the *filtered* prune rather than silently pruning
+    everything.
+  - **`secret set --reference|--command`**: candidates tried, and the write is
+    refused if none exist. A missing `--refresh` is not fatal — the secret still
+    resolves, it just won't re-resolve.
+  - **`env create -f`**: needed only to layer several files; a single file can
+    fall back to convention.
+- **Status:** unverified — every spelling above is a candidate list, not a
+  confirmed flag. When a v0.39 binary is to hand, run each command's `--help`
+  and replace the candidate lists with what's really there.
+
+### `settings` has no read path den could rely on
+- **Version:** sbx v0.38–v0.39.
+- **Symptom:** den's runtime toggles showed whatever den last wrote, so a
+  setting changed with `sbx settings set` from a terminal displayed wrongly in
+  den — and a security-relevant switch showing "off" while it is on is worse
+  than showing nothing.
+- **Cause:** den only ever called `settings set`, and seeded its toggles from
+  its own saved copy of the value (`clipboard.imagePaste` still does).
+- **Fix:** `minipit:sbx-setting-get` tries `sbx settings get <key>` (accepting
+  either a bare value or `key: value`), falls back to parsing `sbx settings ls`,
+  and returns `ok: false` when it can't tell. "Unknown" is kept distinct from
+  "off": the Claude remote-control row says the switch shows what den will set
+  rather than what's in force. `src/main/index.ts`.
+- **Status:** worked around; the `get`/`ls` spellings are themselves unverified.
+
 ---
 
 ## Not sbx — but same class of problem

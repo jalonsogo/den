@@ -91,6 +91,7 @@ const api = {
   sbxInstallInfo: ()                    => ipcRenderer.invoke('minipit:sbx-install-info'),
   sbxUpdate:     (action: string)       => ipcRenderer.invoke('minipit:sbx-update', action),
   sbxSettingSet: (key: string, value: string) => ipcRenderer.invoke('minipit:sbx-setting-set', key, value),
+  sbxSettingGet: (key: string) => ipcRenderer.invoke('minipit:sbx-setting-get', key),
   sbxReset:      (preserveSecrets: boolean) => ipcRenderer.invoke('minipit:sbx-reset', preserveSecrets),
   diagnose:      (mode?: 'text' | 'json' | 'github-issue' | 'upload') => ipcRenderer.invoke('minipit:diagnose', mode),
   daemonRestart: ()                     => ipcRenderer.invoke('minipit:daemon-restart'),
@@ -181,6 +182,28 @@ const api = {
   // Is the installed sbx new enough for the CLI dialect den speaks?
   mainBuildId: ()      => ipcRenderer.invoke('minipit:build-id'),
   sbxVersionCheck: ()  => ipcRenderer.invoke('minipit:sbx-version-check'),
+  // sbx v0.39, all additive — den still runs on 0.38, these just aren't offered
+  // there. See MIN_SBX_VERSION in main for why the floor didn't move.
+  pruneSandboxes: (olderThan?: string) => ipcRenderer.invoke('minipit:prune-sandboxes', olderThan),
+  setSecretDynamic: (opts: unknown)    => ipcRenderer.invoke('minipit:set-secret-dynamic', opts),
+  kitSign:   (ref: string)             => ipcRenderer.invoke('minipit:kit-sign', ref),
+  kitVerify: (ref: string)             => ipcRenderer.invoke('minipit:kit-verify', ref),
+  onKitSignOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:kit-sign-output', handler)
+    return () => ipcRenderer.removeListener('minipit:kit-sign-output', handler)
+  },
+  envDiscover: ()                            => ipcRenderer.invoke('minipit:env-discover'),
+  envProvisioned: ()                         => ipcRenderer.invoke('minipit:env-provisioned'),
+  envRead:   (path: string)                  => ipcRenderer.invoke('minipit:env-read', path),
+  envPick:   ()                              => ipcRenderer.invoke('minipit:env-pick'),
+  envCreate: (paths: string[], name?: string) => ipcRenderer.invoke('minipit:env-create', paths, name),
+  envRemove: (name: string)                  => ipcRenderer.invoke('minipit:env-rm', name),
+  onEnvOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('minipit:env-output', handler)
+    return () => ipcRenderer.removeListener('minipit:env-output', handler)
+  },
   // MCP gateway (sbx v0.38): servers registered once on the host, reused by
   // sandboxes. OAuth stays host-side, so den only drives the CLI.
   mcpList:    ()                    => ipcRenderer.invoke('minipit:mcp-list'),

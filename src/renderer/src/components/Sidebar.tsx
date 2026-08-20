@@ -4,8 +4,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
-  ArrowUp, ArrowDown, Plug
-} from 'lucide-react'
+  ArrowUp, ArrowDown, Plug, FileCode2 } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
@@ -653,6 +652,7 @@ export function Sidebar() {
             {navItem('mixins', 'Mixin Kits', <Layers size={16} />)}
             {navItem('kits', 'Sandbox Kits', <Package size={16} />)}
             {navItem('mcp', 'MCP Servers', <Plug size={16} />)}
+            {navItem('environments', 'Environments', <FileCode2 size={16} />)}
           </>
         )}
       </div>

@@ -52,7 +52,7 @@ export interface ParsedKit {
 }
 
 // ── Minimal YAML reader ───────────────────────────────────────────────────
-type Node = string | Node[] | { [k: string]: Node }
+export type Node = string | Node[] | { [k: string]: Node }
 
 interface Line { indent: number; text: string; raw: string; blank: boolean }
 
@@ -211,12 +211,12 @@ function parseMap(lines: Line[], start: number, indent: number): [Node, number] 
   return [map, i]
 }
 
-const asMap = (n: Node | undefined): { [k: string]: Node } =>
+export const asMap = (n: Node | undefined): { [k: string]: Node } =>
   n && typeof n === 'object' && !Array.isArray(n) ? n : {}
-const asList = (n: Node | undefined): Node[] =>
+export const asList = (n: Node | undefined): Node[] =>
   Array.isArray(n) ? n : n && typeof n === 'string' && n !== '' ? [n] : []
-const asStr = (n: Node | undefined): string => (typeof n === 'string' ? n : '')
-const strList = (n: Node | undefined): string[] => asList(n).map(asStr).filter(Boolean)
+export const asStr = (n: Node | undefined): string => (typeof n === 'string' ? n : '')
+export const strList = (n: Node | undefined): string[] => asList(n).map(asStr).filter(Boolean)
 
 // ── Spec → ParsedKit ─────────────────────────────────────────────────────
 function readCommands(n: Node | undefined): KitCommand[] {
@@ -250,6 +250,14 @@ function readCommands(n: Node | undefined): KitCommand[] {
 //   network.serviceDomains + serviceAuth
 //     + credentials.sources
 //     + environment.proxyManaged            ->  credentials[].apiKey{.name,.proxyManaged,.inject[]}
+// The reader itself, for documents that aren't kit specs — `.sbxenv.yaml` is
+// read by the same one so a tab-indented environment file behaves like a
+// tab-indented kit, rather than silently parsing as empty.
+export function parseYaml(text: string): Node {
+  const [tree] = parseBlock(tokenize(text), 0, 0)
+  return tree
+}
+
 export function parseKitSpec(text: string): ParsedKit {
   const [tree] = parseBlock(tokenize(text), 0, 0)
   const root = asMap(tree)

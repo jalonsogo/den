@@ -29,7 +29,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'shell',          label: 'Shell' }
 ]
 export type LogLevel = 'success' | 'info' | 'command' | 'error' | 'prompt'
-export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'mcp' | 'settings' | 'logs'
+export type PageType = 'sandbox' | 'sandboxes' | 'projects' | 'templates' | 'mixins' | 'kits' | 'mcp' | 'environments' | 'settings' | 'logs'
 export type TabType = 'terminal' | 'info'
 export type ModalType = 'new-sandbox' | 'new-secret' | 'new-kit' | 'new-mcp' | null
 
@@ -389,6 +389,14 @@ export interface KitFile {
   dest: string
 }
 
+// A `.sbxenv.yaml` den found (or the user pointed it at). The parsed summary
+// lives in the renderer — see lib/sbxEnv.ts — since only the page needs it.
+export interface SbxEnvFile {
+  path: string
+  dir: string
+  project: string
+}
+
 declare global {
   interface Window {
     minipit: {
@@ -482,6 +490,7 @@ declare global {
       sbxInstallInfo(): Promise<SbxInstallInfo>
       sbxUpdate(action: 'update' | 'redownload'): Promise<{ ok: boolean; code: number }>
       sbxSettingSet(key: string, value: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      sbxSettingGet(key: string): Promise<{ ok: boolean; value: string }>
       sbxReset(preserveSecrets: boolean): Promise<{ ok: boolean; output?: string; error?: string }>
       onRuntimeOutput(cb: (chunk: string) => void): () => void
       onCreateOutput(cb: (chunk: string) => void): () => void
@@ -529,7 +538,28 @@ declare global {
       onApiError(cb: (trace: ApiErrorTrace) => void): () => void
       // known=false while the probe is still running or the daemon is down.
       mainBuildId(): Promise<string>
-      sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
+      sbxVersionCheck(): Promise<{
+        version: string; min: string; known: boolean; outdated: boolean
+        /** sbx >= 0.39: prune, env files, dynamic secrets, kit signing. */
+        hasEnvFiles?: boolean
+      }>
+      pruneSandboxes(olderThan?: string): Promise<{ ok: boolean; output?: string; error?: string; filtered?: boolean }>
+      setSecretDynamic(opts: {
+        service: string; scope?: string; source: string
+        kind: 'reference' | 'command'; refresh?: string; custom?: boolean
+      }): Promise<{ ok: boolean; output?: string; error?: string; refreshing?: boolean }>
+      kitSign(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      kitVerify(ref: string): Promise<{
+        ok: boolean; state: 'verified' | 'unsigned' | 'invalid' | 'unsupported'; detail: string
+      }>
+      onKitSignOutput(cb: (chunk: string) => void): () => void
+      envDiscover(): Promise<{ supported: boolean; files: SbxEnvFile[] }>
+      envProvisioned(): Promise<Record<string, string>>
+      envRead(path: string): Promise<{ ok: boolean; text?: string; error?: string }>
+      envPick(): Promise<{ ok: boolean; path: string }>
+      envCreate(paths: string[], name?: string): Promise<{ ok: boolean; output?: string; error?: string; created?: string }>
+      envRemove(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      onEnvOutput(cb: (chunk: string) => void): () => void
       mcpList(): Promise<{ ok: boolean; servers: McpServerEntry[]; error?: string }>
       mcpAdd(cfg: { name: string; url?: string; command?: string; args?: string; local?: boolean; scopes?: string; clientId?: string; skipAuth?: boolean }): Promise<{ ok: boolean; output?: string; error?: string }>
       mcpRemove(name: string): Promise<{ ok: boolean; output?: string; error?: string }>
