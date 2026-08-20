@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
-import { useSbxCaps } from '../lib/useSbx'
+import { useSbxCaps, V039_FEATURES } from '../lib/useSbx'
 import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { AccordionSection } from './AccordionSection'
@@ -783,6 +783,27 @@ export function SbxRuntimePanel({
           <div className="ss-row" style={{ paddingTop: 0 }}>
             <div className={`np-banner ${rtMsg.ok ? 'ok' : 'err'}`} style={{ width: '100%' }}>
               <span className="np-banner-txt" style={{ whiteSpace: 'pre-wrap' }}>{rtMsg.text}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Say what this runtime can't do. den hides those affordances, which
+            keeps the UI honest but leaves someone who read about a feature
+            hunting for it — so disclose it once, here, instead of putting a nag
+            on five screens. */}
+        {caps.known && !caps.hasEnvFiles && (
+          <div className="ss-row">
+            <div>
+              <div className="ss-lbl">Not available on this runtime</div>
+              <div className="ss-sub">
+                You’re on <code>{caps.version}</code>. These need <strong>sbx 0.39</strong> and are
+                hidden until then — everything else works as normal.
+                <ul className="rt-gated">
+                  {V039_FEATURES.map((f) => (
+                    <li key={f.name}>{f.name} <span className="rt-gated-where">· {f.where}</span></li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </div>
         )}

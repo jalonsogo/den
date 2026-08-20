@@ -23,7 +23,7 @@ den wraps the `sbx` CLI in a native macOS/Windows app:
 - **Files** — browse the sandbox workspace, open/edit files in a dedicated editor window, and see the agent's **changes inline** (live `git status` badges).
 - **Groups** — organize sandboxes into named groups. Drag to reorder within a group or move a sandbox to another group (an insertion line marks a reorder; a highlighted group marks a move — no modifier keys). Start or stop every sandbox in a group at once, or delete the group (optionally with its sandboxes). Give each sandbox its own **color + icon** so you can tell them apart at a glance.
 - **MCP servers** — register a server once and every sandbox can reach it. A Library page lists what's registered, with **Authorize** running the OAuth flow **on the host** (a callback from inside a sandbox is a browser redirect the host can't reach), plus inspect, remove, and attach‑to‑a‑running‑sandbox. At creation, pick which servers to pre‑load: any means **static** mode, none means **dynamic** — the agent discovers servers itself through the gateway's `mcp-find` tool.
-- **Sandbox environments** — commit a `.sbxenv.yaml` next to your project and everyone who clones it gets the same sandbox: agent, workspace, kits, env vars, secrets, ports and limits. den finds them, shows what each declares, layers a local override over a shared base, and flags values that defer to a host variable. *(Experimental in sbx.)*
+- **Sandbox environments** — commit a `.sbxenv.yaml` next to your project and everyone who clones it gets the same sandbox: agent, workspace, kits, env vars, secrets, ports and limits. den finds them, shows what each declares, layers a local override over a shared base, and flags values that defer to a host variable. *(Experimental in sbx; needs sbx 0.39.)*
 - **Network policy** — see exactly which domains a sandbox can reach, add allow rules from the UI, and get a clear warning when an org governance profile is overriding local rules. Blocked requests are listed one row per host, with what the block actually means and a one‑click **Allow**; because a policy change is inert until the sandbox restarts, a **Restart to apply** bar tracks what's pending.
 - **Secrets** — manage `sbx` service credentials (Anthropic, OpenAI, Google, GitHub, …) with OAuth where supported, or source a value straight from **1Password** — paste an `op://Vault/Item/field` reference and den resolves it via the `op` CLI, so the real value never lives in den.
 - **A runtime den can manage** — each den release is built and tested against one sbx version, and can download and run that exact build itself, kept inside den rather than installed system‑wide. Or point it at your own install; you're asked once, on first launch. Since every sbx minor moves den's UI, pinning is what makes the two match.
@@ -69,6 +69,13 @@ Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network
   ```
   Either way you'll be asked once, on first launch, and can change it in
   Settings → Runtime.
+
+> **On your own sbx, some features are hidden.** den's managed runtime is pinned to the
+> version each release is built against, so everything below works. Bring your own and den
+> uses what's there — but anything newer than it is hidden rather than broken. On **sbx 0.38**
+> that means no Environments, prune, dynamic secrets, kit signing, environment variables at
+> creation, or the Claude remote-control and registry-mirror settings. Settings → Runtime
+> lists exactly what's unavailable and why.
 
 ## Releases
 

@@ -3646,6 +3646,12 @@ html, body, #root {
 }
 .rt-badge-pre { background: var(--bg-subtle); color: var(--t2); font-size: 10px; padding: 1px 6px; }
 
+/* The "what this runtime can't do" list. Sits inside an .ss-sub, so it inherits
+   its colour and only needs layout. */
+.rt-gated { margin: 8px 0 0; padding-left: 16px; display: grid; gap: 3px; }
+.rt-gated li { font-size: 12px; }
+.rt-gated-where { color: var(--t3); }
+
 /* First-run runtime choice. Full-window because nothing in den works until it's
    answered — showing the dashboard behind it would just be a broken app the user
    has to diagnose. */

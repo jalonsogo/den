@@ -17,6 +17,21 @@ export interface SbxCaps {
 
 const EMPTY: SbxCaps = { known: false, version: '', hasEnvFiles: false }
 
+// What a runtime older than 0.39 doesn't get, and where it would otherwise be.
+//
+// Kept next to the gate rather than in the panel that renders it: these
+// affordances are hidden when unsupported, and a hidden feature nobody explains
+// is indistinguishable from one den never had. This list is the disclosure, so
+// it has to live beside the flag it describes or the two drift apart.
+export const V039_FEATURES: Array<{ name: string; where: string }> = [
+  { name: 'Sandbox environments', where: 'Library → Environments' },
+  { name: 'Prune stopped sandboxes', where: 'Sandboxes' },
+  { name: 'Dynamic secrets', where: 'Settings → Secrets' },
+  { name: 'Kit signing and verification', where: 'Library → Kits' },
+  { name: 'Environment variables at creation', where: 'New Sandbox' },
+  { name: 'Claude remote control, registry mirror', where: 'Settings → Runtime' }
+]
+
 export function useSbxCaps(): SbxCaps {
   const [caps, setCaps] = useState<SbxCaps>(EMPTY)
   useEffect(() => {
