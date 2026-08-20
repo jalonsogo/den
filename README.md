@@ -23,8 +23,10 @@ den wraps the `sbx` CLI in a native macOS/Windows app:
 - **Files** — browse the sandbox workspace, open/edit files in a dedicated editor window, and see the agent's **changes inline** (live `git status` badges).
 - **Groups** — organize sandboxes into named groups. Drag to reorder within a group or move a sandbox to another group (an insertion line marks a reorder; a highlighted group marks a move — no modifier keys). Start or stop every sandbox in a group at once, or delete the group (optionally with its sandboxes). Give each sandbox its own **color + icon** so you can tell them apart at a glance.
 - **MCP servers** — register a server once and every sandbox can reach it. A Library page lists what's registered, with **Authorize** running the OAuth flow **on the host** (a callback from inside a sandbox is a browser redirect the host can't reach), plus inspect, remove, and attach‑to‑a‑running‑sandbox. At creation, pick which servers to pre‑load: any means **static** mode, none means **dynamic** — the agent discovers servers itself through the gateway's `mcp-find` tool.
+- **Sandbox environments** — commit a `.sbxenv.yaml` next to your project and everyone who clones it gets the same sandbox: agent, workspace, kits, env vars, secrets, ports and limits. den finds them, shows what each declares, layers a local override over a shared base, and flags values that defer to a host variable. *(Experimental in sbx.)*
 - **Network policy** — see exactly which domains a sandbox can reach, add allow rules from the UI, and get a clear warning when an org governance profile is overriding local rules. Blocked requests are listed one row per host, with what the block actually means and a one‑click **Allow**; because a policy change is inert until the sandbox restarts, a **Restart to apply** bar tracks what's pending.
 - **Secrets** — manage `sbx` service credentials (Anthropic, OpenAI, Google, GitHub, …) with OAuth where supported, or source a value straight from **1Password** — paste an `op://Vault/Item/field` reference and den resolves it via the `op` CLI, so the real value never lives in den.
+- **A runtime den can manage** — each den release is built and tested against one sbx version, and can download and run that exact build itself, kept inside den rather than installed system‑wide. Or point it at your own install; you're asked once, on first launch. Since every sbx minor moves den's UI, pinning is what makes the two match.
 - **Templates & Runtime** — list/launch/delete template images; check the `sbx` version, read its release notes, and update in place. Daemon status, **Restart daemon**, SSH setup and shared agent skills live here too, alongside whether you're signed in to the runtime and a one‑click re‑authenticate.
 - **Logs** — live‑tail the `sbx` daemon logs, or read a specific sandbox's kit‑startup log.
 - **Theming** — light / dark / system, custom accent colors that retint the whole UI, and a terminal theme that can follow the app's light/dark mode or be set independently.
@@ -57,19 +59,22 @@ Kits are declarative add‑ons (`sbx` artifacts) that layer tools, MCPs, network
 
 - macOS or Windows
 - [Docker](https://www.docker.com/) running
-- The **`sbx`** CLI, **v0.38 or newer**, installed and signed in:
+- The **`sbx`** CLI — **or not**. den can download and manage its own copy on first
+  run (Apple Silicon), pinned to the version this build was tested against. If you'd
+  rather install it yourself, den will use that instead; it needs **v0.38 or newer**:
   ```bash
-  brew install docker/tap/sbx   # macOS
+  brew install docker/tap/sbx     # macOS
+  winget install -h Docker.sbx    # Windows
   sbx login
-  sbx version                   # must be >= 0.38
   ```
-  den speaks only the v0.38 CLI dialect. On an older runtime it shows a banner linking to
-  Settings → Runtime, where it can update in place.
+  Either way you'll be asked once, on first launch, and can change it in
+  Settings → Runtime.
 
 ## Releases
 
-Latest: **[v0.9.0](https://github.com/jalonsogo/den/releases/latest)** — MCP Servers with
-host‑side OAuth, kit spec v2, and sbx v0.38 as the minimum runtime. Every release is written
+Latest: **[v0.10.0](https://github.com/jalonsogo/den/releases/latest)** — den manages its own
+pinned sbx runtime, plus full sbx v0.39 support (sandbox environments, dynamic secrets, kit
+signing). Every release is written
 up in [`CHANGELOG.md`](CHANGELOG.md); macOS builds are signed and notarized, Windows
 installers are signtool‑signed.
 

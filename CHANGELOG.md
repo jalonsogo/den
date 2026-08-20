@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-20
+
 ### Added
+- **den can run its own copy of sbx.** Each den release is now built and tested against exactly one sbx version, and says so — because every sbx minor is tightly coupled to den's UI (v0.37 brought SSH and shared skills, v0.38 the MCP gateway and kit spec v2, v0.39 sandbox environments). Chasing the runtime couldn't win: den 0.9.0 required sbx 0.38 and 0.39.0 was already the latest release on the day it shipped. den now **declares** its runtime instead of discovering it, downloading the pinned build from Docker's releases and keeping it inside its own data folder. The binary is never bundled — Docker's releases carry a bare copyright notice with no redistribution grant, so downloading it on your behalf (what brew and winget already do) is the only permitted route, and it keeps den's own installer from doubling in size.
+- **A one-time setup screen** the first time den needs a runtime. Two choices side by side: let den manage it — the recommended default, stating the download size and that nothing is installed system-wide — or use an sbx you installed yourself, with the path den already found shown right in the card. It appears only when there's no explicit choice *and* no managed runtime, so "managed by default" never means a silent 127 MB download replacing something that already works. Pointing den at your own binary verifies it answers `sbx version` before storing it, so a wrong pick fails at the moment you make it rather than as errors spread across every feature.
+- **Settings → Runtime separates the two worlds.** A runtime source switch, the pinned version, and which sbx den is actually running. With the managed runtime selected, everything that belongs to a self-managed install — the binary path, Latest release, Update, Redownload — is hidden; *Update* in particular was inviting you to break the very version den is built against.
+- **Unit tests, and a CI gate that blocks on them.** 65 tests over the pure layer (`npm test`), plus a Check workflow running types and tests on every push and PR. Previously CI only built installers on a tag, so a push with type errors stayed green until packaging. The tests target where this repo's bugs have actually been: a filename losing its first character, a kit spec silently dropping its image and then overwriting it on save, "not authorized" classified as authorized.
+
+### Added — sbx v0.39 support
 - **sbx v0.39 support, without moving the floor.** den still requires v0.38 — everything v0.39 added is new surface rather than a changed spelling, so a 0.38 runtime keeps working and simply isn't offered what it can't do. (Its deprecations don't touch den: `SANDBOX_VM_ID` and the `ollama/` model prefix are unused, `kit inspect` isn't parsed, and the credential blocks den writes already carry the `proxyManaged` sentinels `kit validate` started requiring.) Each new affordance is gated on the installed version, which is re-probed every 15s so updating sbx from Settings lights them up without relaunching den.
 - **Sandbox environments** (`.sbxenv.yaml`, experimental) — a new **Environments** page in the Library. den scans the workspace of every sandbox you have, reads each file with the same tab-tolerant YAML reader kit specs use, and shows what it declares: agent, workspace, kits, env vars, secrets, ports, limits, registries. Files can be **layered** — a shared base plus a local override, passed in order so the last wins — and a value that defers to the host (`${VAR}`) is called out, because an unset one lands empty rather than failing. den provisions with `sbx env create`, not `env run`: `run` also opens an interactive session, which den doesn't need — the sandbox appears in the normal list with its own terminal. den never *writes* one of these files; it belongs to the project's repo, and round-tripping it through a form is how comments and ordering get lost.
 - **Prune stopped sandboxes** — `sbx prune` from the Sandboxes header, listing exactly what will go before it does. Running sandboxes are never touched.
@@ -285,7 +293,8 @@ Initial release — the first automated, cross-platform build (macOS + Windows).
 - Theme submenu and den branding.
 - GitHub Actions release pipeline that builds and publishes macOS (`.dmg`/`.zip`) and Windows (NSIS `.exe`) installers on each `v*` tag.
 
-[Unreleased]: https://github.com/jalonsogo/den/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/jalonsogo/den/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/jalonsogo/den/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jalonsogo/den/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/jalonsogo/den/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/jalonsogo/den/compare/v0.7.0...v0.7.1
