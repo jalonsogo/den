@@ -188,6 +188,11 @@ const api = {
   runtimeSetSource: (source: 'managed' | 'system') => ipcRenderer.invoke('minipit:runtime-source', source),
   runtimeInstall: ()                        => ipcRenderer.invoke('minipit:runtime-install'),
   runtimeRevert:  ()                        => ipcRenderer.invoke('minipit:runtime-revert'),
+  onRuntimeProgress: (cb: (p: { phase: string; got: number; total: number }) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, p: { phase: string; got: number; total: number }) => cb(p)
+    ipcRenderer.on('minipit:runtime-progress', handler)
+    return () => ipcRenderer.removeListener('minipit:runtime-progress', handler)
+  },
   // sbx v0.39, all additive — den still runs on 0.38, these just aren't offered
   // there. See MIN_SBX_VERSION in main for why the floor didn't move.
   pruneSandboxes: (olderThan?: string) => ipcRenderer.invoke('minipit:prune-sandboxes', olderThan),

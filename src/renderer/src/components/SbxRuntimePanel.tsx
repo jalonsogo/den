@@ -12,6 +12,7 @@ const CAP = 200_000
 const MANAGER_LABEL: Record<string, string> = {
   brew: 'Homebrew', winget: 'winget', apt: 'apt', manual: 'manual install'
 }
+const mb = (bytes: number): string => (bytes / 1_000_000).toFixed(0)
 
 // Extract the base x.y.z semver from a version string for comparison.
 function baseSemver(v?: string | null): string | null {
@@ -261,6 +262,10 @@ export function SbxRuntimePanel({
   const [rt, setRt] = useState<RtStatus | null>(null)
   const [rtBusy, setRtBusy] = useState(false)
   const [rtMsg, setRtMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [rtProg, setRtProg] = useState<{ phase: string; got: number; total: number } | null>(null)
+  // What the user just asked for, shown while the switch is still in flight —
+  // otherwise the toggle reads "My own install" during the whole download.
+  const [rtPending, setRtPending] = useState<'managed' | 'system' | null>(null)
   const [remoteControl, setRemoteControl] = useState(false)
   const [remoteKnown, setRemoteKnown] = useState(false)
   const [remoteBusy, setRemoteBusy] = useState(false)
@@ -447,15 +452,19 @@ export function SbxRuntimePanel({
     void window.minipit?.runtimeStatus?.().then(setRt).catch(() => {})
   }
   useEffect(loadRuntime, [])
+  useEffect(() => {
+    const off = window.minipit?.onRuntimeProgress?.((p) => setRtProg(p))
+    return () => { off?.() }
+  }, [])
 
   // Installing adopts the runtime as a side effect, so there's no separate
   // "switch" step to forget. Output streams on the existing runtime channel.
   const installManaged = async () => {
     if (rtBusy) return
-    setRtBusy(true); setRtMsg(null)
+    setRtBusy(true); setRtMsg(null); setRtProg(null); setRtPending('managed')
     const r = await window.minipit?.runtimeInstall()
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
-    setRtBusy(false)
+    setRtBusy(false); setRtPending(null); setRtProg(null)
     setRtMsg(r?.ok
       ? { ok: true, text: `sbx ${r.version} installed and in use. Restart the daemon to apply it.` }
       : { ok: false, text: r?.error || 'Install failed.' })
@@ -464,12 +473,13 @@ export function SbxRuntimePanel({
 
   const setRuntimeSource = async (source: 'managed' | 'system') => {
     if (rtBusy || rt?.source === source) return
-    setRtBusy(true); setRtMsg(null)
+    setRtBusy(true); setRtMsg(null); setRtPending(source)
     const r = source === 'system'
       ? await window.minipit?.runtimeRevert().catch(() => null)
       : await window.minipit?.runtimeSetSource('managed').catch(() => null)
     setRtBusy(false)
     if (source === 'managed' && r && 'needsInstall' in r && r.needsInstall) { void installManaged(); return }
+    setRtPending(null)
     setRtMsg(r?.ok
       ? { ok: true, text: 'Runtime source changed. Restart the daemon to apply it.' }
       : { ok: false, text: (r && 'error' in r && r.error) || 'Could not change the runtime source.' })
@@ -642,13 +652,21 @@ export function SbxRuntimePanel({
             <div className="ss-lbl">Installed version</div>
             <div className="ss-sub" style={{ fontFamily: "'SF Mono','Menlo',monospace" }}>
               {versionErr ? <span style={{ color: 'var(--destruct)' }}>{versionErr}</span> : version ?? 'Checking…'}
+              {rt?.source === 'managed' && <span style={{ fontFamily: 'inherit' }}> · managed by den</span>}
             </div>
           </div>
-          {updateAvailable
-            ? <span className="rt-badge rt-badge-update">Update available → {latest}</span>
-            : version && latest
-              ? <span className="rt-badge rt-badge-ok">Up to date</span>
-              : null}
+          {/* With a managed runtime the pin is the truth, not GitHub's latest —
+              offering a package-manager update here would be telling the user to
+              break the version den is built for. */}
+          {rt?.source === 'managed'
+            ? version && rt.adopted && version.includes(rt.pinned)
+              ? <span className="rt-badge rt-badge-ok">Pinned to {rt.pinned}</span>
+              : null
+            : updateAvailable
+              ? <span className="rt-badge rt-badge-update">Update available → {latest}</span>
+              : version && latest
+                ? <span className="rt-badge rt-badge-ok">Up to date</span>
+                : null}
         </div>
         <div className="ss-row">
           <div>
@@ -700,7 +718,7 @@ export function SbxRuntimePanel({
           </div>
           <div className="seg" role="group">
             <button
-              className={`seg-opt${rt?.source === 'managed' ? ' on' : ''}`}
+              className={`seg-opt${(rtPending ?? rt?.source) === 'managed' ? ' on' : ''}`}
               disabled={rtBusy || rt?.supported === false}
               title={rt?.supported === false ? rt.unsupportedReason : `Use sbx ${rt?.pinned ?? ''} managed by den`}
               onClick={() => void setRuntimeSource('managed')}
@@ -708,7 +726,7 @@ export function SbxRuntimePanel({
               Managed by den
             </button>
             <button
-              className={`seg-opt${rt?.source === 'system' ? ' on' : ''}`}
+              className={`seg-opt${(rtPending ?? rt?.source) === 'system' ? ' on' : ''}`}
               disabled={rtBusy}
               onClick={() => void setRuntimeSource('system')}
             >
@@ -717,20 +735,47 @@ export function SbxRuntimePanel({
           </div>
         </div>
 
-        {rt?.source === 'managed' && (
+        {((rtPending ?? rt?.source) === 'managed') && (
           <div className="ss-row" style={{ paddingTop: 0 }}>
             <div>
               <div className="ss-lbl">Managed runtime</div>
               <div className="ss-sub">
-                {rt.adopted
+                {rt?.adopted
                   ? <>Running <code>sbx {rt.adopted}</code> from den’s own folder.
                       {rt.adopted !== rt.pinned && <> This build pins {rt.pinned}.</>}</>
                   : <>Not downloaded yet — about 127 MB, roughly 330 MB once unpacked.</>}
               </div>
             </div>
             <button className="btn btn-default btn-sm" disabled={rtBusy} onClick={() => void installManaged()}>
-              {rtBusy ? 'Working…' : rt.adopted === rt.pinned ? 'Reinstall' : `Install ${rt.pinned}`}
+              {rtBusy ? 'Working…' : rt?.adopted === rt?.pinned ? 'Reinstall' : `Install ${rt?.pinned ?? ''}`}
             </button>
+          </div>
+        )}
+
+        {/* One line and a bar, not a console. The only number worth showing
+            during a 127 MB download is how much of it is left. */}
+        {rtProg && rtProg.phase !== 'done' && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div style={{ width: '100%' }}>
+              <div className="ss-sub" style={{ marginBottom: 6 }}>
+                {rtProg.phase === 'download'
+                  ? rtProg.total
+                    ? `Downloading — ${mb(rtProg.got)} of ${mb(rtProg.total)} MB`
+                    : 'Downloading…'
+                  : rtProg.phase === 'extract' ? 'Verified. Unpacking…'
+                  : rtProg.phase === 'verify'  ? 'Checking the binary runs…'
+                  : rtProg.phase === 'failed'  ? 'Failed.'
+                  : 'Working…'}
+              </div>
+              <div className="rt-progress">
+                <div
+                  className={`rt-progress-fill${rtProg.phase === 'download' && rtProg.total ? '' : ' indet'}`}
+                  style={rtProg.phase === 'download' && rtProg.total
+                    ? { width: `${Math.round((rtProg.got / rtProg.total) * 100)}%` }
+                    : undefined}
+                />
+              </div>
+            </div>
           </div>
         )}
 
@@ -742,6 +787,10 @@ export function SbxRuntimePanel({
           </div>
         )}
 
+        {/* Everything below belongs to a user-managed install: a binary path to
+            point at, and the package manager's own update flow. With the managed
+            runtime selected none of it applies, and showing both was the mess. */}
+        {(rtPending ?? rt?.source) !== 'managed' && <>
         <div className="ss-row">
           <div>
             <div className="ss-lbl">sbx binary path</div>
@@ -818,6 +867,7 @@ export function SbxRuntimePanel({
             </div>
           </div>
         )}
+        </>}
 
         {/* Daemon lifecycle belongs with the runtime it runs, not under
             Diagnostics — restarting it is routine, not an investigation. */}

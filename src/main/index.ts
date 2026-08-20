@@ -3502,7 +3502,11 @@ function setupIPC(): void {
 
     const fs = require('fs')
     const { version, asset, sha256 } = PINNED_SBX
-    const send = (chunk: string) => event.sender.send('minipit:runtime-output', chunk)
+    // Its own channel, deliberately: minipit:runtime-output is the package
+    // manager's log box, and a download belongs in a progress bar, not a
+    // terminal dump of percentages.
+    const prog = (phase: string, got = 0, total = 0) =>
+      event.sender.send('minipit:runtime-progress', { phase, got, total })
     const dir = runtimeDir(version)
     const tmp = join(runtimeRoot(), `.${asset}.part`)
     const url = `https://github.com/docker/sbx-releases/releases/download/v${version}/${asset}`
@@ -3512,15 +3516,17 @@ function setupIPC(): void {
 
       // Already there and working? Adopt it rather than re-downloading 127 MB.
       if (isFile(runtimeBin(version))) {
-        send(`sbx ${version} is already installed — verifying…\n`)
+        prog('verify')
       } else {
-        send(`Downloading sbx ${version}…\n`)
-        let lastPct = -1
+        prog('download')
+        let lastSent = 0
         await downloadVerified(url, tmp, sha256, (got, total) => {
-          const pct = total ? Math.floor((got / total) * 100) : 0
-          if (pct !== lastPct && pct % 5 === 0) { lastPct = pct; send(`  ${pct}%\n`) }
+          // Throttle to ~1 MB so the renderer isn't re-rendered per chunk.
+          if (got - lastSent < 1_000_000 && got !== total) return
+          lastSent = got
+          prog('download', got, total)
         })
-        send(`Checksum verified.\nExtracting…\n`)
+        prog('extract')
 
         // Extract into a staging dir and move into place, so an interrupted
         // extraction can never look like a complete install.
@@ -3544,7 +3550,7 @@ function setupIPC(): void {
 
       // Prove it runs before adopting it. A binary that can't answer `version`
       // must never become the one den depends on.
-      send('Verifying the binary runs…\n')
+      prog('verify')
       const out = await runSync(runtimeBin(version), ['version'], 60000)
       if (!out.includes(version)) {
         throw new Error(`Installed sbx reports "${out.trim().split('\n')[0]}", expected ${version}.`)
@@ -3556,12 +3562,9 @@ function setupIPC(): void {
       // Retention: one adopted version is enough. 331 MB each is too much to
       // accumulate silently.
       for (const old of installedRuntimes()) {
-        if (old !== version) {
-          send(`Removing old runtime ${old}…\n`)
-          fs.rmSync(runtimeDir(old), { recursive: true, force: true })
-        }
+        if (old !== version) fs.rmSync(runtimeDir(old), { recursive: true, force: true })
       }
-      send(`sbx ${version} is ready.\n`)
+      prog('done')
       return { ok: true as const, version, path: runtimeBin(version), restartNeeded: true }
     } catch (err) {
       // Never leave a partial install behind: it would satisfy isFile() checks
@@ -3572,7 +3575,7 @@ function setupIPC(): void {
         if (!isFile(runtimeBin(version))) require('fs').rmSync(dir, { recursive: true, force: true })
       } catch { /* best effort */ }
       const msg = (err instanceof Error ? err.message : String(err)).trim()
-      send(`\nFailed: ${msg}\n`)
+      prog('failed')
       return { ok: false as const, error: msg }
     }
   })

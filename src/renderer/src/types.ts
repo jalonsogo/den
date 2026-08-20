@@ -559,6 +559,7 @@ declare global {
       }>
       runtimeInstall(): Promise<{ ok: boolean; version?: string; path?: string; error?: string; restartNeeded?: boolean }>
       runtimeRevert(): Promise<{ ok: boolean; path?: string; restartNeeded?: boolean }>
+      onRuntimeProgress(cb: (p: { phase: string; got: number; total: number }) => void): () => void
       pruneSandboxes(olderThan?: string): Promise<{
         ok: boolean; output?: string; error?: string; filtered?: boolean
         /** Names that actually disappeared, by list diff — not den's prediction. */
