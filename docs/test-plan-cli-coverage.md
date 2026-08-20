@@ -1,8 +1,15 @@
 # Test Plan — CLI coverage (branch `feat/cli-coverage`)
 
 Manual QA for the five phases that surface the remaining `sbx` commands in the GUI.
-There is no automated test harness in this repo; the app orchestrates a real `sbx`
-runtime, so every case below is a manual check against a working install.
+The app orchestrates a real `sbx` runtime, so every case below is a manual check
+against a working install.
+
+> **There are unit tests now, for the pure layer only** — `npm test` (vitest).
+> They cover the text-in/structure-out functions where this repo's bugs have
+> actually been: the porcelain parser, semver comparison, MCP auth
+> classification, and the kit spec read/write round-trip. Anything that spawns
+> `sbx` is still checked by hand, below — mocking a child process whose output
+> format is not a stable contract would test the mock, not the app.
 
 Each `sbx` call is verifiable independently in a terminal — run the noted command to
 confirm the GUI produced the same effect (`sbx policy ls`, `sbx ports <name>`, etc.).

@@ -8,6 +8,7 @@ import { mcpIcon } from '../lib/mcpCatalog'
 import { bridgeError } from '../lib/utils'
 import { NewMcpModal } from './modals/NewMcpModal'
 import { EmptyState } from './EmptyState'
+import { authState } from '../lib/mcpAuth'
 import type { McpServerEntry } from '../types'
 
 // The MCP gateway (sbx v0.38): servers are registered once on the host and
@@ -43,28 +44,6 @@ function parseInspect(raw: string): InspectRow[] | null {
 // the damage is a fake server offering Authorize and Remove; dropping anything
 // with whitespace in its name means the worst case is showing nothing.
 const isServer = (s: McpServerEntry): boolean => !!s.name && !/\s/.test(s.name)
-
-// Auth wording varies by sbx build, so classify loosely rather than matching
-// exact strings — and treat "no idea" as its own state instead of guessing.
-function authState(s: string): { label: string; tone: 'ok' | 'warn' | 'none' } {
-  const t = (s || '').toLowerCase()
-  if (!t) return { label: '', tone: 'none' }
-  // "required" on its own is a capability — `sbx mcp inspect` prints
-  // `OAuth: required` for a server whether or not you've authorized it.
-  if (/^(required|optional|supported|enabled|disabled)$/.test(t)) return { label: '', tone: 'none' }
-  if (/expired|invalid|fail|revoked/.test(t)) return { label: 'Reauthorize', tone: 'warn' }
-  // Negatives first: "not authorized" and "unauthorized" both contain
-  // "authorized", so the positive test below would otherwise claim success for
-  // a server that has none.
-  if (/not authorized|unauthori[sz]ed|pending|auth(orization)? required|needs|^(no|none|never)$/.test(t)) {
-    return { label: 'Not authorized', tone: 'warn' }
-  }
-  if (/\b(ok|yes)\b|valid|authorized|active|connected/.test(t)) return { label: 'Authorized', tone: 'ok' }
-  // Something we don't recognise — show it verbatim rather than swallowing it.
-  // Silence is what made an authorized server look like it had never been
-  // authorized, so an odd-looking badge is the better failure.
-  return { label: s.length > 24 ? `${s.slice(0, 23)}…` : s, tone: 'none' }
-}
 
 // sbx v0.38 reports authorization nowhere den can read it back: `mcp ls` has no
 // column for it and `mcp inspect` only says whether the server *requires* OAuth

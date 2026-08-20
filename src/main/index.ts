@@ -24,6 +24,7 @@ import {
   traceFile, traceDir, traceCount, type ApiErrorTrace
 } from './apiTrace'
 import Store from 'electron-store'
+import { parsePorcelain, semverLt, type FileChange } from './parse'
 // node-pty 1.x compiles to CJS with `__esModule: true` but no `default` export,
 // so a default import resolves to `undefined` under esbuild's interop (crashing
 // `pty.spawn`). Import the namespace instead.
@@ -2053,10 +2054,7 @@ interface FileEntry {
   size?: string
 }
 
-interface FileChange {
-  path: string
-  status: 'new' | 'modified' | 'deleted' | 'renamed'
-}
+
 
 // What the agent has created/changed, via `git status` run inside the sandbox
 // (works for both direct-mount and clone workspaces).
@@ -2075,22 +2073,7 @@ async function gitStatus(name: string, workspace: string): Promise<{ isRepo: boo
         'status', '--porcelain=v1', '--untracked-files=all'],
       { timeout: 10000, raw: true }
     )
-    const changes: FileChange[] = []
-    for (const rawLine of out.split('\n')) {
-      // Require the exact "XY path" shape rather than slicing blind, so a line
-      // that isn't what we expect is skipped instead of silently mangled.
-      const m = /^(..) (.+)$/.exec(rawLine.replace(/\r$/, ''))
-      if (!m) continue
-      const code = m[1]
-      let path = m[2]
-      if (path.includes(' -> ')) path = path.split(' -> ')[1] // renamed: show new name
-      let status: FileChange['status'] = 'modified'
-      if (code.includes('?') || code.includes('A')) status = 'new'
-      else if (code.includes('D')) status = 'deleted'
-      else if (code.includes('R')) status = 'renamed'
-      changes.push({ path, status })
-    }
-    return { isRepo: true, changes }
+    return { isRepo: true, changes: parsePorcelain(out) }
   } catch {
     // Non-zero exit usually means "not a git repository".
     return { isRepo: false, changes: [] }
@@ -2481,15 +2464,6 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
 // otherwise an old runtime fails as a stream of opaque "unknown flag" errors.
 export const MIN_SBX_VERSION = '0.38.0'
 
-/** True when `a` is an older release than `b`. Non-numeric suffixes ignored. */
-function semverLt(a: string, b: string): boolean {
-  const parts = (s: string) => (s.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1, 4) ?? []).map(Number)
-  const [a1 = 0, a2 = 0, a3 = 0] = parts(a)
-  const [b1 = 0, b2 = 0, b3 = 0] = parts(b)
-  if (a1 !== b1) return a1 < b1
-  if (a2 !== b2) return a2 < b2
-  return a3 < b3
-}
 
 // ── sbx v0.39 capabilities ───────────────────────────────────────────────────
 // v0.39 is purely additive for den: nothing it deprecated is anything den calls
