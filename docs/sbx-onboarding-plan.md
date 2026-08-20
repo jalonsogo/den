@@ -22,6 +22,11 @@ fine. The LICENSE is bare `Copyright © 2026 Docker Inc. All rights reserved.` w
 grant, so den must **never bundle/redistribute** the binary in its own `.dmg`/`.app`. Download-on-behalf
 only.
 
+> **Superseded in part by [`managed-runtime-plan.md`](managed-runtime-plan.md).** That plan pins the
+> sbx version a den release is built against, so the download step below must fetch the **pinned**
+> version rather than "the latest release". Build the managed runtime first; this gate then becomes a
+> thin caller of it. The legal reasoning above is unchanged and is the shared basis for both.
+
 ## Install-method choice (both offered)
 The onboarding install step lets the user pick. den detects whether `brew` exists (new helper) and
 **recommends** the appropriate default:
