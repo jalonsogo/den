@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  den — interactive UI capture (self-contained). Current as of den v0.9.0.
+  den — interactive UI capture (self-contained). Current as of den v0.10.0.
 
   A faithful, dependency-free replica of the den app UI for embedding in other
   pages. Generated from the app's real stylesheet (src/renderer/src/styles/main.css,
@@ -12,6 +12,9 @@
     · Files dock (browsable tree, Changes tab) and Info dock (accordion sections,
       network policy) per sandbox
     · Mixin Kits & Sandbox Kits with the Browse-contrib marketplace
+    · Environments — the v0.39 `.sbxenv.yaml` page: what a project's file declares,
+      values that defer to a host variable, and its welcome screen
+    · Settings → Runtime — the managed-vs-own sbx switch and the pinned version
     · MCP Servers — the v0.38 gateway: registered servers as a table with an
       Auth column, per-row ⋮ menu, Info (inspect) rows, the browser-authorization
       wait, and the welcome screen the page shows with nothing registered
@@ -31,7 +34,7 @@
     · ?color=<theme id> picks one of the full-interface color themes
     · or postMessage({ denTheme: 'dark' }) from the embedding page
 
-  Deep links:  ?page=mcp | kits | mixins | templates | settings | sandboxes
+  Deep links:  ?page=mcp | environments | kits | mixins | templates | settings | sandboxes
                ?mcp=empty            the gateway's welcome screen
   Focused crops (no app chrome):  ?embed=mcp | kit | network
 
@@ -4529,6 +4532,7 @@ const LUCIDE = {
  "lock": "<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/>",
  "network": "<rect x=\"16\" y=\"16\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"2\" y=\"16\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"9\" y=\"2\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3\"/><path d=\"M12 12V8\"/>",
  "git-compare": "<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M13 6h3a2 2 0 0 1 2 2v7\"/><path d=\"M11 18H8a2 2 0 0 1-2-2V9\"/>",
+ "file-code-2": "<path d=\"M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4\"/><path d=\"M14 2v4a2 2 0 0 0 2 2h4\"/><path d=\"m5 12-3 3 3 3\"/><path d=\"m9 18 3-3-3-3\"/>",
  "key-round": "<path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/>",
  "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>"
 };
@@ -4786,7 +4790,10 @@ const state = {
   mcpInspect: null,                      // server whose `sbx mcp inspect` rows are open
   mcpAuthing: null,                      // server whose browser authorization is in flight
   mcpEmpty: false,                       // show the welcome screen instead of the list
-  mcpTab: 'catalog'
+  mcpTab: 'catalog',
+  openEnv: null,                         // expanded .sbxenv.yaml row
+  envEmpty: false,
+  rtSource: 'managed'                    // den-managed sbx vs the user's own
 };
 const $ = (sel, el) => (el || document).querySelector(sel);
 const sb = (id) => SANDBOXES.find((s) => s.id === id);
@@ -4827,6 +4834,7 @@ function toolbarTitle() {
   if (p === 'mixins')    return { title: 'Mixin Kits', sub: 'Add-ons layered onto an agent' };
   if (p === 'kits')      return { title: 'Sandbox Kits', sub: 'Full agents, defined from scratch' };
   if (p === 'mcp')       return { title: 'MCP servers', sub: 'Shared by every sandbox' };
+  if (p === 'environments') return { title: 'Environments', sub: 'Defined by the project' };
   if (p === 'settings')  return { title: 'Settings', sub: 'den preferences' };
   const s = sb(state.activeSandbox);
   if (!s) return { title: 'den', sub: 'No sandbox selected' };
@@ -4909,6 +4917,7 @@ function renderSidebar() {
         <div class="sb-nav-item${navActive('mixins')}" data-nav="mixins">${ic('layers', 16)}<span class="sb-nav-label">Mixin Kits</span></div>
         <div class="sb-nav-item${navActive('kits')}" data-nav="kits">${ic('package', 16)}<span class="sb-nav-label">Sandbox Kits</span></div>
         <div class="sb-nav-item${navActive('mcp')}" data-nav="mcp">${ic('plug', 16)}<span class="sb-nav-label">MCP Servers</span></div>
+        <div class="sb-nav-item${navActive('environments')}" data-nav="environments">${ic('file-code-2', 16)}<span class="sb-nav-label">Environments</span></div>
       </div>
     </div>
     <div class="sb-div"></div>
@@ -5437,6 +5446,90 @@ function renderMcp() {
   </div>`;
 }
 
+/* ── Sandbox environments (sbx v0.39, experimental) ──────────────────────── */
+// A `.sbxenv.yaml` committed next to a project defines the whole sandbox, so a
+// contributor gets the same one. den reads and runs them; it never writes one.
+const ENVS = [
+  { project:'atlas', path:'/Users/isabella/Code/atlas/.sbxenv.yaml', running:'',
+    agent:'claude', workspace:'/Users/isabella/Code/atlas',
+    kits:['playwright','github-cli'], ports:['5173:5173'],
+    secrets:['anthropic','github'], limits:[['memory','8g'],['cpus','4']],
+    env:[['NODE_ENV','development',false],['MAPBOX_TOKEN','${MAPBOX_TOKEN}',true]] },
+  { project:'api-gateway', path:'/Users/isabella/Code/api-gateway/.sbxenv.yaml', running:'claude-api-gateway',
+    agent:'codex', workspace:'/Users/isabella/Code/api-gateway',
+    kits:['github-cli'], ports:['8080:80'], secrets:['openai'],
+    limits:[['memory','4g']], env:[['LOG_LEVEL','debug',false]] }
+];
+function renderEnvironments() {
+  const zero = state.envEmpty;
+  const empty = `<div class="home-empty">
+    <span class="empty-mark">${ic('file-code-2', 34)}</span>
+    <span class="home-empty-eyebrow">${ic('layers', 11)} Sandbox environments</span>
+    <h1 class="home-empty-title">Commit the environment, not the instructions</h1>
+    <p class="home-empty-sub">den looks for a <code>.sbxenv.yaml</code> in the workspace of every sandbox you
+      have. Add one to a project and everyone who clones it gets the same agent, kits, ports and limits.</p>
+    <div class="home-empty-actions">
+      <button class="btn btn-primary" data-act="env-demo">${ic('plus', 15)} Add a file</button>
+    </div>
+    <div class="home-empty-features">
+      <div class="home-empty-feat"><span class="home-empty-feat-ic">${ic('boxes', 14)}</span>
+        <span class="home-empty-feat-title">One file, whole sandbox</span>
+        <span class="home-empty-feat-sub">Agent, workspace, kits, env, secrets, ports and limits</span></div>
+      <div class="home-empty-feat"><span class="home-empty-feat-ic">${ic('layers', 14)}</span>
+        <span class="home-empty-feat-title">Layer a local override</span>
+        <span class="home-empty-feat-sub">A shared base plus your own file — the last one wins</span></div>
+      <div class="home-empty-feat"><span class="home-empty-feat-ic">${ic('git-branch', 14)}</span>
+        <span class="home-empty-feat-title">Lives in the repo</span>
+        <span class="home-empty-feat-sub">Commit it and a contributor is one click from the same setup</span></div>
+    </div>
+  </div>`;
+  const table = `<div class="lib-tbl">
+    <div class="lib-hdr lib-hdr-kit"><span>PROJECT</span><span>DECLARES</span><span></span></div>
+    ${ENVS.map((e) => {
+      const open = state.openEnv === e.path;
+      const declares = [`agent ${e.agent}`, `${e.kits.length} kits`, `${e.env.length} env`,
+        `${e.secrets.length} secrets`, `${e.ports.length} port`].join(' · ');
+      return `<div>
+        <div class="lib-row lib-row-kit lib-row-click${open ? ' open' : ''}" data-env="${e.path}">
+          <div class="lib-primary">${ic('file-code-2', 14)}<span>${e.project}</span></div>
+          <span class="lib-muted">${e.running ? `Running as <strong>${e.running}</strong>` : declares}</span>
+          <div style="display:flex;gap:4px;justify-content:flex-end" data-stop>
+            ${e.running
+              ? `<button class="btn btn-ghost btn-sm">${ic('trash-2', 13)} Remove</button>`
+              : `<button class="btn btn-default btn-sm">${ic('play', 13)} Create sandbox</button>`}
+            <button class="btn btn-ghost btn-sm tpl-icon-btn" data-env="${e.path}">${ic('chevron-down', 15)}</button>
+          </div>
+        </div>
+        ${open ? `<div class="mcp-info" data-stop>
+          <div class="mcp-info-row"><span class="mcp-info-k">File</span><span class="mcp-info-v">${e.path}</span></div>
+          <div class="mcp-info-row"><span class="mcp-info-k">Agent</span><span class="mcp-info-v">${e.agent}</span></div>
+          <div class="mcp-info-row"><span class="mcp-info-k">Workspace</span><span class="mcp-info-v">${e.workspace}</span></div>
+          <div class="mcp-info-row"><span class="mcp-info-k">Kits</span><span class="mcp-info-v">${e.kits.join(', ')}</span></div>
+          <div class="mcp-info-row"><span class="mcp-info-k">Ports</span><span class="mcp-info-v">${e.ports.join(', ')}</span></div>
+          ${e.limits.map(([k, v]) => `<div class="mcp-info-row sub"><span class="mcp-info-k">${k}</span><span class="mcp-info-v">${v}</span></div>`).join('')}
+          <div class="mcp-info-row"><span class="mcp-info-k">Secrets</span><span class="mcp-info-v">${e.secrets.join(', ')}</span></div>
+          ${e.env.map(([k, v, host]) => `<div class="mcp-info-row sub"><span class="mcp-info-k">${k}</span>
+            <span class="mcp-info-v">${esc(v)}${host ? ' <span class="lib-badge" style="margin-left:8px">from host</span>' : ''}</span></div>`).join('')}
+        </div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>`;
+  return `<div class="page">
+    <div class="page-hdr"><span class="page-title">Environments</span><span class="lib-badge" style="margin-left:8px">Experimental</span></div>
+    <div class="page-subbar">
+      <span class="mcp-subbar-note">A <code>.sbxenv.yaml</code> in your project defines the whole sandbox, so everyone gets the same one.</span>
+      <div class="page-subbar-actions">
+        <button class="btn btn-ghost btn-sm">${ic('refresh-cw', 14)} Rescan</button>
+        ${zero ? '' : `<button class="btn btn-primary btn-sm" data-act="env-demo">${ic('plus', 14)} Add a file</button>`}
+      </div>
+    </div>
+    <div class="page-body${zero ? ' page-body-center' : ''}">${zero ? empty : table}</div>
+    ${zero ? '' : `<div class="mcp-foot">${ic('square-terminal', 13)}<span>den provisions with
+      <code>sbx env create</code> and leaves the session to you — the sandbox appears in
+      <strong>Sandboxes</strong> with its own terminal.</span></div>`}
+  </div>`;
+}
+
 /* ── Templates + Settings ───────────────────────────────────────────────── */
 function renderTemplates() {
   return `<div class="page">
@@ -5490,6 +5583,48 @@ function renderSettings() {
           <div><div class="ss-lbl">Theme</div><div class="ss-sub">A soft, full-interface color palette. Each color is its own coordinated theme.</div></div>
           <div style="width:240px">${fldSelect('color-theme', ct.label, themeIcoHtml(ct))}</div>
         </div>
+      </div>
+
+      <div class="ss">
+        <div class="ss-hdr">Runtime</div>
+        <div class="ss-row">
+          <div>
+            <div class="ss-lbl">Installed version</div>
+            <div class="ss-sub" style="font-family:'SF Mono','Menlo',monospace">v0.39.0${state.rtSource === 'managed' ? '<span style="font-family:inherit"> · managed by den</span>' : ''}</div>
+          </div>
+          ${state.rtSource === 'managed'
+            ? '<span class="rt-badge rt-badge-ok">Pinned to 0.39.0</span>'
+            : '<span class="rt-badge rt-badge-ok">Up to date</span>'}
+        </div>
+        <div class="ss-row">
+          <div>
+            <div class="ss-lbl">Runtime source</div>
+            <div class="ss-sub">den is built for <strong>sbx 0.39.x</strong>. A managed runtime is downloaded from
+              Docker's releases and kept inside den — your own install is left untouched.</div>
+          </div>
+          <div class="seg" role="group">
+            <button class="seg-opt${state.rtSource === 'managed' ? ' on' : ''}" data-rt-source="managed">Managed by den</button>
+            <button class="seg-opt${state.rtSource === 'system' ? ' on' : ''}" data-rt-source="system">My own install</button>
+          </div>
+        </div>
+        ${state.rtSource === 'managed'
+          ? `<div class="ss-row" style="padding-top:0">
+              <div>
+                <div class="ss-lbl">Managed runtime</div>
+                <div class="ss-sub">Running <code>sbx 0.39.0</code> from den's own folder.</div>
+              </div>
+              <button class="btn btn-default btn-sm">Reinstall</button>
+            </div>`
+          : `<div class="ss-row" style="padding-top:0">
+              <div>
+                <div class="ss-lbl">sbx binary path</div>
+                <div class="ss-sub">Installed via Homebrew. Update with <code>brew upgrade --cask docker/tap/sbx</code>.</div>
+              </div>
+              <div style="display:flex;gap:7px">
+                <input class="s-input" value="/opt/homebrew/bin/sbx" style="width:192px" />
+                <button class="btn btn-default btn-sm">Verify</button>
+              </div>
+            </div>`}
       </div>
     </div>
   </div>`;
@@ -5846,6 +5981,7 @@ function render() {
     state.page === 'mixins'    ? renderKits('mixin') :
     state.page === 'kits'      ? renderKits('sandbox') :
     state.page === 'mcp'       ? renderMcp() :
+    state.page === 'environments' ? renderEnvironments() :
     state.page === 'templates' ? renderTemplates() :
     renderSettings();
   if (window.__denRerender) { $('#app').innerHTML = renderMcp(); return; }
@@ -6187,6 +6323,13 @@ document.addEventListener('click', (e) => {
     }, 2600);
     return;
   }
+  if ((el = hit('[data-env]'))) {
+    const p = el.dataset.env;
+    state.openEnv = state.openEnv === p ? null : p;
+    render(); return;
+  }
+  if ((el = hit('[data-rt-source]'))) { state.rtSource = el.dataset.rtSource; render(); return; }
+  if ((el = hit('[data-act="env-demo"]'))) { state.envEmpty = !state.envEmpty; render(); return; }
   if ((el = hit('[data-act="mcp-demo"]'))) {
     // No Add-an-MCP modal in the capture: flip between the populated list and
     // the welcome screen so both states are reachable from the page itself.
