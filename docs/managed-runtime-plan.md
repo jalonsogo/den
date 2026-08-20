@@ -99,6 +99,45 @@ because they installed a den update. Managed is offered, not imposed.
 digest → extract → `chmod +x` → clear quarantine → run `sbx version` → *only then* switch the
 pointer.
 
+## Verified against the real v0.39.0 artifact
+
+Measured, not assumed. Redo this whenever the pin moves.
+
+**The pin digest must come from the published asset, not from provenance.** They are different files:
+
+| | sha256 |
+|---|---|
+| `DockerSandboxes-darwin.tar.gz` — 132,953,770 B, what den downloads | `d12fa06aeece298d96dae058101f256537770a00ef46e6584762e0f27b06a5a3` |
+| `sandboxes-v0.39.0.darwin-arm64.tar.gz` — the provenance subject | `f390df6fcd93b36d03bf05d6bf280ee67b382297c4e819f5572c31bb8607f3db` |
+
+The provenance attests a per-arch build artifact that is renamed on release, so its digest never
+matches the asset. Two consequences: the digest has to be computed by downloading the asset once per
+pin bump, and `slsa-verifier` could not have verified the download anyway — the attestation is about
+another file. That settles the provenance question for good.
+
+**`bin/sbx` is not a standalone binary.** The tarball is a tree that has to stay intact:
+
+```
+bin/sbx  bin/llmman
+libexec/   nerdbox-kernel-arm64 · nerdbox-rootfs-arm64.erofs
+           containerd-shim-nerdbox-v1 · mkfs.ext4 · mkfs.erofs
+           llama/*.dylib · lib/libsailor.dylib
+completions/{bash,zsh,fish}   LICENSE   THIRD-PARTY-NOTICES
+```
+
+den must extract the whole tree and run `<root>/bin/sbx` in place — the VM kernel, rootfs and shim
+are resolved relative to the binary. **This also constrains the Phase 2 PATH shim:** a plain symlink
+into `/usr/local/bin` risks breaking `../libexec` resolution depending on how sbx resolves its own
+path. Use a wrapper script that execs the real path, not a symlink.
+
+**331 MB extracted** from a 127 MB tarball. Keeping the previous version for revert doubles that, so
+retention is a policy, not an afterthought: keep exactly one previous version and prune anything
+older on successful adoption.
+
+**arm64 only.** The darwin tarball contains no x86_64 payload (`nerdbox-kernel-arm64`,
+`nerdbox-rootfs-arm64.erofs`). The managed runtime is therefore Apple Silicon only; an Intel Mac must
+stay on `system`, and the UI should say so rather than offering an install that cannot work.
+
 ## Implementation
 
 ### 1. Main process — `src/main/index.ts`
