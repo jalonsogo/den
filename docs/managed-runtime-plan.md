@@ -62,6 +62,29 @@ and its SHA-256. If a patch appears in the same minor, den offers it and says "d
 `<pinned>`" — the default is always the tested combination. Silently drifting the runtime under a UI
 built for a specific one would contradict the whole point. Crossing a minor requires a den release.
 
+**The coupling runs one way only, and the pin lives in den's minor.** A new sbx minor forces a den
+release; a den release does not require a new sbx. den ships bug fixes, integrations and UI work as
+often as it likes against the same pin — those never touch the runtime.
+
+> **Rule:** the sbx pin may change only in a den **minor** (or major). Never in a patch.
+
+| den | pinned sbx | carries |
+|---|---|---|
+| `0.10.0` | 0.39.x | adopts sbx 0.39 · features |
+| `0.10.1` | 0.39.x | bugs, integrations, UI |
+| `0.11.0` | 0.40.x | adopts sbx 0.40 |
+
+This turns the coupling into a guarantee rather than a constraint: `den 0.10.x` always means
+`sbx 0.39.x`, so a user can take den patches without their runtime moving underneath them. It also
+keeps patch updates cheap — same pin, same digest, the installed runtime is reused, so only a minor
+bump triggers a 126 MB download. A den feature that *needs* a newer sbx was never uncoupled by
+definition, and raises the pin, i.e. a minor.
+
+**Consequence — release branches.** Once `main` starts adopting the next sbx minor, a patch for users
+on the current one can no longer be cut from `main` without dragging the runtime change with it. Cut
+it from the release tag instead and merge forward. Decide this before the first minor adoption, not
+during a hotfix.
+
 **Digest baked into the build, not provenance verification.** Docker publishes `provenance.json` and
 `sbom.json` per release, but verifying them needs cosign or slsa-verifier — dependencies den would
 have to ship. A pinned SHA-256 answers the only question that matters here: *is this the exact
