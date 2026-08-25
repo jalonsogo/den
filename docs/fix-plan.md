@@ -24,7 +24,7 @@
 
 **Severity:** High · **Area:** Security · **Files:** `src/main/index.ts`
 
-**Context.** Several kit handlers operate on renderer-supplied host paths with no containment check. `ipcMain.handle('minipit:remove-kit', (_, dir) => fs.rmSync(dir, { recursive: true, force: true }))` (~line 1716) will delete *any* directory the user owns. The name sanitizer used by `kit-import`/`import-contrib-kit` — `replace(/[^A-Za-z0-9._-]/g, '-')` — **allows `..`**, so `name = '..'` makes `dest = join(kitsRoot(), '..')` (the userData dir), and the error path (~line 2034) then `rmSync`s the escaped destination. `create-kit` (~1624), `update-kit` (~1683), `kit-import` (~1926), `import-contrib-kit` (~2006) all share this shape (arbitrary write/delete).
+**Context.** Several kit handlers operate on renderer-supplied host paths with no containment check. `ipcMain.handle('den:remove-kit', (_, dir) => fs.rmSync(dir, { recursive: true, force: true }))` (~line 1716) will delete *any* directory the user owns. The name sanitizer used by `kit-import`/`import-contrib-kit` — `replace(/[^A-Za-z0-9._-]/g, '-')` — **allows `..`**, so `name = '..'` makes `dest = join(kitsRoot(), '..')` (the userData dir), and the error path (~line 2034) then `rmSync`s the escaped destination. `create-kit` (~1624), `update-kit` (~1683), `kit-import` (~1926), `import-contrib-kit` (~2006) all share this shape (arbitrary write/delete).
 
 **Task.**
 - Add a helper, e.g. `assertInsideKitsRoot(p: string): string` that computes `const resolved = path.resolve(p)` and throws unless `resolved === kitsRoot() || resolved.startsWith(kitsRoot() + path.sep)`. Return `resolved`.
@@ -63,11 +63,11 @@
 
 **Severity:** High · **Area:** Security · **Files:** `src/preload/index.ts:225`
 
-**Context.** `contextBridge.exposeInMainWorld('electron', electronAPI)` (from `@electron-toolkit/preload`) exposes unrestricted `ipcRenderer.invoke/send/on` to the renderer, nullifying the value of the curated `minipit` API — any injected script can call any channel directly, including the SEC-1/SEC-2 handlers. This is the amplifier that turns those from "needs a specific channel" into "call anything."
+**Context.** `contextBridge.exposeInMainWorld('electron', electronAPI)` (from `@electron-toolkit/preload`) exposes unrestricted `ipcRenderer.invoke/send/on` to the renderer, nullifying the value of the curated `den` API — any injected script can call any channel directly, including the SEC-1/SEC-2 handlers. This is the amplifier that turns those from "needs a specific channel" into "call anything."
 
 **Task.**
 - Grep the renderer for `window.electron` usage. If nothing uses `window.electron.ipcRenderer`, remove the `exposeInMainWorld('electron', electronAPI)` line entirely.
-- If something does use it, replace those call sites with dedicated `minipit`-bridge methods and then remove the raw exposure.
+- If something does use it, replace those call sites with dedicated `den`-bridge methods and then remove the raw exposure.
 
 **Acceptance criteria.**
 - `window.electron` is no longer defined in the renderer (or is defined without a raw `ipcRenderer`).
@@ -241,7 +241,7 @@
 
 **Severity:** Medium · **Area:** Dead code + latent bug · **Files:** `src/renderer/src/store.ts:595-600` (`appendLog`), `App.tsx:46-50`, `store.ts:475-476` (logsById merge in `setSandboxes`), `types.ts:56-60,124,383`, `preload/index.ts:142`
 
-**Context.** `minipit:log-line` is listened for in preload but never emitted by main (grep every `webContents.send` in `main/index.ts`). So `appendLog`, `Sandbox.logs`, `LogLine`, and the merge in `setSandboxes` are all vestigial and no component reads `.logs`. Worse, the handler force-sets `status: 'running'`, which deletes a sandbox's `stopHolds` entry (store.ts ~572) — if this channel is ever wired up, a trailing buffered log line after "Stop" defeats the 15s stop-grace window.
+**Context.** `den:log-line` is listened for in preload but never emitted by main (grep every `webContents.send` in `main/index.ts`). So `appendLog`, `Sandbox.logs`, `LogLine`, and the merge in `setSandboxes` are all vestigial and no component reads `.logs`. Worse, the handler force-sets `status: 'running'`, which deletes a sandbox's `stopHolds` entry (store.ts ~572) — if this channel is ever wired up, a trailing buffered log line after "Stop" defeats the 15s stop-grace window.
 
 **Task.** Remove the listener, `appendLog`, the `logsById` merge, the `LogLine` type, and `Sandbox.logs` — the whole dead chain.
 
@@ -437,7 +437,7 @@
 **Files:** `src/main/index.ts:411-426`. On persistent `sbx ls` failure the UI renders `lastGoodSandboxes` indefinitely and `updatePowerBlocker` is never re-evaluated. **Task:** after N consecutive failures, surface an error state and re-evaluate the power blocker.
 
 ## LOW-3 — Unvalidated localStorage theme casts diverge between entry points
-**Files:** `store.ts:8,195,7` vs `main.tsx:8-13`. A corrupted `minipit:themePref` is passed through by `resolveTheme` and stamped into `data-theme`; the two startup paths handle bad input differently. **Task:** validate against the known union with a safe fallback in one shared function used by both paths.
+**Files:** `store.ts:8,195,7` vs `main.tsx:8-13`. A corrupted `den:themePref` is passed through by `resolveTheme` and stamped into `data-theme`; the two startup paths handle bad input differently. **Task:** validate against the known union with a safe fallback in one shared function used by both paths.
 
 ## LOW-4 — Duplicated density constants / theme resolution across entry points
 **Files:** `main.tsx:15-21` (re-hardcodes `1.1`/`1.2`/clamp `0.5–2` with a "keep in sync with store.ts" comment), `store.ts:13-18` (already exports the constants), `FileEditorWindow.tsx:110-115` (third copy of theme-pref resolution). **Task:** import the exported constants and a shared `resolveThemePref()` in all three entry points.
@@ -449,7 +449,7 @@
 **Files:** `lib/iconSet.ts:3,8` (`icons as LUCIDE`, ~1500 icons, `as unknown as Record<...>` cast). **Task:** lazy-load the full set for the browse-all picker; keep a small static set for common icons.
 
 ## LOW-7 — Type over-promising / unsafe casts
-**Files:** `App.tsx:27,40,79`; `types.ts:119-121,278,281`. `Sandbox` declares `branch`/`memory`/`additionalWorkspaces` main never sends; `window.minipit` typed non-optional but always called with `?.`/`!`; `createSandbox(config: unknown)`; redundant `as Sandbox[]` casts; `onOpenModal` payload cast omits `'new-kit'` from `ModalType`; `App.tsx:27` initial `listSandboxes()` has no `.catch`. **Task:** align the `Sandbox` type with what main actually sends, type `createSandbox`'s config, fix `ModalType`, make `window.minipit` optional (or guarantee it), add the missing `.catch`.
+**Files:** `App.tsx:27,40,79`; `types.ts:119-121,278,281`. `Sandbox` declares `branch`/`memory`/`additionalWorkspaces` main never sends; `window.den` typed non-optional but always called with `?.`/`!`; `createSandbox(config: unknown)`; redundant `as Sandbox[]` casts; `onOpenModal` payload cast omits `'new-kit'` from `ModalType`; `App.tsx:27` initial `listSandboxes()` has no `.catch`. **Task:** align the `Sandbox` type with what main actually sends, type `createSandbox`'s config, fix `ModalType`, make `window.den` optional (or guarantee it), add the missing `.catch`.
 
 ## LOW-8 — Mixed IPC error conventions + copy-pasted error idiom
 **Files:** `src/main/index.ts` (all handlers). Half return `{ ok:false, error }`, half throw; `(err instanceof Error ? err.message : String(err)).trim()` is copy-pasted ~25×. **Task:** pick one convention and a shared `errMsg()`/`wrapHandler()` (dovetails with STRUCT-2).
@@ -494,7 +494,7 @@
 ## INFRA-3 — Add tests (see order below)
 **Severity:** High-leverage · **Context.** Zero tests today. Use **Vitest** (works with the existing Vite/electron-vite setup).
 1. **Unit tests for `src/renderer/src/lib/`** — pure functions (`kitSpec.ts`, `filePreview.ts`, `featureChanges.ts`, `names.ts`, `themes.ts`): cheapest, most stable, catch logic regressions instantly.
-2. **Store tests (`store.ts`)** — mock the `window.minipit` bridge; test state transitions and the race machinery (`stopHolds`, `deletingIds`, `creatingHold`) — this is where stability bugs live. Regression-guard BUG-1 here.
+2. **Store tests (`store.ts`)** — mock the `window.den` bridge; test state transitions and the race machinery (`stopHolds`, `deletingIds`, `creatingHold`) — this is where stability bugs live. Regression-guard BUG-1 here.
 3. **Extracted main-process logic** — after STRUCT-2, unit-test `resolveBin`, docker/sbx arg construction, and path-containment (SEC-1) directly.
 4. **One Playwright Electron smoke test** — `_electron.launch`, wait for window, click one core flow. Catches "app doesn't start." Keep E2E minimal (slower/flakier).
 

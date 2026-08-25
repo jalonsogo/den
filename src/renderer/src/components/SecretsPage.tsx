@@ -29,7 +29,7 @@ export function SecretsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await window.minipit?.listSecrets()
+      const result = await window.den?.listSecrets()
       setSecrets(result ?? [])
     } catch {
       setSecrets([])
@@ -74,7 +74,7 @@ export function SecretsPage() {
     if (importing) return
     setImporting(true)
     setImportMsg(null)
-    const r = await window.minipit?.secretImport().catch((e) => ({ ok: false, error: String(e) }))
+    const r = await window.den?.secretImport().catch((e) => ({ ok: false, error: String(e) }))
     setImporting(false)
     const out = r && 'output' in r ? r.output : undefined
     setImportMsg(r?.ok ? (out?.trim() || 'Imported credentials from environment.') : `Import failed: ${(r && 'error' in r && r.error) || 'unknown error'}`)
@@ -84,7 +84,7 @@ export function SecretsPage() {
   const handleRemove = async (service: string, scope: string) => {
     const where = isGlobalScope(scope) ? 'global' : `sandbox "${scope}"`
     if (!confirm(`Remove the stored ${service} secret (${where})?`)) return
-    await window.minipit?.removeSecret(service, scope).catch(() => {})
+    await window.den?.removeSecret(service, scope).catch(() => {})
     load()
   }
 

@@ -63,10 +63,10 @@ These shipped but were only typecheck/build-verified. Confirm in the running app
 
 ## Deferred (intentionally not doing yet)
 
-- [ ] **Rename `minipit` → `den`** across IPC channels + the `window.minipit` bridge.
+- [ ] **Rename `den` → `den`** across IPC channels + the `window.den` bridge.
       Mechanically safe (all channel names are static literals; durable electron-store
-      keys are *not* `minipit`-prefixed), **but** ~22 `localStorage` keys use the
-      `minipit:` prefix — renaming them resets user prefs (theme, accent, sort, sidebar
+      keys are *not* `den`-prefixed), **but** ~22 `localStorage` keys use the
+      `den:` prefix — renaming them resets user prefs (theme, accent, sort, sidebar
       width, sandbox order/colors/icons/groups) unless a one-time migration copies old
       keys to new. Plan when we do it: rename IPC + global to `den`, add a localStorage
       migration shim, keep durable keys as-is. Owner requested we hold off for now.

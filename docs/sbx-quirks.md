@@ -140,7 +140,7 @@ Template:
   `"$1"`, `$PWD`, `$HOME`, `/` inside the sandbox and roots the Files tree at the
   first that exists. When it can't reach the container it now returns nothing and
   the caller retries, rather than falling back to the unverified host path and
-  guaranteeing a failed listing. `src/main/index.ts` → `minipit:workspace-root`,
+  guaranteeing a failed listing. `src/main/index.ts` → `den:workspace-root`,
   `src/renderer/src/components/FilesPanel.tsx`.
 - **Status:** worked around. **Open:** whether `sbx inspect <name> --json`
   reports the container-side mount target — den passes that payload straight to
@@ -201,7 +201,7 @@ Template:
      that makes the two disagree (a folder renamed by hand, a kit edited
      outside den, a spec shape the reader doesn't recognise) then still works
      instead of dead-ending on an error carrying its own fix.
-  `src/main/index.ts` → `listKits()`, `minipit:create-sandbox`;
+  `src/main/index.ts` → `listKits()`, `den:create-sandbox`;
   `NewSandboxModal.tsx` → `kitKinds`.
 - **Status:** fixed. Worth remembering as a pattern: sbx errors of the form
   "X does not match Y (use Y)" are machine-readable, and acting on them beats
@@ -283,7 +283,7 @@ Template:
      `authState()` in the renderer does the same, so neither layer can guess.
   2. Record what *is* observable. `sbx mcp auth <name>` ends with
      `MCP server "x" authorized` and exits 0, so den notes the server and the
-     time in `localStorage` (`minipit:mcp-authorized:v1`) and shows Authorized
+     time in `localStorage` (`den:mcp-authorized:v1`) and shows Authorized
      from that when sbx says nothing. Anything sbx *does* report outranks the
      note, so a later revocation isn't masked; removing a server clears it.
      The badge tooltip says the state came from den and when.
@@ -364,7 +364,7 @@ Template:
   than showing nothing.
 - **Cause:** den only ever called `settings set`, and seeded its toggles from
   its own saved copy of the value (`clipboard.imagePaste` still does).
-- **Fix:** `minipit:sbx-setting-get` tries `sbx settings get <key>` (accepting
+- **Fix:** `den:sbx-setting-get` tries `sbx settings get <key>` (accepting
   either a bare value or `key: value`), falls back to parsing `sbx settings ls`,
   and returns `ok: false` when it can't tell. "Unknown" is kept distinct from
   "off": the Claude remote-control row says the switch shows what den will set

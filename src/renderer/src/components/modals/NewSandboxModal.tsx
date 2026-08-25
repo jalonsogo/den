@@ -95,7 +95,7 @@ export function NewSandboxModal() {
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
-  const lastWorkspace = localStorage.getItem('minipit:lastWorkspace') ?? ''
+  const lastWorkspace = localStorage.getItem('den:lastWorkspace') ?? ''
   const pinnedWs = newSandboxWorkspace ?? (lastWorkspace || '')
 
   const [source, setSource]           = useState<'new' | 'template'>(newSandboxTemplate ? 'template' : 'new')
@@ -133,7 +133,7 @@ export function NewSandboxModal() {
   const [basicOpen, setBasic]         = useState(true)
   const [advancedOpen, setAdvanced]   = useState(false)
   // Command preview lives in its own accordion; remember the user's show/hide choice.
-  const [cmdOpen, setCmdOpen]         = useState(localStorage.getItem('minipit:showCreateCmd') === '1')
+  const [cmdOpen, setCmdOpen]         = useState(localStorage.getItem('den:showCreateCmd') === '1')
   const [ddOpen, setDdOpen]           = useState(false)
   const [error, setError]             = useState('')
   const [availKits, setAvailKits]     = useState<{ name: string; dir: string }[]>([])
@@ -172,13 +172,13 @@ export function NewSandboxModal() {
 
   // Load available templates for the "From template" option.
   useEffect(() => {
-    window.minipit?.listTemplates().then((t) => {
+    window.den?.listTemplates().then((t) => {
       setTemplates(t ?? [])
       if (t && t[0]) setTemplate((cur) => cur || `${t[0].repository}:${t[0].tag}`)
     }).catch(() => {})
     // Mixin kits can be stacked onto the new sandbox at creation (--kit).
-    window.minipit?.mcpList?.().then((r) => setMcpServers((r?.servers ?? []).map((m) => m.name))).catch(() => {})
-    window.minipit?.listKits().then((k) => {
+    window.den?.mcpList?.().then((r) => setMcpServers((r?.servers ?? []).map((m) => m.name))).catch(() => {})
+    window.den?.listKits().then((k) => {
       const all = k ?? []
       // specName, not the folder name: sbx matches an agent kit by the name it
       // declares, and an imported kit's folder is named after its repo.
@@ -188,7 +188,7 @@ export function NewSandboxModal() {
       // Sandbox kits are parsed too, for the base agent their suggested name
       // is built from. Mixins get parsed below for the capability preview.
       Promise.all(all.filter((x) => x.kind === 'sandbox').map(async (x) =>
-        [x.dir, parseKitSpec((await window.minipit?.readKit(x.dir)) ?? '')] as const
+        [x.dir, parseKitSpec((await window.den?.readKit(x.dir)) ?? '')] as const
       )).then((entries) => setKitSpecs((cur) => ({ ...cur, ...Object.fromEntries(entries) }))).catch(() => {})
       // Pre-select any kit the user starred as a default in the Kits page.
       const seed = mixins.filter((m) => defaultKits.includes(m.name)).map((m) => m.dir)
@@ -198,7 +198,7 @@ export function NewSandboxModal() {
       if (withPrefill.length) setSelKits(withPrefill)
       // Load + parse each local kit's spec so we can preview its capabilities.
       Promise.all(mixins.map(async (m) =>
-        [m.dir, parseKitSpec((await window.minipit?.readKit(m.dir)) ?? '')] as const
+        [m.dir, parseKitSpec((await window.den?.readKit(m.dir)) ?? '')] as const
       // Merge, not replace — the sandbox-kit specs above land in the same map
       // and whichever of the two settles last would otherwise wipe the other.
       )).then((entries) => setKitSpecs((cur) => ({ ...cur, ...Object.fromEntries(entries) }))).catch(() => {})
@@ -234,7 +234,7 @@ export function NewSandboxModal() {
   // project folder and no remembered last-used folder to default to).
   useEffect(() => {
     if (pinnedWs) return
-    window.minipit?.defaultWorkspace().then((dir) => { if (dir) setWsBase(dir) }).catch(() => {})
+    window.den?.defaultWorkspace().then((dir) => { if (dir) setWsBase(dir) }).catch(() => {})
   }, [pinnedWs])
 
   // First-run fallback only: default the workspace to ~/den/<name>, tracking the
@@ -263,7 +263,7 @@ export function NewSandboxModal() {
     let cancelled = false
     setWsIsRepo(null)
     const t = setTimeout(() => {
-      window.minipit?.isGitRepo(workspace)
+      window.den?.isGitRepo(workspace)
         .then((r) => { if (!cancelled) setWsIsRepo(!!r) })
         .catch(() => { if (!cancelled) setWsIsRepo(null) })
     }, 350)
@@ -273,14 +273,14 @@ export function NewSandboxModal() {
   const handleGitInit = async () => {
     setGitIniting(true)
     setError('')
-    const res = await window.minipit?.gitInit(workspace).catch(() => null)
+    const res = await window.den?.gitInit(workspace).catch(() => null)
     setGitIniting(false)
     if (res?.ok) setWsIsRepo(true)
     else setError(res?.error || 'Could not initialize a Git repository.')
   }
 
   const handleBrowse = async () => {
-    const path = await window.minipit?.showOpenDialog()
+    const path = await window.den?.showOpenDialog()
     if (path) { setWorkspace(path); setWsEdited(true) }
   }
 
@@ -298,7 +298,7 @@ export function NewSandboxModal() {
     if (!workspace) { setError('Workspace is required'); return }
     const finalName = (name.trim() || suggestedName() || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
-    localStorage.setItem('minipit:lastWorkspace', workspace)
+    localStorage.setItem('den:lastWorkspace', workspace)
     setError('')
     setProgress('')
     setCreating(true)
@@ -306,14 +306,14 @@ export function NewSandboxModal() {
       id: `creating-${finalName}`, name: finalName, status: 'creating',
       agent: effAgent as typeof agent, workspace, ports: [], logs: []
     })
-    const unsub = window.minipit?.onCreateOutput((chunk) => {
+    const unsub = window.den?.onCreateOutput((chunk) => {
       setProgress((p) => p + chunk)
       requestAnimationFrame(() => { if (progRef.current) progRef.current.scrollTop = progRef.current.scrollHeight })
     })
     unsubRef.current = unsub ?? null
     ;(async () => {
       try {
-        await window.minipit?.createSandbox({
+        await window.den?.createSandbox({
           name: finalName,
           agent: effAgent,
           workspace,
@@ -327,7 +327,7 @@ export function NewSandboxModal() {
           // Only sent when opting out — the store is mounted by default.
           noShareSkills: !shareSkills
         })
-        const sandboxes = await window.minipit?.listSandboxes()
+        const sandboxes = await window.den?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
         // Honor a group pre-selected from a group header's "New sandbox…" (the
         // manual group picker was removed to simplify creation).
@@ -759,7 +759,7 @@ export function NewSandboxModal() {
           <Section
             title="Command preview"
             open={cmdOpen}
-            onToggle={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('minipit:showCreateCmd', v ? '1' : '0') }}
+            onToggle={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('den:showCreateCmd', v ? '1' : '0') }}
           >
                 <div className="cmd-blk">
                   {cmdTokens.map((word, i) => {

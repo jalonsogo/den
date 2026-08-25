@@ -106,7 +106,7 @@ export function SandboxDetail() {
   // Refresh ports when the Network dock is shown (ports live inside Network).
   useEffect(() => {
     if (dock === 'network' && sandbox?.name) {
-      window.minipit?.getPorts(sandbox.name).then((ports) => {
+      window.den?.getPorts(sandbox.name).then((ports) => {
         if (ports?.length) updateSandbox(sandbox.name, { ports })
       }).catch(() => {})
     }
@@ -144,7 +144,7 @@ export function SandboxDetail() {
   const handleStop = async () => {
     updateSandbox(sandbox.id, { status: 'stopping' })
     try {
-      await window.minipit?.stopSandbox(sandbox.name)
+      await window.den?.stopSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'stopped', uptimeSeconds: undefined })
     } catch (e) {
       console.error(e)
@@ -157,7 +157,7 @@ export function SandboxDetail() {
     clearSandboxError(sandbox.name)
     updateSandbox(sandbox.id, { status: 'starting' })
     try {
-      await window.minipit?.runSandbox(sandbox.name)
+      await window.den?.runSandbox(sandbox.name)
       // Status will update via log lines and polling
     } catch (e) {
       console.error(e)
@@ -171,7 +171,7 @@ export function SandboxDetail() {
     if (!confirm(`Remove "${sandbox.name}"?\n\nIts workspace folder is gone, so the sandbox can't start.`)) return
     updateSandbox(sandbox.id, { status: 'deleting' })
     try {
-      await window.minipit?.deleteSandbox(sandbox.name)
+      await window.den?.deleteSandbox(sandbox.name)
       clearSandboxError(sandbox.name)
     } catch (e) {
       console.error(e)
@@ -182,8 +182,8 @@ export function SandboxDetail() {
   const handleRestart = async () => {
     updateSandbox(sandbox.id, { status: 'stopping' })
     try {
-      await window.minipit?.stopSandbox(sandbox.name)
-      await window.minipit?.runSandbox(sandbox.name)
+      await window.den?.stopSandbox(sandbox.name)
+      await window.den?.runSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'running' })
     } catch (e) {
       console.error(e)
@@ -291,7 +291,7 @@ export function SandboxDetail() {
                   onClick={() => {
                     const open = !changesOpen
                     setChangesOpen(open)
-                    if (open) window.minipit?.gitStatus(sandbox.name, sandbox.workspace)
+                    if (open) window.den?.gitStatus(sandbox.name, sandbox.workspace)
                       .then((r) => setChangeFiles(r?.changes ?? [])).catch(() => {})
                   }}
                 >
@@ -302,7 +302,7 @@ export function SandboxDetail() {
                     <div className="ds-changes-scroll">
                       <ChangesList
                         changes={changeFiles}
-                        onOpen={(rel, name) => { window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true); setChangesOpen(false) }}
+                        onOpen={(rel, name) => { window.den?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true); setChangesOpen(false) }}
                       />
                     </div>
                     <button className="ds-changes-link" onClick={openChangesPanel}>
@@ -313,7 +313,7 @@ export function SandboxDetail() {
               </div>
             )}
             {gi?.remoteUrl && (
-              <a className="ds-remote" title={gi.remote || gi.remoteUrl} onClick={() => window.minipit?.openPath(gi.remoteUrl!)}>
+              <a className="ds-remote" title={gi.remote || gi.remoteUrl} onClick={() => window.den?.openPath(gi.remoteUrl!)}>
                 <Github size={12} />{repoShort || 'remote'}
               </a>
             )}

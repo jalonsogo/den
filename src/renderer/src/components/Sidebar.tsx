@@ -178,7 +178,7 @@ export function Sidebar() {
   // Drag-to-resize the sidebar width (expanded only), persisted.
   const asideRef = useRef<HTMLElement>(null)
   const [sbWidth, setSbWidth] = useState(() => {
-    const v = Number(localStorage.getItem('minipit:sidebarWidth'))
+    const v = Number(localStorage.getItem('den:sidebarWidth'))
     return v >= 180 && v <= 480 ? v : 216
   })
   const startResize = (e: React.MouseEvent) => {
@@ -194,7 +194,7 @@ export function Sidebar() {
     const onUp = () => {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      localStorage.setItem('minipit:sidebarWidth', String(Math.round(latest)))
+      localStorage.setItem('den:sidebarWidth', String(Math.round(latest)))
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -204,50 +204,50 @@ export function Sidebar() {
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   // Whether to show group sections (vs one flat list). Default on.
-  const [showGroups, setShowGroups] = useState<boolean>(() => localStorage.getItem('minipit:showGroups') !== '0')
+  const [showGroups, setShowGroups] = useState<boolean>(() => localStorage.getItem('den:showGroups') !== '0')
   const toggleShowGroups = () =>
-    setShowGroups((v) => { const n = !v; localStorage.setItem('minipit:showGroups', n ? '1' : '0'); return n })
+    setShowGroups((v) => { const n = !v; localStorage.setItem('den:showGroups', n ? '1' : '0'); return n })
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'stopped'>(
-    () => (localStorage.getItem('minipit:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
+    () => (localStorage.getItem('den:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
   )
   // Selected agents to filter by; empty = all agents.
   const [agentFilter, setAgentFilter] = useState<AgentType[]>(() => {
-    try { return JSON.parse(localStorage.getItem('minipit:sbxAgents') ?? '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem('den:sbxAgents') ?? '[]') } catch { return [] }
   })
   // Sort order for the sandbox list. 'manual' uses the user's drag arrangement.
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'manual'>(() => {
-    const v = localStorage.getItem('minipit:sbxSortBy')
+    const v = localStorage.getItem('den:sbxSortBy')
     return v === 'name' || v === 'status' ? v : 'manual'
   })
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
-    () => (localStorage.getItem('minipit:sbxSortDir') as 'asc' | 'desc') ?? 'asc'
+    () => (localStorage.getItem('den:sbxSortDir') as 'asc' | 'desc') ?? 'asc'
   )
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   // Fixed-position coords for the dropdown so it escapes the sidebar's overflow.
   const [filterPos, setFilterPos] = useState<{ top: number; left: number } | null>(null)
   const filterRef = useRef<HTMLDivElement>(null)
-  const [libOpen, setLibOpen] = useState(() => localStorage.getItem('minipit:libraryOpen') === '1')
-  const [sbxOpen, setSbxOpen] = useState(() => localStorage.getItem('minipit:sandboxesOpen') !== '0')
+  const [libOpen, setLibOpen] = useState(() => localStorage.getItem('den:libraryOpen') === '1')
+  const [sbxOpen, setSbxOpen] = useState(() => localStorage.getItem('den:sandboxesOpen') !== '0')
   const toggleLib = () =>
-    setLibOpen((o) => { const n = !o; localStorage.setItem('minipit:libraryOpen', n ? '1' : '0'); return n })
+    setLibOpen((o) => { const n = !o; localStorage.setItem('den:libraryOpen', n ? '1' : '0'); return n })
   const toggleSbx = () =>
-    setSbxOpen((o) => { const n = !o; localStorage.setItem('minipit:sandboxesOpen', n ? '1' : '0'); return n })
+    setSbxOpen((o) => { const n = !o; localStorage.setItem('den:sandboxesOpen', n ? '1' : '0'); return n })
 
   const setAgents = (a: AgentType[]) => {
     setAgentFilter(a)
-    localStorage.setItem('minipit:sbxAgents', JSON.stringify(a))
+    localStorage.setItem('den:sbxAgents', JSON.stringify(a))
   }
   const toggleAgent = (id: AgentType) =>
     setAgents(agentFilter.includes(id) ? agentFilter.filter((x) => x !== id) : [...agentFilter, id])
   const setStatus = (s: 'all' | 'active' | 'stopped') => {
     setStatusFilter(s)
-    localStorage.setItem('minipit:sbxStatus', s)
+    localStorage.setItem('den:sbxStatus', s)
   }
   // Order-by: clicking Manual selects it; clicking Name/Status cycles asc → desc
   // → back to Manual (the default arrangement).
   const applySort = (by: 'name' | 'status' | 'manual', dir: 'asc' | 'desc') => {
-    setSortBy(by); localStorage.setItem('minipit:sbxSortBy', by)
-    setSortDir(dir); localStorage.setItem('minipit:sbxSortDir', dir)
+    setSortBy(by); localStorage.setItem('den:sbxSortBy', by)
+    setSortDir(dir); localStorage.setItem('den:sbxSortDir', dir)
   }
   const setSort = (field: 'name' | 'status' | 'manual') => {
     if (field === 'manual') return applySort('manual', 'asc')

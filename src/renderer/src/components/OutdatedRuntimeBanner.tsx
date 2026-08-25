@@ -25,7 +25,7 @@ export function OutdatedRuntimeBanner() {
   const [staleMain, setStaleMain] = useState(false)
   useEffect(() => {
     let cancelled = false
-    void window.minipit?.mainBuildId?.()
+    void window.den?.mainBuildId?.()
       .then((id) => { if (!cancelled && id && id !== __BUILD_ID__) setStaleMain(true) })
       .catch(() => {})
     return () => { cancelled = true }
@@ -34,7 +34,7 @@ export function OutdatedRuntimeBanner() {
   useEffect(() => {
     let cancelled = false
     const check = () => {
-      void window.minipit?.sbxVersionCheck?.()
+      void window.den?.sbxVersionCheck?.()
         .then((r) => { if (!cancelled && r?.known) setInfo(r) })
         .catch(() => {})
     }

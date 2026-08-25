@@ -18,7 +18,7 @@ export function AccordionSection({ id, title, badge, alert = false, defaultOpen 
   // v4: Runtime settings and Diagnostics still opened collapsed despite both
   // declaring defaultOpen — a stale stored value was winning. Diagnostics also
   // gained the daemon controls, so it has to be open to be discoverable.
-  const key = `minipit:info-acc:v4:${id}`
+  const key = `den:info-acc:v4:${id}`
   const [open, setOpen] = useState(() => {
     const v = localStorage.getItem(key)
     return v === null ? defaultOpen : v === '1'

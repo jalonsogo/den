@@ -17,7 +17,7 @@ function Toast({ block }: { block: PolicyBlock }) {
 
   const allow = async () => {
     setState('busy')
-    const res = await window.minipit?.policyAllow(block.sandbox, block.host).catch(() => null)
+    const res = await window.den?.policyAllow(block.sandbox, block.host).catch(() => null)
     setState(res?.ok ? 'done' : 'err')
     if (res?.ok) {
       // Same bookkeeping as allowing from the Network panel: the host is handled

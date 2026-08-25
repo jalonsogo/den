@@ -170,7 +170,7 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     // doesn't linkify by default, and the agent runs inside a headless sandbox
     // that has no browser — so route the click to the host via openPath, which
     // opens http(s) URLs in the Mac's default browser (scheme-checked in main).
-    term.loadAddon(new WebLinksAddon((_event, uri) => { window.minipit?.openPath(uri) }))
+    term.loadAddon(new WebLinksAddon((_event, uri) => { window.den?.openPath(uri) }))
     term.open(ref.current)
     fitRef.current = fit
 
@@ -555,10 +555,10 @@ function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
       visible={visible}
       theme={theme}
       shiftEnterNewline
-      subscribe={(write) => window.minipit?.onAgentOutput((name, data, replay) => { if (name === sandbox.name) write(data, replay) })}
-      onInput={(data) => window.minipit?.agentWrite(sandbox.name, data)}
-      onResize={(cols, rows) => window.minipit?.agentResize(sandbox.name, cols, rows)}
-      onStart={(cols, rows) => window.minipit?.agentEnsure(sandbox.name, cols, rows)}
+      subscribe={(write) => window.den?.onAgentOutput((name, data, replay) => { if (name === sandbox.name) write(data, replay) })}
+      onInput={(data) => window.den?.agentWrite(sandbox.name, data)}
+      onResize={(cols, rows) => window.den?.agentResize(sandbox.name, cols, rows)}
+      onStart={(cols, rows) => window.den?.agentEnsure(sandbox.name, cols, rows)}
       onDropFiles={async (files) => {
         // Copy each dropped file into the sandbox, then type its in-sandbox path
         // into the agent — TUIs like Claude Code take a file path, not raw bytes.
@@ -568,11 +568,11 @@ function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
         for (const file of files) {
           if (!file.type && file.size === 0) continue
           const bytes = new Uint8Array(await file.arrayBuffer())
-          const path = await window.minipit?.agentDropFile(sandbox.name, file.name, bytes)
+          const path = await window.den?.agentDropFile(sandbox.name, file.name, bytes)
           if (path) paths.push(path)
         }
         // One write with space-separated paths so multiple files land as args.
-        if (paths.length) window.minipit?.agentWrite(sandbox.name, paths.join(' ') + ' ')
+        if (paths.length) window.den?.agentWrite(sandbox.name, paths.join(' ') + ' ')
       }}
     />
   )
@@ -589,11 +589,11 @@ function ShellTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
       sandboxId={sandbox.id}
       visible={visible}
       theme={theme}
-      subscribe={(write) => window.minipit?.onPtyOutput((name, data) => { if (name === sandbox.name) write(data) })}
-      onInput={(data) => window.minipit?.ptyWrite(sandbox.name, data)}
-      onResize={(cols, rows) => window.minipit?.ptyResize(sandbox.name, cols, rows)}
-      onStart={(cols, rows) => window.minipit?.ptyStart(sandbox.name, cols, rows)}
-      onDispose={() => window.minipit?.ptyStop(sandbox.name)}
+      subscribe={(write) => window.den?.onPtyOutput((name, data) => { if (name === sandbox.name) write(data) })}
+      onInput={(data) => window.den?.ptyWrite(sandbox.name, data)}
+      onResize={(cols, rows) => window.den?.ptyResize(sandbox.name, cols, rows)}
+      onStart={(cols, rows) => window.den?.ptyStart(sandbox.name, cols, rows)}
+      onDispose={() => window.den?.ptyStop(sandbox.name)}
     />
   )
 }

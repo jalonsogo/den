@@ -38,8 +38,8 @@ export function InfoPanel({ sandbox }: { sandbox: Sandbox }) {
   const [inspect, setInspect] = useState<{ secrets: InjectedSecret[]; authMode?: string } | null>(null)
 
   useEffect(() => {
-    window.minipit?.appliedKits(sandbox.name).then((k) => setKits(k ?? [])).catch(() => setKits([]))
-    window.minipit?.sbxInspect(sandbox.name)
+    window.den?.appliedKits(sandbox.name).then((k) => setKits(k ?? [])).catch(() => setKits([]))
+    window.den?.sbxInspect(sandbox.name)
       .then((r) => setInspect(r?.ok ? extractInspect(r.json) : null))
       .catch(() => setInspect(null))
   }, [sandbox.name])
@@ -79,7 +79,7 @@ export function InfoPanel({ sandbox }: { sandbox: Sandbox }) {
           <span
             className="ir-val"
             title="Double-click to reveal in Finder"
-            onDoubleClick={() => window.minipit?.openInFinder(sandbox.workspace)}
+            onDoubleClick={() => window.den?.openInFinder(sandbox.workspace)}
           >{sandbox.workspace}</span>
         </div>
         {sandbox.additionalWorkspaces?.map((ws, i) => (

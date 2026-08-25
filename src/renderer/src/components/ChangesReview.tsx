@@ -33,7 +33,7 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
   const load = () => {
     if (stopped) return
     setLoading(true); setMsg(null); setPr(null); setPrOpen(false); setCommitOpen(false)
-    window.minipit?.reviewSummary(sandbox.name, sandbox.workspace)
+    window.den?.reviewSummary(sandbox.name, sandbox.workspace)
       .then((r) => setReview(r ?? null))
       .catch((e) => setReview({ ok: false, error: e instanceof Error ? e.message : 'Failed to load changes.' }))
       .finally(() => setLoading(false))
@@ -69,16 +69,16 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
     return f ? { added: f.added, deleted: f.deleted, binary: f.binary } : undefined
   }
   const openFile = (rel: string, name: string) =>
-    window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true, reviewBranch)
+    window.den?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true, reviewBranch)
 
   const startPr = async () => {
     setPrOpen(true); setMsg(null)
-    const b = (await window.minipit?.listBranches(sandbox.workspace).catch(() => [] as string[])) ?? []
+    const b = (await window.den?.listBranches(sandbox.workspace).catch(() => [] as string[])) ?? []
     setBranches(b)
     const defBase = b.includes('main') ? 'main' : b.includes('master') ? 'master' : (b[0] ?? 'main')
     setBase(defBase)
     if (review?.branch) {
-      const d = await window.minipit?.prDefaults(sandbox.workspace, review.branch, defBase).catch(() => null)
+      const d = await window.den?.prDefaults(sandbox.workspace, review.branch, defBase).catch(() => null)
       if (d) { setTitle(d.title); setBody(d.body) }
     }
   }
@@ -86,7 +86,7 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
   const createPr = async () => {
     if (!review?.branch || !title.trim()) return
     setBusy('pr'); setMsg(null)
-    const r = await window.minipit?.sandboxOpenPr(sandbox.workspace, review.branch, { base, title: title.trim(), body })
+    const r = await window.den?.sandboxOpenPr(sandbox.workspace, review.branch, { base, title: title.trim(), body })
       .catch(() => null)
     setBusy(null)
     if (r?.ok) { setPr(r); setPrOpen(false) }
@@ -96,12 +96,12 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
   const merge = async () => {
     if (!review?.branch) return
     setBusy('merge'); setMsg(null)
-    const r = await window.minipit?.sandboxMergeBranch(sandbox.workspace, review.branch)
+    const r = await window.den?.sandboxMergeBranch(sandbox.workspace, review.branch)
       .catch(() => null)
     setBusy(null)
     if (r?.ok) {
       setMsg({ ok: true, text: `Merged into ${r.base ?? 'your branch'}.` })
-      if (deleteAfter) { updateSandbox(sandbox.id, { status: 'deleting' }); window.minipit?.deleteSandbox(sandbox.name).catch(() => {}) }
+      if (deleteAfter) { updateSandbox(sandbox.id, { status: 'deleting' }); window.den?.deleteSandbox(sandbox.name).catch(() => {}) }
     } else {
       setMsg({ ok: false, text: r?.error || 'Merge failed.' })
     }
@@ -112,7 +112,7 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
     setBusy('commit'); setMsg(null)
     // Stage-all when everything's ticked; otherwise commit only the ticked paths.
     const only = allSelected ? undefined : Array.from(selected)
-    const r = await window.minipit?.sandboxCommit(sandbox.workspace, commitMsg.trim(), only).catch(() => null)
+    const r = await window.den?.sandboxCommit(sandbox.workspace, commitMsg.trim(), only).catch(() => null)
     setBusy(null)
     if (r?.ok) {
       setCommitOpen(false); setCommitMsg('')
@@ -181,7 +181,7 @@ export function ChangesReview({ sandbox, stopped, onContext }: {
                 {pr.number ? `#${pr.number} ` : ''}{pr.title ?? 'Pull request'}{pr.state ? ` · ${pr.state.toLowerCase()}` : ''}
               </span>
               {pr.url && (
-                <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(pr.url!)}>
+                <button className="btn btn-default btn-sm" onClick={() => window.den?.openPath(pr.url!)}>
                   <ExternalLink size={12} /> Open
                 </button>
               )}

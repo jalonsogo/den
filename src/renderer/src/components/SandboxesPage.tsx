@@ -32,7 +32,7 @@ export function SandboxesPage() {
     )
     if (!ok) return
     setPruning(true); setPruneMsg(null)
-    const r = await window.minipit?.pruneSandboxes()
+    const r = await window.den?.pruneSandboxes()
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setPruning(false)
     if (!r?.ok) { setPruneMsg({ ok: false, text: r?.error || 'Could not prune.' }); return }

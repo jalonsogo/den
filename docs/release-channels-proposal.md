@@ -2,7 +2,7 @@
 
 **Status:** Draft for discussion
 **Owner:** Javier
-**Surface:** minipit (sbx desktop GUI) + sbx packaging
+**Surface:** den (sbx desktop GUI) + sbx packaging
 
 ---
 

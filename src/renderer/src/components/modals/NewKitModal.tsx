@@ -133,8 +133,8 @@ export function NewKitModal() {
     if (!editKit) return
     let cancelled = false
     Promise.all([
-      window.minipit?.readKit(editKit.dir) ?? Promise.resolve(''),
-      window.minipit?.listKitFiles(editKit.dir).catch(() => []) ?? Promise.resolve([])
+      window.den?.readKit(editKit.dir) ?? Promise.resolve(''),
+      window.den?.listKitFiles(editKit.dir).catch(() => []) ?? Promise.resolve([])
     ]).then(([raw, packed]) => {
       if (cancelled || !raw) return
       const { form, caps: c } = specToForm(raw)
@@ -188,7 +188,7 @@ export function NewKitModal() {
   const removeCred = (i: number) => setF((p) => ({ ...p, creds: p.creds.filter((_, j) => j !== i) }))
 
   const attach = async () => {
-    const picked = await window.minipit?.pickFiles().catch(() => [])
+    const picked = await window.den?.pickFiles().catch(() => [])
     if (!picked?.length) return
     setF((p) => ({
       ...p,
@@ -209,7 +209,7 @@ export function NewKitModal() {
   const removeFile = async (i: number) => {
     const row = f.files[i]
     if (row.packed && editKit) {
-      const res = await window.minipit?.removeKitFile(editKit.dir, row.target, row.dest)
+      const res = await window.den?.removeKitFile(editKit.dir, row.target, row.dest)
       if (res && !res.ok) { setError(res.error || 'Failed to remove the file'); return }
     }
     setF((p) => ({ ...p, files: p.files.filter((_, j) => j !== i) }))
@@ -223,7 +223,7 @@ export function NewKitModal() {
     if (!f.name.trim()) { setError('Name is required'); return }
     setSaving(true); setError(''); setDone('')
     try {
-      const res = await window.minipit?.createKit(f.name.trim(), buildSpec(f), newFiles())
+      const res = await window.den?.createKit(f.name.trim(), buildSpec(f), newFiles())
       setDone(res?.zip ? `Packed → ${res.zip}` : 'Kit created')
       setTimeout(() => close(), 1200)
     } catch (e) {
@@ -236,7 +236,7 @@ export function NewKitModal() {
   const handleSave = async () => {
     if (!editKit) return
     setSaving(true); setError(''); setDone('')
-    const res = await window.minipit?.updateKit(editKit.dir, buildSpec(f), newFiles())
+    const res = await window.den?.updateKit(editKit.dir, buildSpec(f), newFiles())
       .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
     if (res?.ok) {
       setDone('Saved & re-packed')

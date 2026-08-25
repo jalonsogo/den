@@ -48,11 +48,11 @@ const DEN_LIGHT: ITheme = {
 }
 
 // Sentinel id of the adaptive default.
-export const DEFAULT_TERM_THEME = 'minipit'
+export const DEFAULT_TERM_THEME = 'den'
 
 export const TERM_THEMES: TermTheme[] = [
   {
-    id: 'minipit',
+    id: 'den',
     label: 'den (default · adaptive)',
     mode: 'dark',
     theme: DEN_DARK
@@ -143,7 +143,7 @@ export const TERM_THEME_GROUPS: { label: string; mode: 'dark' | 'light' }[] = [
   { label: 'Light', mode: 'light' }
 ]
 
-// Resolve a terminal theme. The adaptive default ('minipit') follows the app's
+// Resolve a terminal theme. The adaptive default ('den') follows the app's
 // light/dark mode; any explicitly-picked theme is returned as-is.
 export function termTheme(id: string, appTheme?: 'light' | 'dark'): TermTheme {
   if (id === DEFAULT_TERM_THEME && appTheme) {

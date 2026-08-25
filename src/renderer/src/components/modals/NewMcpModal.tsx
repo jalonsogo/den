@@ -33,7 +33,7 @@ export function NewMcpModal({ registered, onDone }: { registered: Set<string>; o
     scopes?: string; clientId?: string; skipAuth?: boolean
   }) => {
     setBusy(cfg.name); setError('')
-    const r = await window.minipit?.mcpAdd(cfg)
+    const r = await window.den?.mcpAdd(cfg)
       .catch((e) => ({ ok: false as const, error: bridgeError(e, 'Add an MCP') }))
     setBusy(null)
     if (r?.ok) { onDone(); close(); return }

@@ -117,12 +117,12 @@ export function ContextMenu() {
       setNewSandboxGroup(groupId)
       setModal('new-sandbox')
     }
-    const startAll = async () => { close(); for (const s of stopped) { try { await window.minipit?.runSandbox(s.name); updateSandbox(s.id, { status: 'running' }) } catch (e) { console.error(e) } } }
+    const startAll = async () => { close(); for (const s of stopped) { try { await window.den?.runSandbox(s.name); updateSandbox(s.id, { status: 'running' }) } catch (e) { console.error(e) } } }
     const stopAll = async () => {
       close()
       for (const s of running) {
         updateSandbox(s.id, { status: 'stopping' })
-        try { await window.minipit?.stopSandbox(s.name); updateSandbox(s.id, { status: 'stopped', uptimeSeconds: undefined }) }
+        try { await window.den?.stopSandbox(s.name); updateSandbox(s.id, { status: 'stopped', uptimeSeconds: undefined }) }
         catch { updateSandbox(s.id, { status: 'running' }) }
       }
     }
@@ -156,7 +156,7 @@ export function ContextMenu() {
     if (sandbox.status === 'running') {
       updateSandbox(sandbox.id, { status: 'stopping' })
       try {
-        await window.minipit?.stopSandbox(sandbox.id)
+        await window.den?.stopSandbox(sandbox.id)
         updateSandbox(sandbox.id, { status: 'stopped', uptimeSeconds: undefined })
       } catch {
         updateSandbox(sandbox.id, { status: 'running' })
@@ -164,7 +164,7 @@ export function ContextMenu() {
     } else {
       updateSandbox(sandbox.id, { status: 'creating' })
       try {
-        await window.minipit?.runSandbox(sandbox.name)
+        await window.den?.runSandbox(sandbox.name)
         updateSandbox(sandbox.id, { status: 'running' })
       } catch {
         updateSandbox(sandbox.id, { status: 'stopped' })
@@ -174,7 +174,7 @@ export function ContextMenu() {
 
   const handleOpenInFinder = () => {
     setContextMenu({ visible: false })
-    window.minipit?.openInFinder(sandbox.workspace)
+    window.den?.openInFinder(sandbox.workspace)
   }
 
   // Restart = stop (if running) then start again, so a fresh agent session picks
@@ -184,9 +184,9 @@ export function ContextMenu() {
     try {
       if (sandbox.status === 'running') {
         updateSandbox(sandbox.id, { status: 'stopping' })
-        await window.minipit?.stopSandbox(sandbox.id)
+        await window.den?.stopSandbox(sandbox.id)
       }
-      await window.minipit?.runSandbox(sandbox.name)
+      await window.den?.runSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'running' })
     } catch (e) {
       console.error(e)
@@ -207,10 +207,10 @@ export function ContextMenu() {
       placeholder: 'my-template:v1',
       confirmText: 'Save',
       onSubmit: async (tag) => {
-        const res = await window.minipit?.saveSnapshot(sandbox.name, tag)
+        const res = await window.den?.saveSnapshot(sandbox.name, tag)
         if (!res?.ok) throw new Error(res?.error ?? 'Snapshot failed')
         // sbx stops the sandbox to capture it — refresh so the UI reflects that.
-        const list = await window.minipit?.listSandboxes()
+        const list = await window.den?.listSandboxes()
         if (list) setSandboxes(list)
       },
     })
@@ -222,9 +222,9 @@ export function ContextMenu() {
     if (!confirm(`Delete "${sandbox.name}"?`)) return
     setDeleting(sandbox.id, true)
     try {
-      await window.minipit?.deleteSandbox(sandbox.name)
+      await window.den?.deleteSandbox(sandbox.name)
       // Refresh immediately so the row disappears without waiting for the poll.
-      const list = await window.minipit?.listSandboxes()
+      const list = await window.den?.listSandboxes()
       if (list) setSandboxes(list)
     } catch (e) {
       console.error(e)
@@ -255,19 +255,19 @@ export function ContextMenu() {
 
   const connectEditor = () =>
     callBridge(
-      () => window.minipit?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id),
+      () => window.den?.openRemoteEditor(sandbox.name, sandbox.workspace, editor.id),
       `Connecting ${editor.label}`
     )
 
   const connectTerminal = () =>
-    callBridge(() => window.minipit?.openSshTerminal(sandbox.name), 'Opening a terminal')
+    callBridge(() => window.den?.openSshTerminal(sandbox.name), 'Opening a terminal')
 
   // Point Claude Desktop / the ChatGPT app at this sandbox over SSH. main does the
   // automatable parts and shows the remaining in-app steps; a `canceled` result is
   // the user backing out of one of its prompts, not a failure.
   const connectApp = (appId: string, label: string) =>
     callBridge(
-      () => window.minipit?.openRemoteApp(sandbox.name, appId, sandbox.agent),
+      () => window.den?.openRemoteApp(sandbox.name, appId, sandbox.agent),
       `Connecting ${label}`
     )
 

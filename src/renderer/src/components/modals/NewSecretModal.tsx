@@ -41,7 +41,7 @@ export function NewSecretModal() {
   const [opAvail, setOpAvail] = useState<boolean | null>(null)
 
   useEffect(() => {
-    window.minipit?.opAvailable?.().then((v) => setOpAvail(!!v)).catch(() => setOpAvail(false))
+    window.den?.opAvailable?.().then((v) => setOpAvail(!!v)).catch(() => setOpAvail(false))
   }, [])
 
   // Services already stored in the currently-selected scope (to disable them).
@@ -81,8 +81,8 @@ export function NewSecretModal() {
     isGlobalScope(scope) && (service === 'anthropic' || service === 'openai') ? service : null
 
   const handleOAuth = async () => {
-    const fn = service === 'anthropic' ? window.minipit?.anthropicOAuth : () => window.minipit?.oauthSecret('openai')
-    if (typeof window.minipit?.anthropicOAuth !== 'function' || typeof window.minipit?.oauthSecret !== 'function') {
+    const fn = service === 'anthropic' ? window.den?.anthropicOAuth : () => window.den?.oauthSecret('openai')
+    if (typeof window.den?.anthropicOAuth !== 'function' || typeof window.den?.oauthSecret !== 'function') {
       setError('OAuth needs an app restart to load. Quit den and relaunch, then try again.')
       return
     }
@@ -100,7 +100,7 @@ export function NewSecretModal() {
 
   // Load the stored secrets (all scopes) so we can disable already-set providers.
   useEffect(() => {
-    window.minipit?.listSecrets().then((list) => {
+    window.den?.listSecrets().then((list) => {
       setStored((list ?? []).filter((s) => s.type === 'service'))
     }).catch(() => {})
   }, [])
@@ -120,7 +120,7 @@ export function NewSecretModal() {
 
   const handleSave = async () => {
     if ((useOp || dynamic) ? !opRef.trim() : !apiKey) return
-    if (useOp && typeof window.minipit?.setSecretOp !== 'function') {
+    if (useOp && typeof window.den?.setSecretOp !== 'function') {
       setError('1Password support needs an app restart to load. Quit den and relaunch, then try again.')
       return
     }
@@ -138,15 +138,15 @@ export function NewSecretModal() {
       if (dynamic) {
         // sbx owns resolution here, so a failure is its message, not a thrown
         // bridge error — surface it rather than closing on a write that failed.
-        const r = await window.minipit?.setSecretDynamic({
+        const r = await window.den?.setSecretDynamic({
           service, scope, source: opRef.trim(), kind: dynKind,
           refresh: dynRefresh.trim() || undefined
         })
         if (!r?.ok) { setError(r?.error || 'sbx could not store that dynamic secret.'); setSaving(false); return }
       }
-      else if (useOp) await window.minipit?.setSecretOp(service, opRef.trim(), scope)
-      else await window.minipit?.setSecret(service, apiKey, scope)
-      if (moving) await window.minipit?.removeSecret(service, oldScope)
+      else if (useOp) await window.den?.setSecretOp(service, opRef.trim(), scope)
+      else await window.den?.setSecret(service, apiKey, scope)
+      if (moving) await window.den?.removeSecret(service, oldScope)
       setModal(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

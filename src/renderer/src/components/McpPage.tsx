@@ -51,7 +51,7 @@ const isServer = (s: McpServerEntry): boolean => !!s.name && !/\s/.test(s.name)
 // successful `sbx mcp auth`, which prints `MCP server "x" authorized` — so den
 // records that and uses it when sbx offers nothing. Anything sbx does say wins
 // over this, so a later revocation isn't masked by a stale note.
-const AUTH_RECORD_KEY = 'minipit:mcp-authorized:v1'
+const AUTH_RECORD_KEY = 'den:mcp-authorized:v1'
 type AuthRecord = Record<string, string>
 function readAuthRecord(): AuthRecord {
   try { return JSON.parse(localStorage.getItem(AUTH_RECORD_KEY) || '{}') as AuthRecord } catch { return {} }
@@ -123,7 +123,7 @@ export function McpPage() {
 
   const load = useCallback(() => {
     setLoading(true)
-    void window.minipit?.mcpList()
+    void window.den?.mcpList()
       .then((r) => {
         setServers((r?.servers ?? []).filter(isServer))
         setError(r?.ok ? null : (r?.error ?? 'Could not read registered servers.'))
@@ -133,7 +133,7 @@ export function McpPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => window.minipit?.onMcpAuthOutput?.((c) => setAuthOut((o) => o + c)), [])
+  useEffect(() => window.den?.onMcpAuthOutput?.((c) => setAuthOut((o) => o + c)), [])
 
   const registered = new Set(servers.map((s) => s.name.toLowerCase()))
   // Nothing registered and nothing to report — the page is just the empty state,
@@ -143,7 +143,7 @@ export function McpPage() {
   const remove = async (name: string) => {
     if (!window.confirm(`Remove the MCP server "${name}"? Sandboxes referencing it will stop finding it.`)) return
     setBusy(name); setMsg(null)
-    const r = await window.minipit?.mcpRemove(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Remove server') }))
+    const r = await window.den?.mcpRemove(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Remove server') }))
     setBusy(null)
     if (r?.ok) rememberAuth(name, false)
     setMsg(r?.ok ? { ok: true, text: `Removed "${name}".` } : { ok: false, text: r?.error || 'Remove failed.' })
@@ -152,7 +152,7 @@ export function McpPage() {
 
   const authorize = async (name: string) => {
     setAuthFor(name); setAuthOut(''); setBusy(name); setMsg(null)
-    const r = await window.minipit?.mcpAuth(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Authorize') }))
+    const r = await window.den?.mcpAuth(name).catch((e) => ({ ok: false as const, error: bridgeError(e, 'Authorize') }))
     setBusy(null)
     if (r?.ok) rememberAuth(name, true)
     setAuthFor(null)
@@ -168,7 +168,7 @@ export function McpPage() {
     // parseInspect (no "key: value" in "Loading…") into the raw terminal
     // fallback, so opening Info flashed a black block before the rows landed.
     setInspectFor(name); setInspectOut(''); setInspectLoading(true)
-    const r = await window.minipit?.mcpInspect(name)
+    const r = await window.den?.mcpInspect(name)
       .catch((e) => ({ ok: false as const, error: bridgeError(e, 'Inspect') }))
     setInspectLoading(false)
     setInspectOut(r?.ok ? (r.raw ?? '') : (r?.error || 'Inspect failed.'))
@@ -178,7 +178,7 @@ export function McpPage() {
   // different mechanism — --static-mcp, chosen in New Sandbox.
   const attach = async (name: string, sandbox: string) => {
     setAttachFor(null); setBusy(name); setMsg(null)
-    const r = await window.minipit?.mcpLoad(name, sandbox)
+    const r = await window.den?.mcpLoad(name, sandbox)
       .catch((e) => ({ ok: false as const, error: bridgeError(e, 'Add to sandbox') }))
     setBusy(null)
     setMsg(r?.ok
@@ -340,7 +340,7 @@ export function McpPage() {
                         <TerminalSquare size={14} /> Copy add command
                       </button>
                       {localPath && (
-                        <button className="kit-more-item" onClick={() => { setMoreFor(null); window.minipit?.openInFinder(localPath) }}>
+                        <button className="kit-more-item" onClick={() => { setMoreFor(null); window.den?.openInFinder(localPath) }}>
                           <FolderOpen size={14} /> Open in Finder
                         </button>
                       )}
@@ -384,7 +384,7 @@ export function McpPage() {
                       <div className={`mcp-info-row${r.depth ? ' sub' : ''}`} key={`${r.key}-${i}`}>
                         <span className="mcp-info-k">{r.key}</span>
                         {/^https?:\/\//i.test(r.value)
-                          ? <a className="mcp-info-link" onClick={() => window.minipit?.openPath(r.value)}>{r.value}</a>
+                          ? <a className="mcp-info-link" onClick={() => window.den?.openPath(r.value)}>{r.value}</a>
                           : <span className="mcp-info-v">{r.value || '—'}</span>}
                       </div>
                     ))
@@ -401,7 +401,7 @@ export function McpPage() {
                     <RefreshCw size={13} className="spin" />
                     <span>Waiting for you to authorize <strong>{s.name}</strong> in your browser…</span>
                     {url && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => window.minipit?.openPath(url)}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => window.den?.openPath(url)}>
                         Open the page again
                       </button>
                     )}

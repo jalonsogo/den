@@ -399,7 +399,7 @@ export interface SbxEnvFile {
 
 declare global {
   interface Window {
-    minipit: {
+    den: {
       listSandboxes(): Promise<Sandbox[]>
       createSandbox(config: unknown): Promise<string>
       runSandbox(name: string): Promise<void>

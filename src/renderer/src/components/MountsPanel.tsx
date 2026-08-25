@@ -16,18 +16,18 @@ export function MountsPanel({ sandbox }: { sandbox: Sandbox }) {
   const running = sandbox.status === 'running'
 
   useEffect(() => {
-    window.minipit?.mountsGet(sandbox.name).then((m) => setMounts(m ?? [])).catch(() => {})
+    window.den?.mountsGet(sandbox.name).then((m) => setMounts(m ?? [])).catch(() => {})
   }, [sandbox.name])
 
   const pick = async () => {
-    const dir = await window.minipit?.showOpenDialog().catch(() => null)
+    const dir = await window.den?.showOpenDialog().catch(() => null)
     if (dir) setHost(dir)
   }
 
   const mount = async () => {
     if (!host || busy) return
     setBusy('mount'); setErr(null)
-    const res = await window.minipit?.sbxMount(sandbox.name, host, target.trim(), ro).catch(() => null)
+    const res = await window.den?.sbxMount(sandbox.name, host, target.trim(), ro).catch(() => null)
     setBusy(null)
     if (res?.ok) {
       setMounts(res.mounts ?? [])
@@ -41,7 +41,7 @@ export function MountsPanel({ sandbox }: { sandbox: Sandbox }) {
     const key = `${m.host}|${m.target ?? ''}`
     if (busy) return
     setBusy(key); setErr(null)
-    const res = await window.minipit?.sbxUmount(sandbox.name, m.host, m.target ?? '').catch(() => null)
+    const res = await window.den?.sbxUmount(sandbox.name, m.host, m.target ?? '').catch(() => null)
     setBusy(null)
     if (res?.ok) setMounts(res.mounts ?? [])
     else setErr(res?.error || 'Failed to unmount.')

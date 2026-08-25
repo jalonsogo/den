@@ -1,3 +1,6 @@
+// FIRST import, deliberately: it moves the minipit:* preference keys to den:*
+// before App and store read them at module scope.
+import './lib/migrateStorage'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { FileEditorWindow } from './FileEditorWindow'
@@ -5,7 +8,7 @@ import './styles/main.css'
 import { applyTheme, DEFAULT_THEME } from './lib/themes'
 
 // Apply the persisted theme + accent before first paint to avoid a flash.
-const themePref = localStorage.getItem('minipit:themePref') ?? 'system'
+const themePref = localStorage.getItem('den:themePref') ?? 'system'
 const resolvedTheme =
   themePref === 'dark' ||
   (themePref === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
@@ -14,13 +17,13 @@ const resolvedTheme =
 document.documentElement.setAttribute('data-theme', resolvedTheme)
 // UI density → whole-window zoom (applies to this window and the editor window).
 // Keep in sync with store.ts densityFactor().
-const densityRaw = localStorage.getItem('minipit:density')
-const densityCustom = Math.min(2, Math.max(0.5, Number(localStorage.getItem('minipit:densityCustom')) || 1.2))
+const densityRaw = localStorage.getItem('den:density')
+const densityCustom = Math.min(2, Math.max(0.5, Number(localStorage.getItem('den:densityCustom')) || 1.2))
 const densityZoom =
   densityRaw === 'custom' ? densityCustom : densityRaw === 'comfortable' ? 1.1 : 1
-window.minipit?.setZoomFactor?.(densityZoom)
+window.den?.setZoomFactor?.(densityZoom)
 // Apply the persisted color theme (surfaces + accent) for the resolved mode.
-applyTheme(localStorage.getItem('minipit:accent') ?? DEFAULT_THEME, resolvedTheme)
+applyTheme(localStorage.getItem('den:accent') ?? DEFAULT_THEME, resolvedTheme)
 
 // Route: a separate editor window loads with hash #/editor?sandbox=…&path=…&name=…
 const hash = window.location.hash

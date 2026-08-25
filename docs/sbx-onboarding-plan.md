@@ -40,10 +40,10 @@ The onboarding install step lets the user pick. den detects whether `brew` exist
 ## Existing pieces to reuse (do NOT reinvent)
 - `getSbxPath()` / `getBrewPath()` — `src/main/index.ts:43,61` (path discovery).
 - `detectInstallManager()` — `:209`; `pkgCommand()`/`displayCommand()` — `:229,243`.
-- `minipit:sbx-version` `:2702`, `minipit:sbx-install-info` `:2738`, `minipit:sbx-update` `:2755`,
-  `minipit:sbx-releases` `:2717` (GitHub API fetch pattern).
-- `minipit:docker-account` `:1779` (login status: `{loggedIn, username,...}`) and
-  `minipit:docker-login` `:1811` (`sbx login`, streams via `minipit:login-output`).
+- `den:sbx-version` `:2702`, `den:sbx-install-info` `:2738`, `den:sbx-update` `:2755`,
+  `den:sbx-releases` `:2717` (GitHub API fetch pattern).
+- `den:docker-account` `:1779` (login status: `{loggedIn, username,...}`) and
+  `den:docker-login` `:1811` (`sbx login`, streams via `den:login-output`).
 - Streaming channels: `onRuntimeOutput` / `onLoginOutput` (`src/preload/index.ts:111,121`).
 - Store pattern in `src/renderer/src/store.ts`; App render gate in `src/renderer/src/App.tsx:159`.
 - `SBX_RELEASES_URL` `:204`.
@@ -53,22 +53,22 @@ The onboarding install step lets the user pick. den detects whether `brew` exist
 ### 1. Main process — `src/main/index.ts`
 - **`getBrewPath` already exists**; add a tiny `brewInstalled()` check (fs.accessSync on the two
   brew prefixes) for the UI recommendation.
-- **New `minipit:sbx-status`** handler — the boot-time gate source of truth. Runs `sbx version`
+- **New `den:sbx-status`** handler — the boot-time gate source of truth. Runs `sbx version`
   (reuse the `sbx-version` logic) + `docker-account`. Returns
   `{ installed: boolean, version?: string, path: string, signedIn: boolean, username?: string,
     brewAvailable: boolean, platform, arch }`. `installed=false` when `version` errors with ENOENT.
-- **New `minipit:sbx-download-install`** handler (macOS first; Windows/Linux fall back to showing
+- **New `den:sbx-download-install`** handler (macOS first; Windows/Linux fall back to showing
   the documented command since winget/apt don't need brew anyway):
   1. Fetch `https://api.github.com/repos/docker/sbx-releases/releases/latest`, find the macOS asset
      `DockerSandboxes-darwin.tar.gz` `browser_download_url` (reuse fetch pattern from `sbx-releases`).
-  2. Download to a temp file over HTTPS; stream progress via `minipit:runtime-output`.
+  2. Download to a temp file over HTTPS; stream progress via `den:runtime-output`.
   3. Extract with `tar -xzf` into a **den-owned dir** (`app.getPath('userData')/sbx/`).
   4. Locate the `sbx` binary in the extraction, `chmod +x`, clear quarantine
      (`xattr -dr com.apple.quarantine <dir>`).
   5. **Verify**: run `<binary> version`; on success persist `store.set('sbxPath', <binary>)` and
      return `{ ok:true, path, version }`. On any failure, clean up and return `{ ok:false, error }`
      with a link to `SBX_RELEASES_URL` as fallback.
-- **`minipit:sbx-update`** (`:2755`): extend the `manual` branch so a den-managed (userData) install
+- **`den:sbx-update`** (`:2755`): extend the `manual` branch so a den-managed (userData) install
   can re-run `sbx-download-install` instead of only printing the releases URL. Keep brew/winget as-is.
 - **SEC hardening (ties to docs/fix-plan.md SEC-2)**: since we now set `sbxPath` programmatically,
   validate in `getSbxPath()`/on-set that a stored `sbxPath` exists and is a regular file before use,
@@ -76,13 +76,13 @@ The onboarding install step lets the user pick. den detects whether `brew` exist
 
 ### 2. Preload — `src/preload/index.ts`
 Add bridge methods next to the existing `sbx*` group (`:81`):
-`sbxStatus: () => invoke('minipit:sbx-status')`,
-`sbxDownloadInstall: () => invoke('minipit:sbx-download-install')`.
+`sbxStatus: () => invoke('den:sbx-status')`,
+`sbxDownloadInstall: () => invoke('den:sbx-download-install')`.
 (`dockerLogin`, `sbxVersion`, `sbxInstallInfo`, `onRuntimeOutput`, `onLoginOutput`, `sbxSettingSet`,
 and the file-picker used for "Locate binary" already exist.)
 
 ### 3. Renderer store — `src/renderer/src/store.ts`
-- Add `sbxStatus: SbxStatus | null` state + `refreshSbxStatus()` action (calls `window.minipit.sbxStatus()`).
+- Add `sbxStatus: SbxStatus | null` state + `refreshSbxStatus()` action (calls `window.den.sbxStatus()`).
 - Call `refreshSbxStatus()` in the App boot effect (`src/renderer/src/App.tsx:26`), before/alongside
   `listSandboxes()`.
 

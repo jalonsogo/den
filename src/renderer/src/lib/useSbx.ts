@@ -37,7 +37,7 @@ export function useSbxCaps(): SbxCaps {
   useEffect(() => {
     let cancelled = false
     const check = () => {
-      void window.minipit?.sbxVersionCheck?.()
+      void window.den?.sbxVersionCheck?.()
         .then((r) => {
           if (cancelled || !r?.known) return
           setCaps({ known: true, version: r.version, hasEnvFiles: !!r.hasEnvFiles })

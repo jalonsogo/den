@@ -50,18 +50,18 @@ export function EnvironmentsPage() {
   useEffect(() => { setLayered([]) }, [open])
 
   const readInto = useCallback(async (file: SbxEnvFile): Promise<Row> => {
-    const r = await window.minipit?.envRead(file.path)
+    const r = await window.den?.envRead(file.path)
     if (!r?.ok || typeof r.text !== 'string') return { ...file, error: r?.error || 'Could not read the file.' }
     try { return { ...file, summary: parseSbxEnv(r.text) } }
     catch { return { ...file, error: 'The file is not readable as YAML.' } }
   }, [])
 
   const load = useCallback(async () => {
-    const res = await window.minipit?.envDiscover().catch(() => null)
+    const res = await window.den?.envDiscover().catch(() => null)
     setSupported(res ? res.supported : null)
     const found = res?.files ?? []
     setRows(await Promise.all(found.map(readInto)))
-    setProvisioned(await window.minipit?.envProvisioned().catch(() => ({})) ?? {})
+    setProvisioned(await window.den?.envProvisioned().catch(() => ({})) ?? {})
     setLoaded(true)
   }, [readInto])
 
@@ -73,12 +73,12 @@ export function EnvironmentsPage() {
   useEffect(() => { if (caps.hasEnvFiles && supported === false) void load() }, [caps.hasEnvFiles, supported, load])
 
   useEffect(() => {
-    const off = window.minipit?.onEnvOutput?.((chunk) => setLog((prev) => (prev + chunk).slice(-4000)))
+    const off = window.den?.onEnvOutput?.((chunk) => setLog((prev) => (prev + chunk).slice(-4000)))
     return () => { off?.() }
   }, [])
 
   const add = async () => {
-    const picked = await window.minipit?.envPick()
+    const picked = await window.den?.envPick()
     if (!picked?.ok || !picked.path) return
     if (rows.some((r) => r.path === picked.path)) { setOpen(picked.path); return }
     const dir = picked.path.replace(/\/[^/]+$/, '')
@@ -92,14 +92,14 @@ export function EnvironmentsPage() {
     // The file being run goes last: later files win, so an override the user
     // layered on top has to come after the base it overrides.
     const paths = [...layered.filter((p) => p !== row.path), row.path]
-    const r = await window.minipit?.envCreate(paths)
+    const r = await window.den?.envCreate(paths)
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setBusy(null)
     if (r?.ok) {
       setMsg({ ok: true, text: r.created
         ? `Provisioned ${r.created} from ${row.project}. It's in Sandboxes now.`
         : `Provisioned from ${row.project}. It's in Sandboxes now.` })
-      setProvisioned(await window.minipit?.envProvisioned().catch(() => ({})) ?? {})
+      setProvisioned(await window.den?.envProvisioned().catch(() => ({})) ?? {})
     } else {
       setMsg({ ok: false, text: r?.error || 'Could not provision that environment.' })
     }
@@ -109,13 +109,13 @@ export function EnvironmentsPage() {
   // an environment, and removing it the other way can leave that bookkeeping.
   const remove = async (row: Row, sandbox: string) => {
     setBusy(row.path); setMsg(null)
-    const r = await window.minipit?.envRemove(sandbox)
+    const r = await window.den?.envRemove(sandbox)
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setBusy(null)
     setMsg(r?.ok
       ? { ok: true, text: `Removed ${sandbox}.` }
       : { ok: false, text: r?.error || `Could not remove ${sandbox}.` })
-    setProvisioned(await window.minipit?.envProvisioned().catch(() => ({})) ?? {})
+    setProvisioned(await window.den?.envProvisioned().catch(() => ({})) ?? {})
   }
 
   const zero = loaded && rows.length === 0

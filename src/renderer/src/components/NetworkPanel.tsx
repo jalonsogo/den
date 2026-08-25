@@ -107,7 +107,7 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
 
   const loadPolicy = () => {
     setPolLoading(true)
-    window.minipit?.networkPolicy(sandbox.name)
+    window.den?.networkPolicy(sandbox.name)
       .then((p) => {
         setPolicy(p ?? null)
         // Sync the picker to the active preset so it reflects reality.
@@ -137,8 +137,8 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     let failed: string | null = null
     for (const r of pending) {
       const res = r.decision === 'allow'
-        ? await window.minipit?.policyAllow(sandbox.name, r.resources).catch(() => null)
-        : await window.minipit?.policyDeny(sandbox.name, r.resources).catch(() => null)
+        ? await window.den?.policyAllow(sandbox.name, r.resources).catch(() => null)
+        : await window.den?.policyDeny(sandbox.name, r.resources).catch(() => null)
       if (!res?.ok) { remaining.push(r); if (!failed) failed = res?.error || `Failed to add ${r.resources}.` }
     }
     setPending(remaining)
@@ -156,7 +156,7 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     if (!resource || checkBusy) return
     setCheckBusy(true)
     setCheckResult(null)
-    const r = await window.minipit?.policyCheck(resource, sandbox.name).catch(() => null)
+    const r = await window.den?.policyCheck(resource, sandbox.name).catch(() => null)
     setCheckBusy(false)
     if (!r) { setCheckResult({ decision: 'unknown', text: 'Check failed.' }); return }
     const text = r.decision === 'allow' ? `Allowed — ${resource} would be reachable.`
@@ -173,7 +173,7 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     if (blockState[host] === 'busy' || blockState[host] === 'done') return
     setBlockState((s) => ({ ...s, [host]: 'busy' }))
     setAllowMsg(null)
-    const res = await window.minipit?.policyAllow(sandbox.name, host).catch(() => null)
+    const res = await window.den?.policyAllow(sandbox.name, host).catch(() => null)
     if (res?.ok) {
       setBlockState((s) => ({ ...s, [host]: 'done' }))
       noteChange(`Allowed ${host}`)
@@ -193,7 +193,7 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     if (rmBusy) return
     setRmBusy(resource)
     setAllowMsg(null)
-    const res = await window.minipit?.policyRm(sandbox.name, resource).catch(() => null)
+    const res = await window.den?.policyRm(sandbox.name, resource).catch(() => null)
     setRmBusy(null)
     if (res?.ok) {
       noteChange(`Removed ${resource}`)
@@ -209,7 +209,7 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
     if (!window.confirm(`Remove all custom network rules and set the default preset to “${preset}”?`)) return
     setPresetBusy(true)
     setAllowMsg(null)
-    const res = await window.minipit?.policyReset(preset).catch(() => null)
+    const res = await window.den?.policyReset(preset).catch(() => null)
     setPresetBusy(false)
     if (res?.ok) {
       noteChange(`Default preset → “${preset}” (custom rules reset)`)
@@ -223,8 +223,8 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
   const handleRestart = async () => {
     setRestarting(true)
     try {
-      if (sandbox.status === 'running') await window.minipit?.stopSandbox(sandbox.name)
-      await window.minipit?.runSandbox(sandbox.name)
+      if (sandbox.status === 'running') await window.den?.stopSandbox(sandbox.name)
+      await window.den?.runSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'running' })
       clearPolicyRestart(sandbox.name)
       setRestartDone(true)

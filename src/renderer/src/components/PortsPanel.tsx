@@ -25,7 +25,7 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
   const running = sandbox.status === 'running'
 
   const refresh = () =>
-    window.minipit?.getPorts(sandbox.name).then((p) => setPorts(p ?? [])).catch(() => {})
+    window.den?.getPorts(sandbox.name).then((p) => setPorts(p ?? [])).catch(() => {})
 
   // `sbx ports --json` is the authoritative source (the polled sandbox.ports
   // from `sbx ls` can lag or omit mappings). Refresh on open and when the
@@ -53,7 +53,7 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
     // 0.0.0.0 bind still covers 127.0.0.1 and localhost.
     const hostIp = expose ? '0.0.0.0:' : '127.0.0.1:'
     const spec = `${hostIp}${h}:${s}/${proto}4`
-    const res = await window.minipit?.portPublish(sandbox.name, spec).catch(() => null)
+    const res = await window.den?.portPublish(sandbox.name, spec).catch(() => null)
     setBusy(null)
     if (res?.ok) {
       setHostPort(''); setSbxPort(''); setExpose(false); setAdding(false)
@@ -68,7 +68,7 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
     if (busy) return
     setBusy(spec)
     setErr(null)
-    const res = await window.minipit?.portUnpublish(sandbox.name, spec).catch(() => null)
+    const res = await window.den?.portUnpublish(sandbox.name, spec).catch(() => null)
     setBusy(null)
     if (res?.ok) refresh()
     else setErr(res?.error || 'Failed to unpublish port.')
@@ -90,7 +90,7 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
               // 127.0.0.1 and a [::1] binding, but macOS resolves `localhost`
               // to ::1 first — and sandbox services that listen only on IPv4
               // 0.0.0.0 (the common case) return an empty reply over IPv6.
-              onClick={() => window.minipit?.openPath(`http://127.0.0.1:${port.host}`)}
+              onClick={() => window.den?.openPath(`http://127.0.0.1:${port.host}`)}
             >
               Open <ExternalLink size={13} />
             </button>

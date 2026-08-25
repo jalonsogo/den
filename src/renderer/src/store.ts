@@ -5,7 +5,7 @@ import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretS
 type ThemePref = 'light' | 'dark' | 'system'
 const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
 const resolveTheme = (pref: ThemePref): 'light' | 'dark' => (pref === 'system' ? (prefersDark() ? 'dark' : 'light') : pref)
-const initialThemePref = (localStorage.getItem('minipit:themePref') as ThemePref) ?? 'system'
+const initialThemePref = (localStorage.getItem('den:themePref') as ThemePref) ?? 'system'
 
 // UI density → a whole-window zoom factor (scales every element at once).
 // 'custom' uses a user-set multiplier (densityCustom).
@@ -13,9 +13,9 @@ export type Density = 'default' | 'comfortable' | 'custom'
 const DENSITY_FIXED: Record<'default' | 'comfortable', number> = { default: 1, comfortable: 1.1 }
 export const densityFactor = (d: Density, custom: number): number => (d === 'custom' ? custom : DENSITY_FIXED[d])
 const clampFactor = (n: number): number => Math.min(2, Math.max(0.5, Number.isFinite(n) ? n : 1))
-const storedDensity = localStorage.getItem('minipit:density')
+const storedDensity = localStorage.getItem('den:density')
 const initialDensity: Density = storedDensity === 'comfortable' || storedDensity === 'custom' ? storedDensity : 'default'
-const initialDensityCustom = clampFactor(Number(localStorage.getItem('minipit:densityCustom')) || 1.2)
+const initialDensityCustom = clampFactor(Number(localStorage.getItem('den:densityCustom')) || 1.2)
 
 interface ContextMenuState {
   visible: boolean
@@ -247,7 +247,7 @@ export const useStore = create<AppState>((set) => ({
   secretTarget: null,
   secretScopeTarget: null,
   dockerAccount: null,
-  activeOrg: localStorage.getItem('minipit:activeOrg'),
+  activeOrg: localStorage.getItem('den:activeOrg'),
   newSandboxWorkspace: null,
   newSandboxTemplate: null,
   newSandboxGroup: null,
@@ -255,27 +255,27 @@ export const useStore = create<AppState>((set) => ({
   editKit: null,
   themePref: initialThemePref,
   theme: resolveTheme(initialThemePref),
-  fileOpenMode: (localStorage.getItem('minipit:fileOpenMode') as 'preview' | 'system') ?? 'preview',
+  fileOpenMode: (localStorage.getItem('den:fileOpenMode') as 'preview' | 'system') ?? 'preview',
   density: initialDensity,
   densityCustom: initialDensityCustom,
-  sidebarCollapsed: localStorage.getItem('minipit:sidebarCollapsed') === '1',
+  sidebarCollapsed: localStorage.getItem('den:sidebarCollapsed') === '1',
   rightDockOpen: false,
-  accent: localStorage.getItem('minipit:accent') ?? DEFAULT_THEME,
-  termTheme: localStorage.getItem('minipit:termTheme') ?? 'minipit',
-  remoteEditor: localStorage.getItem('minipit:remoteEditor') ?? 'code',
-  terminalApp: localStorage.getItem('minipit:terminalApp') ?? 'default',
+  accent: localStorage.getItem('den:accent') ?? DEFAULT_THEME,
+  termTheme: localStorage.getItem('den:termTheme') ?? 'den',
+  remoteEditor: localStorage.getItem('den:remoteEditor') ?? 'code',
+  terminalApp: localStorage.getItem('den:terminalApp') ?? 'default',
   sandboxIcons: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
+    try { return JSON.parse(localStorage.getItem('den:sandboxIcons') ?? '{}') ?? {} } catch { return {} }
   })(),
   sandboxColors: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:sandboxColors') ?? '{}') ?? {} } catch { return {} }
+    try { return JSON.parse(localStorage.getItem('den:sandboxColors') ?? '{}') ?? {} } catch { return {} }
   })(),
   groups: [],
   sandboxGroups: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:sandboxGroups') ?? '{}') ?? {} } catch { return {} }
+    try { return JSON.parse(localStorage.getItem('den:sandboxGroups') ?? '{}') ?? {} } catch { return {} }
   })(),
   sandboxOrder: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:sandboxOrder') ?? '[]') ?? [] } catch { return [] }
+    try { return JSON.parse(localStorage.getItem('den:sandboxOrder') ?? '[]') ?? [] } catch { return [] }
   })(),
   sandboxIsolation: {},
   sandboxAutoSync: {},
@@ -283,7 +283,7 @@ export const useStore = create<AppState>((set) => ({
   sandboxChanges: {},
   display: (() => {
     const d = { agentBadge: true, sandboxSub: true, projectCounts: true, gitBranch: true, changeBadge: true, subLineMode: 'status' as const }
-    try { return { ...d, ...JSON.parse(localStorage.getItem('minipit:display') ?? '{}') } } catch { return d }
+    try { return { ...d, ...JSON.parse(localStorage.getItem('den:display') ?? '{}') } } catch { return d }
   })(),
   pickerOpen: false,
   prefillKit: null,
@@ -298,7 +298,7 @@ export const useStore = create<AppState>((set) => ({
   logsSandbox: null,
   logsReturn: null,
   defaultKits: (() => {
-    try { return JSON.parse(localStorage.getItem('minipit:defaultKits') ?? '[]') ?? [] } catch { return [] }
+    try { return JSON.parse(localStorage.getItem('den:defaultKits') ?? '[]') ?? [] } catch { return [] }
   })(),
 
   setSecretTarget: (service, scope = null) => set({ secretTarget: service, secretScopeTarget: scope }),
@@ -309,7 +309,7 @@ export const useStore = create<AppState>((set) => ({
       const next = state.defaultKits.includes(name)
         ? state.defaultKits.filter((n) => n !== name)
         : [...state.defaultKits, name]
-      localStorage.setItem('minipit:defaultKits', JSON.stringify(next))
+      localStorage.setItem('den:defaultKits', JSON.stringify(next))
       return { defaultKits: next }
     }),
 
@@ -326,26 +326,26 @@ export const useStore = create<AppState>((set) => ({
   // active light/dark mode.
   setAccent: (id) =>
     set((state) => {
-      localStorage.setItem('minipit:accent', id)
+      localStorage.setItem('den:accent', id)
       applyTheme(id, state.theme)
       return { accent: id }
     }),
 
   setTermTheme: (id) =>
     set(() => {
-      localStorage.setItem('minipit:termTheme', id)
+      localStorage.setItem('den:termTheme', id)
       return { termTheme: id }
     }),
 
   setRemoteEditor: (id) =>
     set(() => {
-      localStorage.setItem('minipit:remoteEditor', id)
+      localStorage.setItem('den:remoteEditor', id)
       return { remoteEditor: id }
     }),
 
   setTerminalApp: (id) =>
     set(() => {
-      localStorage.setItem('minipit:terminalApp', id)
+      localStorage.setItem('den:terminalApp', id)
       return { terminalApp: id }
     }),
 
@@ -358,15 +358,15 @@ export const useStore = create<AppState>((set) => ({
       try { return JSON.parse(localStorage.getItem(k) ?? '{}') ?? {} } catch { return {} }
     }
     const local = {
-      sandboxIcons: readLS('minipit:sandboxIcons'),
-      sandboxColors: readLS('minipit:sandboxColors'),
-      sandboxGroups: readLS('minipit:sandboxGroups')
+      sandboxIcons: readLS('den:sandboxIcons'),
+      sandboxColors: readLS('den:sandboxColors'),
+      sandboxGroups: readLS('den:sandboxGroups')
     }
-    window.minipit?.projectConfigSync(local).then((cfg) => {
+    window.den?.projectConfigSync(local).then((cfg) => {
       if (!cfg) return
-      localStorage.setItem('minipit:sandboxIcons', JSON.stringify(cfg.sandboxIcons))
-      localStorage.setItem('minipit:sandboxColors', JSON.stringify(cfg.sandboxColors))
-      localStorage.setItem('minipit:sandboxGroups', JSON.stringify(cfg.sandboxGroups))
+      localStorage.setItem('den:sandboxIcons', JSON.stringify(cfg.sandboxIcons))
+      localStorage.setItem('den:sandboxColors', JSON.stringify(cfg.sandboxColors))
+      localStorage.setItem('den:sandboxGroups', JSON.stringify(cfg.sandboxGroups))
       set({ sandboxIcons: cfg.sandboxIcons, sandboxColors: cfg.sandboxColors, sandboxGroups: cfg.sandboxGroups })
     }).catch(() => {})
   },
@@ -374,13 +374,13 @@ export const useStore = create<AppState>((set) => ({
   loadGitInfo: (workspace, force) => {
     if (!workspace) return
     if (!force && useStore.getState().gitInfo[workspace]) return
-    window.minipit?.gitInfo(workspace)
+    window.den?.gitInfo(workspace)
       .then((info) => set((s) => ({ gitInfo: { ...s.gitInfo, [workspace]: info ?? { isRepo: false } } })))
       .catch(() => {})
   },
 
   refreshSandboxChanges: (name, workspace) => {
-    window.minipit?.gitStatus(name, workspace)
+    window.den?.gitStatus(name, workspace)
       .then((r) => set((s) => ({ sandboxChanges: { ...s.sandboxChanges, [name]: r?.isRepo ? r.changes.length : 0 } })))
       .catch(() => {})
   },
@@ -388,27 +388,27 @@ export const useStore = create<AppState>((set) => ({
   setDisplay: (key, value) =>
     set((state) => {
       const next = { ...state.display, [key]: value }
-      localStorage.setItem('minipit:display', JSON.stringify(next))
+      localStorage.setItem('den:display', JSON.stringify(next))
       return { display: next }
     }),
 
   setSubLineMode: (mode) =>
     set((state) => {
       const next = { ...state.display, subLineMode: mode }
-      localStorage.setItem('minipit:display', JSON.stringify(next))
+      localStorage.setItem('den:display', JSON.stringify(next))
       return { display: next }
     }),
 
   setCustomizeSandbox: (name) => set({ customizeSandbox: name }),
 
   loadSandboxIsolation: () => {
-    window.minipit?.sandboxIsolation()
+    window.den?.sandboxIsolation()
       .then((m) => set({ sandboxIsolation: m ?? {} }))
       .catch(() => {})
   },
 
   loadAutoSync: () => {
-    window.minipit?.autoSyncGet()
+    window.den?.autoSyncGet()
       .then((m) => set({ sandboxAutoSync: m ?? {} }))
       .catch(() => {})
   },
@@ -416,7 +416,7 @@ export const useStore = create<AppState>((set) => ({
   setAutoSync: (name, on) => {
     // Optimistic: reflect the toggle immediately, then persist in main.
     set((s) => ({ sandboxAutoSync: { ...s.sandboxAutoSync, [name]: on } }))
-    window.minipit?.autoSyncSet(name, on).catch(() => {})
+    window.den?.autoSyncSet(name, on).catch(() => {})
   },
 
   setSandboxIcon: (name, iconKey) =>
@@ -424,8 +424,8 @@ export const useStore = create<AppState>((set) => ({
       const next = { ...state.sandboxIcons }
       if (iconKey) next[name] = iconKey
       else delete next[name]
-      localStorage.setItem('minipit:sandboxIcons', JSON.stringify(next))
-      window.minipit?.projectConfigSet('sandboxIcons', name, iconKey ?? null)
+      localStorage.setItem('den:sandboxIcons', JSON.stringify(next))
+      window.den?.projectConfigSet('sandboxIcons', name, iconKey ?? null)
       return { sandboxIcons: next }
     }),
 
@@ -434,14 +434,14 @@ export const useStore = create<AppState>((set) => ({
       const next = { ...state.sandboxColors }
       if (hex) next[name] = hex
       else delete next[name]
-      localStorage.setItem('minipit:sandboxColors', JSON.stringify(next))
-      window.minipit?.projectConfigSet('sandboxColors', name, hex ?? null)
+      localStorage.setItem('den:sandboxColors', JSON.stringify(next))
+      window.den?.projectConfigSet('sandboxColors', name, hex ?? null)
       return { sandboxColors: next }
     }),
 
   // ── Docker account ──────────────────────────────────────────────────────────
   loadDockerAccount: () => {
-    window.minipit?.dockerAccount().then((a) => {
+    window.den?.dockerAccount().then((a) => {
       const account = (a as DockerAccount) ?? { loggedIn: false }
       set({ dockerAccount: account })
       // Default/repair the active namespace: keep a still-valid selection,
@@ -451,35 +451,35 @@ export const useStore = create<AppState>((set) => ({
       if (!current || !valid.includes(current)) {
         const next = account.username ?? null
         set({ activeOrg: next })
-        if (next) localStorage.setItem('minipit:activeOrg', next)
-        else localStorage.removeItem('minipit:activeOrg')
+        if (next) localStorage.setItem('den:activeOrg', next)
+        else localStorage.removeItem('den:activeOrg')
       }
     }).catch(() => {})
   },
 
   setActiveOrg: (org) => {
     set({ activeOrg: org })
-    if (org) localStorage.setItem('minipit:activeOrg', org)
-    else localStorage.removeItem('minipit:activeOrg')
+    if (org) localStorage.setItem('den:activeOrg', org)
+    else localStorage.removeItem('den:activeOrg')
   },
 
   // ── Groups ────────────────────────────────────────────────────────────────
   loadGroups: () => {
-    window.minipit?.groupsGet().then((g) => set({ groups: g ?? [] })).catch(() => {})
+    window.den?.groupsGet().then((g) => set({ groups: g ?? [] })).catch(() => {})
   },
 
   createGroup: (name) => {
     const id = `g-${Date.now().toString(36)}-${Math.round(Math.random() * 1e9).toString(36)}`
     const groups = [...useStore.getState().groups, { id, name: name.trim() || 'Group' }]
     set({ groups })
-    window.minipit?.groupsSet(groups)
+    window.den?.groupsSet(groups)
     return id
   },
 
   renameGroup: (id, name) => {
     const groups = useStore.getState().groups.map((g) => (g.id === id ? { ...g, name: name.trim() || g.name } : g))
     set({ groups })
-    window.minipit?.groupsSet(groups)
+    window.den?.groupsSet(groups)
   },
 
   deleteGroup: (id, deleteSandboxes) => {
@@ -488,15 +488,15 @@ export const useStore = create<AppState>((set) => ({
     // Drop the group + clear its members' membership (persist each removal).
     const groups = state.groups.filter((g) => g.id !== id)
     const nextMap = { ...state.sandboxGroups }
-    for (const n of members) { delete nextMap[n]; window.minipit?.projectConfigSet('sandboxGroups', n, null) }
-    localStorage.setItem('minipit:sandboxGroups', JSON.stringify(nextMap))
+    for (const n of members) { delete nextMap[n]; window.den?.projectConfigSet('sandboxGroups', n, null) }
+    localStorage.setItem('den:sandboxGroups', JSON.stringify(nextMap))
     set({ groups, sandboxGroups: nextMap })
-    window.minipit?.groupsSet(groups)
+    window.den?.groupsSet(groups)
     if (deleteSandboxes) {
       for (const n of members) {
         const sb = state.sandboxes.find((s) => s.name === n)
         if (sb) useStore.getState().updateSandbox(sb.id, { status: 'deleting' })
-        window.minipit?.deleteSandbox(n).catch(() => {})
+        window.den?.deleteSandbox(n).catch(() => {})
       }
     }
   },
@@ -506,8 +506,8 @@ export const useStore = create<AppState>((set) => ({
       const next = { ...state.sandboxGroups }
       if (groupId) next[name] = groupId
       else delete next[name]
-      localStorage.setItem('minipit:sandboxGroups', JSON.stringify(next))
-      window.minipit?.projectConfigSet('sandboxGroups', name, groupId ?? null)
+      localStorage.setItem('den:sandboxGroups', JSON.stringify(next))
+      window.den?.projectConfigSet('sandboxGroups', name, groupId ?? null)
       return { sandboxGroups: next }
     }),
 
@@ -520,7 +520,7 @@ export const useStore = create<AppState>((set) => ({
     const idx = beforeId ? rest.findIndex((g) => g.id === beforeId) : -1
     const next = idx < 0 ? [...rest, dragged] : [...rest.slice(0, idx), dragged, ...rest.slice(idx)]
     set({ groups: next })
-    window.minipit?.groupsSet(next)
+    window.den?.groupsSet(next)
   },
 
   // Move sandbox `dragName` before `beforeName` (null = end) in the manual order.
@@ -531,7 +531,7 @@ export const useStore = create<AppState>((set) => ({
     const rest = base.filter((n) => n !== dragName)
     const idx = beforeName ? rest.indexOf(beforeName) : -1
     const next = idx < 0 ? [...rest, dragName] : [...rest.slice(0, idx), dragName, ...rest.slice(idx)]
-    localStorage.setItem('minipit:sandboxOrder', JSON.stringify(next))
+    localStorage.setItem('den:sandboxOrder', JSON.stringify(next))
     set({ sandboxOrder: next })
   },
 
@@ -539,7 +539,7 @@ export const useStore = create<AppState>((set) => ({
 
   setThemePref: (pref) =>
     set((state) => {
-      localStorage.setItem('minipit:themePref', pref)
+      localStorage.setItem('den:themePref', pref)
       const theme = resolveTheme(pref)
       document.documentElement.setAttribute('data-theme', theme)
       // Re-apply the color theme so its palette matches the new light/dark mode.
@@ -548,29 +548,29 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   setFileOpenMode: (mode) => {
-    localStorage.setItem('minipit:fileOpenMode', mode)
+    localStorage.setItem('den:fileOpenMode', mode)
     set({ fileOpenMode: mode })
   },
 
   setDensity: (density) =>
     set((s) => {
-      localStorage.setItem('minipit:density', density)
-      window.minipit?.setZoomFactor(densityFactor(density, s.densityCustom))
+      localStorage.setItem('den:density', density)
+      window.den?.setZoomFactor(densityFactor(density, s.densityCustom))
       return { density }
     }),
 
   setDensityCustom: (factor) =>
     set((s) => {
       const f = clampFactor(factor)
-      localStorage.setItem('minipit:densityCustom', String(f))
-      if (s.density === 'custom') window.minipit?.setZoomFactor(f)
+      localStorage.setItem('den:densityCustom', String(f))
+      if (s.density === 'custom') window.den?.setZoomFactor(f)
       return { densityCustom: f }
     }),
 
   toggleSidebar: () =>
     set((state) => {
       const sidebarCollapsed = !state.sidebarCollapsed
-      localStorage.setItem('minipit:sidebarCollapsed', sidebarCollapsed ? '1' : '0')
+      localStorage.setItem('den:sidebarCollapsed', sidebarCollapsed ? '1' : '0')
       return { sidebarCollapsed }
     }),
 

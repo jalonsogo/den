@@ -37,7 +37,7 @@ export function App() {
   const appTheme = useStore((s) => s.theme)
   const termThemeId = useStore((s) => s.termTheme)
   const termMode = resolveTermTheme(termThemeId, appTheme).mode
-  useEffect(() => { window.minipit?.setTermMode(termMode) }, [termMode])
+  useEffect(() => { window.den?.setTermMode(termMode) }, [termMode])
 
   // Mirror which sandbox is open so the Sandboxes menu can mark it and put the
   // keyboard accelerators on that sandbox's own items — a menu item saying
@@ -45,19 +45,19 @@ export function App() {
   // Same reason as the theme mirror: the Sandboxes menu is built in main, so it
   // needs to know which terminal "Connect in Terminal" should use.
   const terminalAppId = useStore((s) => s.terminalApp)
-  useEffect(() => { window.minipit?.setTerminalApp?.(terminalAppId) }, [terminalAppId])
+  useEffect(() => { window.den?.setTerminalApp?.(terminalAppId) }, [terminalAppId])
 
   const activeSandboxId = useStore((s) => s.activeSandboxId)
   const activeSandboxName = useStore(
     (s) => s.sandboxes.find((x) => x.id === s.activeSandboxId)?.name ?? null
   )
   useEffect(() => {
-    window.minipit?.setActiveSandbox?.(activeSandboxName)
+    window.den?.setActiveSandbox?.(activeSandboxName)
   }, [activeSandboxName, activeSandboxId])
 
   useEffect(() => {
     // Initial load
-    window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
+    window.den?.listSandboxes().then((s) => setSandboxes(s as Sandbox[]))
     // Pull durable per-sandbox appearance (color/icon) + group membership from
     // the main-process store, migrating any localStorage cache on first run.
     syncProjectConfig()
@@ -71,7 +71,7 @@ export function App() {
     useStore.getState().loadDockerAccount()
 
     // Live updates from main process
-    const unsub1 = window.minipit?.onSandboxesUpdated((s) => {
+    const unsub1 = window.den?.onSandboxesUpdated((s) => {
       const list = s as Sandbox[]
       setSandboxes(list)
       // A create/delete changes the isolation map — keep it fresh.
@@ -87,18 +87,18 @@ export function App() {
     })
 
     // Stream real log lines from sbx processes
-    const unsub2 = window.minipit?.onLogLine((name: string, line: LogLine) => {
+    const unsub2 = window.den?.onLogLine((name: string, line: LogLine) => {
       appendLog(name, line)
       // If we got a log line, the sandbox must be running
       updateSandbox(name, { status: 'running' })
     })
 
-    const unsubBlock = window.minipit?.onPolicyBlock?.((b) => addPolicyBlock(b as PolicyBlock))
+    const unsubBlock = window.den?.onPolicyBlock?.((b) => addPolicyBlock(b as PolicyBlock))
 
     // `sbx run` refused the launch. `runSandbox` is fire-and-forget (it can't
     // report this), and the optimistic "starting"/"running" would otherwise sit
     // there forever — so record the reason and put the sandbox back to stopped.
-    const unsubErr = window.minipit?.onSandboxError?.((e) => {
+    const unsubErr = window.den?.onSandboxError?.((e) => {
       const err = e as SandboxError
       useStore.getState().setSandboxError(err)
       updateSandbox(err.sandbox, { status: 'stopped', uptimeSeconds: undefined })
@@ -108,7 +108,7 @@ export function App() {
     // "ask" cue. This event is sent just before the matching activity→waiting, so
     // we note it and let the activity handler skip the finish cue for it.
     const askedAt: Record<string, number> = {}
-    const unsubAttn = window.minipit?.onAgentAttention?.((name) => {
+    const unsubAttn = window.den?.onAgentAttention?.((name) => {
       askedAt[name] = Date.now()
       playAskSound()
     })
@@ -116,7 +116,7 @@ export function App() {
     // Agent activity: track state and chime on every working → waiting finalize,
     // unless an attention cue just fired for this sandbox (it's a question, not a
     // finished turn).
-    const unsubAct = window.minipit?.onAgentActivity?.((name, state) => {
+    const unsubAct = window.den?.onAgentActivity?.((name, state) => {
       const prev = useStore.getState().agentActivity[name]
       setAgentActivity(name, state)
       if (state === 'waiting' && prev === 'working') {
@@ -125,28 +125,28 @@ export function App() {
       }
     })
 
-    const unsub3 = window.minipit?.onNavigate((page) =>
+    const unsub3 = window.den?.onNavigate((page) =>
       setActivePage(page as import('./types').PageType)
     )
-    const unsub4 = window.minipit?.onOpenModal((m) =>
+    const unsub4 = window.den?.onOpenModal((m) =>
       setModal(m as 'new-sandbox' | 'new-secret')
     )
-    const unsub5 = window.minipit?.onSetTab((tab) =>
+    const unsub5 = window.den?.onSetTab((tab) =>
       setActiveTab(tab as 'terminal' | 'info')
     )
     // A sandbox's files changed → refresh its uncommitted-change count.
-    const unsubFiles = window.minipit?.onFilesChanged?.((name) => {
+    const unsubFiles = window.den?.onFilesChanged?.((name) => {
       const sb = useStore.getState().sandboxes.find((s) => s.name === name)
       if (sb) useStore.getState().refreshSandboxChanges(name, sb.workspace)
     })
 
     // Menu-bar (tray) quick-open: jump to a sandbox.
-    const unsub6 = window.minipit?.onOpenSandbox((name) => setActiveSandboxId(name))
+    const unsub6 = window.den?.onOpenSandbox((name) => setActiveSandboxId(name))
 
     // A menu action aimed at a specific sandbox by name. Run here rather than in
     // main so the sidebar reflects the transition immediately (main would have to
     // wait for the next poll to show "stopping"/"starting").
-    const unsubAction = window.minipit?.onSandboxAction?.((name, action) => {
+    const unsubAction = window.den?.onSandboxAction?.((name, action) => {
       const s = useStore.getState()
       const sb = s.sandboxes.find((x) => x.name === name)
       if (!sb) return
@@ -156,13 +156,13 @@ export function App() {
           break
         case 'start':
           s.updateSandbox(sb.id, { status: 'starting' })
-          window.minipit?.runSandbox(name)
+          window.den?.runSandbox(name)
             .then(() => s.updateSandbox(sb.id, { status: 'running' }))
             .catch(() => s.updateSandbox(sb.id, { status: 'stopped' }))
           break
         case 'stop':
           s.updateSandbox(sb.id, { status: 'stopping' })
-          window.minipit?.stopSandbox(name)
+          window.den?.stopSandbox(name)
             .then(() => s.updateSandbox(sb.id, { status: 'stopped', uptimeSeconds: undefined }))
             .catch(() => s.updateSandbox(sb.id, { status: 'running' }))
           break
@@ -170,8 +170,8 @@ export function App() {
           s.updateSandbox(sb.id, { status: 'stopping' })
           ;(async () => {
             try {
-              await window.minipit?.stopSandbox(name)
-              await window.minipit?.runSandbox(name)
+              await window.den?.stopSandbox(name)
+              await window.den?.runSandbox(name)
               s.updateSandbox(sb.id, { status: 'running' })
             } catch { s.updateSandbox(sb.id, { status: 'running' }) }
           })()
@@ -207,7 +207,7 @@ export function App() {
   // probe is in flight would be worse than showing it a beat late.
   const [needsRuntimeSetup, setNeedsRuntimeSetup] = useState(false)
   useEffect(() => {
-    void window.minipit?.runtimeSetupState?.()
+    void window.den?.runtimeSetupState?.()
       .then((r) => { if (r?.needsSetup) setNeedsRuntimeSetup(true) })
       .catch(() => {})
   }, [])
@@ -231,14 +231,14 @@ export function App() {
       switch (k) {
         case 's':
           if (running) { e.preventDefault(); s.updateSandbox(sb.id, { status: 'stopping' })
-            window.minipit?.stopSandbox(sb.name)
+            window.den?.stopSandbox(sb.name)
               .then(() => s.updateSandbox(sb.id, { status: 'stopped', uptimeSeconds: undefined }))
               .catch(() => s.updateSandbox(sb.id, { status: 'running' })) }
           break
         case 'r':
           e.preventDefault(); s.updateSandbox(sb.id, { status: 'stopping' })
           ;(async () => {
-            try { await window.minipit?.stopSandbox(sb.name); await window.minipit?.runSandbox(sb.name); s.updateSandbox(sb.id, { status: 'running' }) }
+            try { await window.den?.stopSandbox(sb.name); await window.den?.runSandbox(sb.name); s.updateSandbox(sb.id, { status: 'running' }) }
             catch { s.updateSandbox(sb.id, { status: 'running' }) }
           })()
           break
@@ -246,7 +246,7 @@ export function App() {
           e.preventDefault()
           if (confirm(`Delete sandbox "${sb.name}"? This can't be undone.`)) {
             s.updateSandbox(sb.id, { status: 'deleting' })
-            window.minipit?.deleteSandbox(sb.name).catch(() => {})
+            window.den?.deleteSandbox(sb.name).catch(() => {})
           }
           break
         case 'l':
