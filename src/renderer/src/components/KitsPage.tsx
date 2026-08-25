@@ -213,6 +213,18 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     /\.git(?:#|$)/.test(ref) ||
     /^https?:\/\/(?:[^/]*\.)?(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|git\.sr\.ht|dev\.azure\.com)\//.test(ref)
 
+  // An import can succeed and still produce no .zip — the kit works for
+  // "Add to sandbox" but can't be pushed, and shows as "unpacked". That's a
+  // partial failure, so it gets the warning banner rather than a green
+  // "Imported", and it names the reason sbx gave. (Read off the wider result
+  // shape, as with `choices` below: only the local importers pack.)
+  const importedMsg = (res: { name?: string } | null | undefined) => {
+    const packError = (res as { packError?: string } | null | undefined)?.packError
+    return packError
+      ? { ok: false, text: `Imported "${res?.name}", but it didn't pack: ${packError} — it'll show as unpacked and can't be pushed until that's fixed.` }
+      : { ok: true, text: `Imported "${res?.name}" into your library.` }
+  }
+
   // OCI reference / Git URL — both take a text ref via the inline form.
   const doImport = async (ref = importRef.trim(), pickDir?: string) => {
     if (!ref || importing) return
@@ -228,7 +240,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       setImportRef('')
       setRepoPick(null)
       load()
-      setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
+      setMsg(importedMsg(res))
       return
     }
     // Several kits in one repo — ask which, keeping the typed reference so the
@@ -269,7 +281,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     if (res?.canceled) return
     if (res?.ok) {
       load()
-      setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
+      setMsg(importedMsg(res))
     } else {
       setMsg({ ok: false, text: res?.error || 'Import failed.' })
     }
@@ -719,7 +731,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                   <div className="lib-primary">
                     {variant === 'mixin' ? <Layers size={14} /> : <Package size={14} />}
                     <span>{k.name}</span>
-                    {!k.hasZip && <span className="kit-unpacked" title="Not packed yet">unpacked</span>}
+                    {!k.hasZip && <span className="kit-unpacked" title="No packed artifact — this kit failed to pack, so it can't be pushed. Edit ▸ Save re-packs it and reports why.">unpacked</span>}
                   </div>
                   <KitCaps p={specs[k.dir]} />
                   <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>

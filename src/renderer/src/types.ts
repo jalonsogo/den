@@ -455,12 +455,12 @@ declare global {
       kitPack(dir: string, name: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; output?: string; error?: string }>
       saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
-      kitImportZip(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
-      kitImportFolder(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
+      kitImportZip(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string; packError?: string }>
+      kitImportFolder(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string; packError?: string }>
       // `choices` comes back instead of an import when the repo holds several
       // kits — re-call with the chosen `dir` as `pickDir`.
       kitImportGit(url: string, pickDir?: string): Promise<{
-        ok: boolean; name?: string; error?: string; choices?: RepoKit[]; repo?: string; ref?: string
+        ok: boolean; name?: string; error?: string; packError?: string; choices?: RepoKit[]; repo?: string; ref?: string
       }>
       listHubKits(): Promise<{ ok: boolean; kits?: HubKit[]; error?: string }>
       dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; fullName?: string; gravatar?: string; orgs?: string[] }>

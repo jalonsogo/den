@@ -474,16 +474,28 @@ function kitNameFrom(raw: string): string {
 // Validate an imported kit dir has a spec.yaml, pack it to a sibling .zip (so it
 // reads like any locally-authored kit), and refresh the app menu. Cleans up on
 // failure. Shared exit path for the folder/zip/git importers.
-async function finalizeImportedKit(name: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+async function finalizeImportedKit(name: string): Promise<{ ok: boolean; name?: string; error?: string; packError?: string }> {
   const fs = require('fs')
   const dir = join(kitsRoot(), name)
   if (!fs.existsSync(join(dir, 'spec.yaml'))) {
     fs.rmSync(dir, { recursive: true, force: true })
     return { ok: false, error: 'No spec.yaml found — not a valid kit.' }
   }
-  try { await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 }) } catch { /* leave unpacked; still usable */ }
+  // A failed pack doesn't fail the import: the kit still works for `kit add`,
+  // which takes a directory. But it can't be pushed, and it reports itself as
+  // "unpacked" in the library — so the reason travels back with the result
+  // instead of being dropped here. It used to be swallowed outright, which left
+  // that badge as the only evidence anything had gone wrong, with no way to
+  // find out what (the other two pack call sites, create-kit and update-kit,
+  // both surface theirs).
+  let packError: string | undefined
+  try {
+    await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 })
+  } catch (e) {
+    packError = (e instanceof Error ? e.message : String(e)).trim()
+  }
   setAppMenu().catch(() => {})
-  return { ok: true, name }
+  return { ok: true, name, packError }
 }
 
 // Extract a kit archive (.zip or .tar.gz) into <kits>/<name>, flattening a
