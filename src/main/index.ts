@@ -5603,7 +5603,10 @@ function setupIPC(): void {
       // nudge below for many seconds, leaving the terminal blank until then.
       // The renderer subscribed before invoking this, so it receives the replay.
       const buf = agentOutBuf.get(name)
-      if (buf) mainWindow?.webContents.send('minipit:agent-output', name, buf)
+      // Flagged as a replay: this is history, not live output, so the renderer
+      // has to re-pin the viewport to the bottom once it lands (see the write
+      // handler in TerminalPanel). Live writes carry no flag.
+      if (buf) mainWindow?.webContents.send('minipit:agent-output', name, buf, true)
       // Nudge the size so the TUI repaints cleanly at this size.
       try { proc.resize(Math.max(2, cols - 1), rows) } catch { /* ignore */ }
       try { proc.resize(cols, rows) } catch { /* ignore */ }

@@ -16,8 +16,10 @@ interface XTermProps {
   sandboxId: string
   visible: boolean
   theme: ITheme
-  // Subscribe to live output; return an unsubscribe fn. `write` feeds the terminal.
-  subscribe: (write: (data: string) => void) => (() => void) | undefined
+  // Subscribe to live output; return an unsubscribe fn. `write` feeds the
+  // terminal. `replay` marks a burst of buffered history resent on reattach,
+  // which the viewport has to be re-pinned after (see the write handler).
+  subscribe: (write: (data: string, replay?: boolean) => void) => (() => void) | undefined
   onInput: (data: string) => void
   onResize: (cols: number, rows: number) => void
   // Called once after the first fit with the real size (start/attach the session).
@@ -50,16 +52,26 @@ const ENABLE_WEBGL = false
 // arrives sliced in half. Measuring what was actually laid out catches that
 // (and any other rounding mismatch) instead of trusting the arithmetic.
 function fitToBox(term: Terminal, fit: FitAddon, host: HTMLElement | null): void {
-  fit.fit()
-  if (!host || term.rows <= 1) return
-  const screen = term.element?.querySelector('.xterm-screen') as HTMLElement | null
-  if (!screen) return
-  // Computed height is the content box — the same measurement FitAddon makes.
-  const available = parseFloat(window.getComputedStyle(host).height)
-  const rendered = screen.getBoundingClientRect().height
-  // A pixel of slack: sub-pixel rounding is unavoidable and invisible, and
-  // trimming on it would cost a row for nothing.
-  if (isFinite(available) && rendered > available + 1) term.resize(term.cols, term.rows - 1)
+  // A resize reflows the buffer and can leave the viewport parked somewhere in
+  // the scrollback rather than on the newest line. Only correct that when we
+  // were at the bottom to begin with — someone who has deliberately scrolled
+  // back to read is left where they are. The finally covers the early returns.
+  const buf = term.buffer.active
+  const pinned = buf.viewportY >= buf.baseY
+  try {
+    fit.fit()
+    if (!host || term.rows <= 1) return
+    const screen = term.element?.querySelector('.xterm-screen') as HTMLElement | null
+    if (!screen) return
+    // Computed height is the content box — the same measurement FitAddon makes.
+    const available = parseFloat(window.getComputedStyle(host).height)
+    const rendered = screen.getBoundingClientRect().height
+    // A pixel of slack: sub-pixel rounding is unavoidable and invisible, and
+    // trimming on it would cost a row for nothing.
+    if (isFinite(available) && rendered > available + 1) term.resize(term.cols, term.rows - 1)
+  } finally {
+    if (pinned) term.scrollToBottom()
+  }
 }
 
 // A real VT100 terminal (xterm.js) that handles full-screen TUIs like Claude Code.
@@ -208,7 +220,18 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     sentColsRef.current = term.cols; sentRowsRef.current = term.rows
     // Subscribe to output BEFORE attaching the session, so we never miss the
     // first frame or the reattach replay (main emits it during agent-ensure).
-    const unsub = subscribe((data) => { gotData = true; term.write(data) })
+    // A replay is the tail of the session resent into this freshly-mounted
+    // terminal. An agent that repaints a full frame (Claude Code) overwrites it
+    // and lands wherever its own frame puts the cursor, but one that renders a
+    // scrolling transcript (Codex) leaves the whole burst as real scrollback —
+    // and the viewport can end up at the top of it, so returning to the tab
+    // meant scrolling all the way down to reach the live prompt. write()'s
+    // callback runs once xterm has parsed the chunk, which is the only point at
+    // which scrolling to the bottom means the *new* bottom.
+    const unsub = subscribe((data, replay) => {
+      gotData = true
+      term.write(data, replay ? () => { if (!disposed) term.scrollToBottom() } : undefined)
+    })
     const dataDisp = term.onData(onInput)
     onStart(term.cols, term.rows)
     requestAnimationFrame(() => { kick(); requestAnimationFrame(kick) })
@@ -532,7 +555,7 @@ function AgentTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
       visible={visible}
       theme={theme}
       shiftEnterNewline
-      subscribe={(write) => window.minipit?.onAgentOutput((name, data) => { if (name === sandbox.name) write(data) })}
+      subscribe={(write) => window.minipit?.onAgentOutput((name, data, replay) => { if (name === sandbox.name) write(data, replay) })}
       onInput={(data) => window.minipit?.agentWrite(sandbox.name, data)}
       onResize={(cols, rows) => window.minipit?.agentResize(sandbox.name, cols, rows)}
       onStart={(cols, rows) => window.minipit?.agentEnsure(sandbox.name, cols, rows)}

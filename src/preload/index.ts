@@ -296,8 +296,8 @@ const api = {
   agentResize: (name: string, cols: number, rows: number) => ipcRenderer.invoke('minipit:agent-resize', name, cols, rows),
   agentEnsure: (name: string, cols: number, rows: number) => ipcRenderer.invoke('minipit:agent-ensure', name, cols, rows),
   setTermMode: (mode: 'light' | 'dark') => ipcRenderer.invoke('minipit:term-mode', mode),
-  onAgentOutput: (cb: (name: string, data: string) => void) => {
-    const handler = (_: Electron.IpcRendererEvent, name: string, data: string) => cb(name, data)
+  onAgentOutput: (cb: (name: string, data: string, replay?: boolean) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string, data: string, replay?: boolean) => cb(name, data, replay)
     ipcRenderer.on('minipit:agent-output', handler)
     return () => ipcRenderer.removeListener('minipit:agent-output', handler)
   },

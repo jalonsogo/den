@@ -617,7 +617,7 @@ declare global {
       agentResize(name: string, cols: number, rows: number): Promise<void>
       agentEnsure(name: string, cols: number, rows: number): Promise<void>
       setTermMode(mode: 'light' | 'dark'): Promise<void>
-      onAgentOutput(cb: (name: string, data: string) => void): () => void
+      onAgentOutput(cb: (name: string, data: string, replay?: boolean) => void): () => void
       onAgentExit(cb: (name: string) => void): () => void
       ptyStart(name: string, cols: number, rows: number): Promise<void>
       ptyWrite(name: string, data: string): Promise<void>
