@@ -109,3 +109,14 @@ export const MCP_CATALOG: McpServer[] = [
 export function mcpHost(url: string): string {
   try { return new URL(url).host } catch { return url }
 }
+
+// Second line of defence behind the main process's `parseMcpTable()`. A
+// registered server's name is an identifier — notion, vercel, playwright —
+// never a sentence. With nothing registered sbx prints prose and aligned help
+// where the table would be, and anything that mistakes one of those lines for a
+// row yields a phantom server: on the MCP page it came with working Authorize
+// and Remove buttons, in New Sandbox it was a pill reading "add one" that
+// silently passed `--static-mcp "add one"` to creation. Dropping names with
+// whitespace means a parse failure can only ever render less, never a fake.
+// Every consumer of `mcpList()` filters through this.
+export const isMcpServerName = (name: string): boolean => !!name && !/\s/.test(name)

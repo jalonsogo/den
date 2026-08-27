@@ -24,7 +24,7 @@ import {
   traceFile, traceDir, traceCount, type ApiErrorTrace
 } from './apiTrace'
 import Store from 'electron-store'
-import { parsePorcelain, semverLt, type FileChange } from './parse'
+import { parsePorcelain, semverLt, type FileChange, parseMcpTable, type McpServerEntry } from './parse'
 // node-pty 1.x compiles to CJS with `__esModule: true` but no `default` export,
 // so a default import resolves to `undefined` under esbuild's interop (crashing
 // `pty.spawn`). Import the namespace instead.
@@ -784,27 +784,6 @@ function parsePolicyLs(out: string) {
   return { governance, sync, rules }
 }
 
-// `raw` keeps stdout exactly as produced. The default trim is right for the
-// value-style callers (a version, a JSON blob), but it silently corrupts any
-// format where leading whitespace on the first line is significant — see
-// gitStatus, where a trimmed " M path" loses a character off the filename.
-// A registered MCP server as den shows it. Fields are best-effort: which of
-// url/command/transport/auth a given sbx build reports isn't pinned.
-interface McpServerEntry {
-  name: string
-  url: string
-  command: string
-  transport: string
-  auth: string
-}
-
-// Fallback for `sbx mcp ls` without --json: a column-aligned table. Take the
-// first field as the name and classify the rest by shape rather than by column
-// position, which has moved before in other sbx tables.
-// `sbx mcp ls` doesn't report whether a server is authorized — `sbx mcp auth
-// status` does. Ask it per server so an authorized server actually reads as
-// one; the list is short, and a server whose status can't be read keeps
-// whatever `ls` said rather than being mislabelled.
 // Pull an authorization state out of `sbx mcp inspect` output. Only a value
 // that actually names a state counts: v0.38 prints `OAuth: required`, which
 // says the server *needs* OAuth, not that you haven't done it — reading that as
@@ -827,6 +806,10 @@ function authFromInspect(raw: string): string {
   return ''
 }
 
+// `sbx mcp ls` doesn't report whether a server is authorized — `sbx mcp auth
+// status` does. Ask it per server so an authorized server actually reads as
+// one; the list is short, and a server whose status can't be read keeps
+// whatever `ls` said rather than being mislabelled.
 // sbx reports authorization differently across builds: `mcp ls` may carry a
 // column, `mcp auth status` may or may not exist, and `mcp inspect` always has
 // something. Try them in cost order and only give up at the end — reporting
@@ -863,35 +846,10 @@ async function withAuthState(servers: McpServerEntry[]): Promise<McpServerEntry[
   return Promise.all(servers.map(async (m) => (m.auth ? m : { ...m, auth: await probeAuth(m.name) })))
 }
 
-function parseMcpTable(out: string): McpServerEntry[] {
-  const rows: McpServerEntry[] = []
-  for (const line of out.split('\n')) {
-    const t = line.trim()
-    if (!t) continue
-    const cols = t.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
-    if (cols.length < 1) continue
-    // Skip the header row, whatever it's called.
-    if (/^(name|server)\b/i.test(cols[0])) continue
-    // Skip prose. With nothing registered sbx prints a sentence ("No MCP
-    // servers registered"), and add/auth emit INFO/ERROR lines; taking the
-    // first field of those produced a phantom server complete with action
-    // buttons. A real row is either multi-column or a bare identifier.
-    if (/^(no|none|error|info|warn|warning|usage|failed)\b/i.test(cols[0])) continue
-    if (cols.length === 1 && /\s/.test(cols[0])) continue
-    const rest = cols.slice(1)
-    rows.push({
-      name: cols[0],
-      url: rest.find((c) => /^https?:\/\//i.test(c)) ?? '',
-      command: rest.find((c) => !/^https?:\/\//i.test(c) && /\s|\//.test(c)) ?? '',
-      transport: rest.find((c) => /^(http|sse|stdio|local|remote)$/i.test(c)) ?? '',
-      // Widened past the obvious words: a column can just as well read "yes",
-      // "valid" or "active", and missing it shows an authorized server as blank.
-      auth: rest.find((c) => /^(yes|no|ok|valid|active|none|never)$/i.test(c) || /auth|token|expired|pending/i.test(c)) ?? ''
-    })
-  }
-  return rows
-}
-
+// `raw` keeps stdout exactly as produced. The default trim is right for the
+// value-style callers (a version, a JSON blob), but it silently corrupts any
+// format where leading whitespace on the first line is significant — see
+// gitStatus, where a trimmed " M path" loses a character off the filename.
 function sbx(args: string[], opts?: { timeout?: number; raw?: boolean }): Promise<string> {
   const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The phantom MCP server in New Sandbox.** With nothing registered on the gateway, sbx prints a sentence and a few lines of aligned help where the table of servers would be — and one of those lines split into columns exactly like a real row, so the form offered a server called **add one**. It looked like a broken button (no icon, prose for a name), pressing it appeared to do nothing, and it would have gone on to `sbx create` as `--static-mcp "add one"`. The parser now requires a name to be a bare identifier however many columns follow it, and the whitespace filter that had been protecting the MCP page is shared with every consumer of the server list rather than living in one component. `parseMcpTable()` moved to the tested pure layer, so the empty-registry output is a regression test.
+- A picker chip for a server den ships no icon for kept the icon's 14px slot, leaving a hole that read as an image that failed to load.
+
+### Changed
+- **New Sandbox states the MCP mode instead of hinting at it.** Which servers a sandbox can reach was a grey suffix on the field label (*dynamic — the agent discovers them itself*) that changed as you clicked, and it was routinely missed. It's now a card that says which mode you're in, what that means, and carries the action that leaves it: **Dynamic** explains that the agent finds servers itself through the gateway's `mcp-find` tool, **Static** names the servers that are pre-loaded and offers *Back to dynamic*. It stays derived from the selection rather than becoming a switch of its own, because "static with nothing pre-loaded" isn't a state sbx can express and a switch offering it would lie. With nothing registered the section now appears at all — previously it was hidden, so the default went unexplained — with a **Register one…** button that opens Library → MCP servers on its Add form.
+
 ## [0.10.0] - 2026-08-20
 
 ### Added

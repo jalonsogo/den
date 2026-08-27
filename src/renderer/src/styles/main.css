@@ -4313,6 +4313,30 @@ html, body, #root {
   padding: 48px 20px; text-align: center; color: var(--t3);
 }
 
+/* Which servers a sandbox can reach follows from this field, so the resulting
+   mode is stated as a card with the action that leaves it — as a grey suffix on
+   the label ("dynamic — the agent discovers them itself") it went unread. */
+.mcp-mode {
+  display: flex; align-items: center; gap: 9px; margin-bottom: 9px;
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+.mcp-mode > svg { flex-shrink: 0; align-self: flex-start; margin-top: 2px; color: var(--t3); }
+.mcp-mode.static { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--bg)); }
+.mcp-mode.static > svg { color: var(--primary); }
+.mcp-mode-txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.mcp-mode-txt b { color: var(--t1); font-weight: 600; }
+.mcp-mode-txt span { color: var(--t3); line-height: 1.45; }
+.mcp-mode-act {
+  margin-left: auto; flex-shrink: 0;
+  padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--t2); font-size: 11.5px; cursor: pointer;
+}
+.mcp-mode-act:hover { border-color: var(--border-hi); color: var(--t1); }
+/* Prompts the chips below it, so it sits above them rather than reading as a
+   footnote to the mode card. */
+.mcp-pick-cap { font-size: 11px; color: var(--t3); margin-bottom: 6px; }
+
 /* Static-MCP picker in New Sandbox — toggles, not a dropdown: the set is small
    and which servers are pre-loaded is worth seeing at a glance. */
 .mcp-pick { display: flex; flex-wrap: wrap; gap: 6px; }

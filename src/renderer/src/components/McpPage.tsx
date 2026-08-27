@@ -4,7 +4,7 @@ import {
   Zap, Boxes, ShieldCheck, Search, MoreVertical, Copy, TerminalSquare, FolderOpen
 } from 'lucide-react'
 import { useStore } from '../store'
-import { mcpIcon } from '../lib/mcpCatalog'
+import { mcpIcon, isMcpServerName } from '../lib/mcpCatalog'
 import { bridgeError } from '../lib/utils'
 import { NewMcpModal } from './modals/NewMcpModal'
 import { EmptyState } from './EmptyState'
@@ -38,12 +38,7 @@ function parseInspect(raw: string): InspectRow[] | null {
   return rows.length ? rows : null
 }
 
-// Second line of defence behind the main-process parser. A server name is an
-// identifier — notion, vercel, playwright — never a sentence. When sbx says
-// "No MCP servers registered" and something upstream mistakes that for a row,
-// the damage is a fake server offering Authorize and Remove; dropping anything
-// with whitespace in its name means the worst case is showing nothing.
-const isServer = (s: McpServerEntry): boolean => !!s.name && !/\s/.test(s.name)
+const isServer = (s: McpServerEntry): boolean => isMcpServerName(s.name)
 
 // sbx v0.38 reports authorization nowhere den can read it back: `mcp ls` has no
 // column for it and `mcp inspect` only says whether the server *requires* OAuth

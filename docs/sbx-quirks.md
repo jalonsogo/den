@@ -304,7 +304,29 @@ Template:
   in the renderer, drop any entry whose name contains whitespace, so a future
   parse failure can only ever render less rather than a fake server.
   `src/main/index.ts` → `parseMcpTable()`; `McpPage.tsx` → `isServer()`.
-- **Status:** fixed.
+- **Status:** fixed, then fixed again — see below.
+
+### …and so does the help printed underneath it
+- **Version:** v0.38.0
+- **Symptom:** the same empty registry produced a second phantom, named
+  `add one`. It never reached the MCP page (the renderer's whitespace filter
+  caught it there), but New Sandbox had no such filter and showed it as a
+  selectable pill — pressing it did nothing visible and would have passed
+  `--static-mcp "add one"` to `sbx create`.
+- **Cause:** two holes, both from the fix above. The parser's identifier test
+  only ran on *single-column* lines, and the help beneath the sentence is
+  column-aligned (`add one   sbx mcp add <name> --url <url>`), so it split like
+  a real row. And the renderer guard lived in `McpPage.tsx`, private to the one
+  consumer that had already been bitten.
+- **Fix:** the identifier test now applies to every row regardless of column
+  count, plus a second check that rejects columns carrying placeholders,
+  backticks or a full stop (help text; a url or command has none of those). The
+  renderer guard moved to `isMcpServerName()` in `lib/mcpCatalog.ts` and every
+  consumer of `mcpList()` filters through it. `parseMcpTable()` moved to
+  `src/main/parse.ts` so the empty-registry output is a regression test rather
+  than a comment.
+- **Status:** fixed. Note the exact wording of sbx's empty-registry output is
+  still unobserved here — the guards are shape-based for that reason.
 
 ## Open / unverified
 
