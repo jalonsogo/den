@@ -13,7 +13,7 @@ import type { FileChange } from '../types'
 type Dock = 'files' | 'info' | 'network' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen, clearSandboxError } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen, clearSandboxError, pendingDock, setPendingDock } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
   // The last launch this sandbox refused, if it hasn't started since (see the
   // banner below the header).
@@ -82,6 +82,16 @@ export function SandboxDetail() {
     window.addEventListener('den:toggle-dock', onToggle)
     return () => window.removeEventListener('den:toggle-dock', onToggle)
   }, [])
+
+  // A dock requested from elsewhere (e.g. "Review" on a blocked-request toast,
+  // which may fire before this component exists). Set rather than toggled, so it
+  // opens whether or not a panel was already showing, and cleared once honoured.
+  useEffect(() => {
+    if (!pendingDock) return
+    setDock(pendingDock)
+    if (pendingDock === 'files') setFilesTab('files')
+    setPendingDock(null)
+  }, [pendingDock, setPendingDock])
 
   // Mirror the dock's open state into the store, so the toolbar can show a
   // collapse toggle for it.

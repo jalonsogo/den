@@ -95,6 +95,12 @@ interface AppState {
   // open. Mirrored here so the toolbar can show a collapse toggle for it, the
   // way it does for the left sidebar. SandboxDetail owns the actual dock.
   rightDockOpen: boolean
+  // A dock another surface wants shown once SandboxDetail is up. The existing
+  // `den:toggle-dock` event can't be used for this: it toggles, so firing it
+  // would close an already-open panel, and it's only heard while SandboxDetail
+  // is mounted — which it isn't yet when the request comes from a toast on
+  // another page. SandboxDetail consumes this and clears it.
+  pendingDock: 'files' | 'info' | 'network' | null
   // Selected color theme id (drives the full palette: surfaces + accent).
   accent: string
   termTheme: string
@@ -177,6 +183,7 @@ interface AppState {
   setDensityCustom:   (factor: number) => void
   toggleSidebar:      () => void
   setRightDockOpen:   (open: boolean) => void
+  setPendingDock:     (dock: 'files' | 'info' | 'network' | null) => void
   setAccent:          (id: string) => void
   setTermTheme:       (id: string) => void
   setRemoteEditor:    (id: string) => void
@@ -260,6 +267,7 @@ export const useStore = create<AppState>((set) => ({
   densityCustom: initialDensityCustom,
   sidebarCollapsed: localStorage.getItem('den:sidebarCollapsed') === '1',
   rightDockOpen: false,
+  pendingDock: null,
   accent: localStorage.getItem('den:accent') ?? DEFAULT_THEME,
   termTheme: localStorage.getItem('den:termTheme') ?? 'den',
   remoteEditor: localStorage.getItem('den:remoteEditor') ?? 'code',
@@ -575,6 +583,7 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   setRightDockOpen: (open) => set({ rightDockOpen: open }),
+  setPendingDock: (pendingDock) => set({ pendingDock }),
 
   // Merge incoming list with existing logs so real-time lines aren't wiped
   setSandboxes: (incoming) =>

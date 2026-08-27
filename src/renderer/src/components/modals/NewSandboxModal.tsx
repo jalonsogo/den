@@ -1,33 +1,46 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useSbxCaps } from '../../lib/useSbx'
-import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes } from 'lucide-react'
+import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes, Zap, Pin } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { KitCaps } from '../KitCaps'
 import { randomName } from '../../lib/names'
-import { mcpIcon } from '../../lib/mcpCatalog'
+import { mcpIcon, isMcpServerName } from '../../lib/mcpCatalog'
 import { parseKitSpec, type ParsedKit } from '../../lib/kitSpec'
 import { AGENTS, type AgentType, type Template } from '../../types'
 
 const MEM_VALUES = ['default', '2g', '4g', '8g', '16g', '32g']
 
-// A collapsible section in the creation form. The disclosure chevron sits on the
-// LEFT and points right when collapsed / down when open.
-function Section({ title, open, onToggle, children }: {
-  title: string
-  open: boolean
-  onToggle: () => void
-  children: ReactNode
-}) {
+// The creation form is split across two tabs. Only the active panel mounts, so
+// a field in the hidden tab keeps its state (it lives in the parent) without
+// paying for its height.
+type Tab = 'basic' | 'advanced'
+
+function TabBar({ tab, onPick }: { tab: Tab; onPick: (t: Tab) => void }) {
   return (
-    <div className="adv">
-      <button className="adv-toggle" onClick={onToggle} aria-expanded={open}>
-        <ChevronDown size={14} className="adv-chev" style={{ transform: open ? undefined : 'rotate(-90deg)' }} />
-        {title}
-      </button>
-      {open && <div className="adv-body">{children}</div>}
+    <div className="m-tabs" role="tablist">
+      {([['basic', 'Basic'], ['advanced', 'Advanced']] as [Tab, string][]).map(([id, label]) => (
+        <button
+          key={id}
+          role="tab"
+          aria-selected={tab === id}
+          className={`m-tab${tab === id ? ' active' : ''}`}
+          onClick={() => onPick(id)}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   )
+}
+
+// "notion", "notion and github", "notion, github and 2 more" — the pre-loaded
+// set named rather than counted, so the sentence says which servers the agent
+// is limited to. Capped so a long selection doesn't wrap the mode card.
+const andList = (xs: string[]): string => {
+  if (xs.length <= 3) return xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
+  return `${xs.slice(0, 3).join(', ')} and ${xs.length - 3} more`
 }
 
 const slugify = (s: string): string =>
@@ -88,10 +101,16 @@ function deriveKitName(kit: string, spec: ParsedKit | undefined): string {
 }
 
 export function NewSandboxModal() {
-  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup, prefillKit, setPrefillKit } = useStore()
+  const { setModal, setSandboxes, addCreatingSandbox, removeCreatingSandbox, setHighlightSandbox, newSandboxWorkspace, newSandboxTemplate, newSandboxFeature, setNewSandboxFeature, newSandboxGroup, setNewSandboxGroup, defaultKits, sandboxes, setSandboxGroup, prefillKit, setPrefillKit, setActivePage } = useStore()
   const feature = newSandboxFeature
   // Feature mode always isolates (a feature is an isolated clone you merge back).
   const closeModal = () => { setNewSandboxFeature(false); setNewSandboxGroup(null); setPrefillKit(null); setModal(null) }
+
+  // Nothing registered on the gateway yet: hand the user to the page that fixes
+  // that, with its Add form already open, instead of stating the dynamic default
+  // and leaving no way to change it. This abandons the half-filled form, so the
+  // button says where it goes.
+  const registerMcp = () => { closeModal(); setActivePage('mcp'); setModal('new-mcp') }
 
   // Standalone (non-project) sandboxes default to the last folder we created one
   // in; project sessions always pin to the project folder (newSandboxWorkspace).
@@ -130,9 +149,9 @@ export function NewSandboxModal() {
   const [progress, setProgress]       = useState('')
   const progRef = useRef<HTMLPreElement>(null)
   const unsubRef = useRef<(() => void) | null>(null)
-  const [basicOpen, setBasic]         = useState(true)
-  const [advancedOpen, setAdvanced]   = useState(false)
-  // Command preview lives in its own accordion; remember the user's show/hide choice.
+  const [tab, setTab]                 = useState<Tab>('basic')
+  // Command preview is pinned above the footer so it stays visible while you
+  // edit the flags it renders; remember the user's show/hide choice.
   const [cmdOpen, setCmdOpen]         = useState(localStorage.getItem('den:showCreateCmd') === '1')
   const [ddOpen, setDdOpen]           = useState(false)
   const [error, setError]             = useState('')
@@ -144,6 +163,10 @@ export function NewSandboxModal() {
   // pre-loaded. Picking none leaves it DYNAMIC — the agent discovers servers
   // itself through the gateway's mcp-find tool.
   const [mcpServers, setMcpServers]   = useState<string[]>([])
+  // Whether the gateway answered at all. The dynamic default holds even with an
+  // empty registry, so that case still gets the section (with a way to register
+  // a server); only a runtime that can't list them at all hides it.
+  const [mcpListed, setMcpListed]     = useState(false)
   const [selMcps, setSelMcps]         = useState<string[]>([])
 
   const [selKits, setSelKits]         = useState<string[]>([])
@@ -168,7 +191,11 @@ export function NewSandboxModal() {
                 : deriveName(effAgent, workspace)
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
+  // Fixed viewport coords for the portaled menu (see kitDdPlace).
+  const [kitDdPos, setKitDdPos]       = useState<{ left: number; top: number; width: number } | null>(null)
   const kitDdRef = useRef<HTMLDivElement>(null)
+  const kitDdTrigRef = useRef<HTMLButtonElement>(null)
+  const kitDdMenuRef = useRef<HTMLDivElement>(null)
 
   // Load available templates for the "From template" option.
   useEffect(() => {
@@ -176,8 +203,16 @@ export function NewSandboxModal() {
       setTemplates(t ?? [])
       if (t && t[0]) setTemplate((cur) => cur || `${t[0].repository}:${t[0].tag}`)
     }).catch(() => {})
+    window.den?.mcpList?.().then((r) => {
+      if (!r?.ok) return
+      setMcpListed(true)
+      // Filtered like the MCP page's list: sbx prints prose where the table
+      // would be when nothing is registered, and a row parsed out of it showed
+      // up here as a pill reading "add one" that pre-loaded a server by that
+      // name into the sandbox.
+      setMcpServers((r.servers ?? []).map((m) => m.name).filter(isMcpServerName))
+    }).catch(() => {})
     // Mixin kits can be stacked onto the new sandbox at creation (--kit).
-    window.den?.mcpList?.().then((r) => setMcpServers((r?.servers ?? []).map((m) => m.name))).catch(() => {})
     window.den?.listKits().then((k) => {
       const all = k ?? []
       // specName, not the folder name: sbx matches an agent kit by the name it
@@ -220,14 +255,52 @@ export function NewSandboxModal() {
     return () => document.removeEventListener('mousedown', handler)
   }, [ddOpen])
 
-  // Close the kit dropdown on outside click.
+  // Mixin kits is the last field in the Basic panel, so a menu positioned inside
+  // the scrolling body opened into clipped space beneath the pinned command
+  // strip — a barely-visible sliver. It's portaled to document.body with fixed
+  // coords instead, the same escape hatch FieldSelect uses, so the modal's
+  // overflow can't clip it. Flips above the trigger when the viewport is tight.
+  const kitDdPlace = () => {
+    const el = kitDdTrigRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    // Search row (~38px) plus the 200px options cap, and its own padding.
+    const menuH = 250
+    const below = window.innerHeight - r.bottom
+    const openUp = below < menuH + 8 && r.top > below
+    setKitDdPos({
+      left: r.left,
+      top: openUp ? Math.max(8, r.top - menuH - 4) : r.bottom + 4,
+      width: r.width
+    })
+  }
+  useLayoutEffect(() => { if (kitDdOpen) kitDdPlace() }, [kitDdOpen])
+
+  // Close on outside click, and on scroll/resize rather than keeping a fixed
+  // menu glued to a moving trigger — matching FieldSelect. The scroll listener
+  // captures so it sees the modal body scrolling, so exclude the menu's own
+  // overflow or a long kit list would dismiss itself on the first wheel tick.
   useEffect(() => {
     if (!kitDdOpen) return
-    const handler = (e: MouseEvent) => {
-      if (kitDdRef.current && !kitDdRef.current.contains(e.target as Node)) setKitDdOpen(false)
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (kitDdRef.current?.contains(t) || kitDdMenuRef.current?.contains(t)) return
+      setKitDdOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    const close = () => setKitDdOpen(false)
+    const onScroll = (e: Event) => {
+      const t = e.target as Node | null
+      if (t && kitDdMenuRef.current?.contains(t)) return
+      setKitDdOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', onScroll, true)
+    }
   }, [kitDdOpen])
 
   // Fetch the ~/den base once — only needed for the first-run fallback (no
@@ -295,7 +368,10 @@ export function NewSandboxModal() {
   // Creation streams its output into the in-modal terminal and also registers a
   // background "creating" row, so the modal can be dismissed while it finishes.
   const handleLaunch = () => {
-    if (!workspace) { setError('Workspace is required'); return }
+    // Surface the offending field, not just the message: the error is pinned
+    // outside the tab panels, so from the Advanced tab it would otherwise name
+    // a control the user can't see.
+    if (!workspace) { setTab('basic'); setError('Workspace is required'); return }
     const finalName = (name.trim() || suggestedName() || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
     localStorage.setItem('den:lastWorkspace', workspace)
@@ -373,6 +449,10 @@ export function NewSandboxModal() {
           <div className="m-sub">{creating ? 'Setting up the sandbox — this can take a moment.' : 'Pick an agent and workspace, then launch.'}</div>
         </div>
 
+        {/* Tabs sit outside .m-body so the bar stays put while the panel
+            scrolls. Hidden during creation: there is nothing left to edit. */}
+        {!creating && <TabBar tab={tab} onPick={setTab} />}
+
         <div className="m-body">
           {creating ? (
           <div className="cmd-blk create-log create-log-full">
@@ -380,7 +460,8 @@ export function NewSandboxModal() {
           </div>
           ) : (
           <>
-          <Section title="Basic" open={basicOpen} onToggle={() => setBasic((v) => !v)}>
+          {tab === 'basic' && (
+          <div className="m-tabpanel" role="tabpanel">
           {/* Name — random by default, regenerate or edit */}
           <div className="fg">
             <label className="flabel">Name</label>
@@ -436,48 +517,137 @@ export function NewSandboxModal() {
           )}
           </div>
 
-          {/* Workspace */}
-          <div className="fg">
-            <label className="flabel">Workspace path</label>
-            <div className="frow-2">
-              <input
-                className="finput"
-                value={workspace}
-                placeholder="/Users/you/Code/my-project"
-                onChange={(e) => { setWorkspace(e.target.value); setWsEdited(true) }}
-                autoFocus
-              />
-              <button className="btn btn-default btn-sm" onClick={handleBrowse}>Browse…</button>
+          {/* Workspace — which folder to mount, and how it gets exposed.
+              Grouped because the isolation toggle is meaningless without the
+              path above it: it decides whether that folder is mounted
+              directly or cloned first. */}
+          <div className="fgroup">
+            <div className="fgroup-hdr">Workspace</div>
+            <div className="fg">
+              <label className="flabel">Path</label>
+              <div className="frow-2">
+                <input
+                  className="finput"
+                  value={workspace}
+                  placeholder="/Users/you/Code/my-project"
+                  onChange={(e) => { setWorkspace(e.target.value); setWsEdited(true) }}
+                  autoFocus
+                />
+                <button className="btn btn-default btn-sm" onClick={handleBrowse}>Browse…</button>
+              </div>
+              <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
             </div>
-            <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
+            <div className="fg">
+              <label className="flabel">Isolation</label>
+              <div className="tog-row">
+                <button
+                  className={`s-toggle${clone ? ' on' : ''}`}
+                  onClick={() => { if (!feature) setClone(!clone) }}
+                  disabled={feature}
+                  title={feature ? 'A feature always runs on an isolated clone' : undefined}
+                />
+                Git clone isolation{' '}
+                <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
+                  --clone
+                </code>
+              </div>
+              <div className="fhint">
+                {feature
+                  ? 'A feature always runs on an isolated clone — work here, then Merge work to host when it’s done.'
+                  : <>Work in a standalone clone; your changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.
+                    {newSandboxWorkspace && ' On by default here because sessions in a project share its folder.'}</>}
+              </div>
+
+              {clone && wsIsRepo === false && (
+                <div className="clone-warn">
+                  <span>
+                    This folder isn't a Git repository, so <code>--clone</code> has nothing to clone.
+                  </span>
+                  <button className="btn btn-default btn-sm" onClick={handleGitInit} disabled={gitIniting}>
+                    {gitIniting ? 'Initializing…' : 'Initialize repository'}
+                  </button>
+                </div>
+              )}
+
+              {/* Guard: creating a non-isolated sandbox in a folder that already
+                  has one means both mount the same working tree — edits collide. */}
+              {!clone && (() => {
+                const inUse = sandboxes.filter((s) => s.workspace === workspace).length
+                return inUse > 0 ? (
+                  <div className="clone-warn">
+                    <span>
+                      This folder already has {inUse} sandbox{inUse > 1 ? 'es' : ''}. Without isolation they mount the
+                      same working tree — concurrent edits can collide or corrupt the Git index.
+                    </span>
+                    <button className="btn btn-default btn-sm" onClick={() => setClone(true)}>Enable isolation</button>
+                  </div>
+                ) : null
+              })()}
+            </div>
           </div>
 
           {/* MCP servers from the gateway. Selecting any switches this sandbox
               to static mode; selecting none leaves the agent free to discover
-              servers itself at runtime. */}
-          {mcpServers.length > 0 && (
+              servers itself at runtime.
+
+              The mode is stated rather than hinted at: which servers a sandbox
+              can reach is a consequence worth reading, and as a grey suffix on
+              the label it was routinely missed. It's derived from the selection
+              instead of being its own control because that's the only thing sbx
+              can express — "static with nothing pre-loaded" isn't a state, so a
+              switch offering it would lie. Each mode therefore carries the
+              action that leaves it. */}
+          {mcpListed && (
             <div className="fg">
-              <label className="flabel">
-                MCP servers
-                <span className="flabel-hint">
-                  {selMcps.length
-                    ? `static — ${selMcps.length} pre-loaded`
-                    : 'dynamic — the agent discovers them itself'}
-                </span>
-              </label>
-              <div className="mcp-pick">
-                {mcpServers.map((m) => (
-                  <button
-                    key={m}
-                    className={`mcp-pick-item${selMcps.includes(m) ? ' on' : ''}`}
-                    onClick={() => setSelMcps((cur) => cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m])}
-                  >
-                    <img src={mcpIcon(m.toLowerCase())} alt=""
-                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
-                    {m}
+              <label className="flabel">MCP servers</label>
+              <div className={`mcp-mode${selMcps.length ? ' static' : ''}`}>
+                {selMcps.length ? <Pin size={14} /> : <Zap size={14} />}
+                <div className="mcp-mode-txt">
+                  <b>{selMcps.length ? 'Static' : 'Dynamic'}</b>
+                  <span>
+                    {selMcps.length
+                      ? `Only ${andList(selMcps)} ${selMcps.length === 1 ? 'is' : 'are'} loaded — nothing else is reachable.`
+                      : "The agent finds servers itself through the gateway's mcp-find tool, as it needs them."}
+                  </span>
+                </div>
+                {selMcps.length > 0 ? (
+                  <button type="button" className="mcp-mode-act" onClick={() => setSelMcps([])}>
+                    Back to dynamic
                   </button>
-                ))}
+                ) : mcpServers.length === 0 && (
+                  <button
+                    type="button" className="mcp-mode-act" onClick={registerMcp}
+                    title="Closes this form and opens Library → MCP servers"
+                  >
+                    Register one…
+                  </button>
+                )}
               </div>
+              {mcpServers.length > 0 && (
+                <>
+                  <div className="mcp-pick-cap">Or pre-load specific servers, and only those:</div>
+                  <div className="mcp-pick">
+                    {mcpServers.map((m) => {
+                      // Only render an icon den actually ships. Hiding a broken
+                      // one after the fact still left its 14px slot, and a chip
+                      // with a hole where a logo should be reads as a button
+                      // that failed to load rather than one you can press.
+                      const icon = mcpIcon(m.toLowerCase())
+                      return (
+                        <button
+                          key={m}
+                          className={`mcp-pick-item${selMcps.includes(m) ? ' on' : ''}`}
+                          onClick={() => setSelMcps((cur) => cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m])}
+                        >
+                          {icon && <img src={icon} alt=""
+                                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />}
+                          {m}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -516,12 +686,16 @@ export function NewSandboxModal() {
 
             {/* Searchable dropdown to add a local kit or paste an OCI reference */}
             <div className="kit-dd" ref={kitDdRef}>
-              <button type="button" className="kit-dd-trigger" onClick={() => setKitDdOpen((v) => !v)}>
+              <button type="button" ref={kitDdTrigRef} className="kit-dd-trigger" onClick={() => setKitDdOpen((v) => !v)}>
                 <Plus size={13} /> Add a mixin kit
                 <ChevronDown size={13} style={{ marginLeft: 'auto', color: 'var(--t3)' }} />
               </button>
-              {kitDdOpen && (
-                <div className="kit-dd-menu">
+              {kitDdOpen && kitDdPos && createPortal(
+                <div
+                  className="kit-dd-menu"
+                  ref={kitDdMenuRef}
+                  style={{ left: kitDdPos.left, top: kitDdPos.top, width: kitDdPos.width }}
+                >
                   <div className="kit-dd-search">
                     <Search size={13} className="kit-dd-search-ic" />
                     <input
@@ -573,215 +747,186 @@ export function NewSandboxModal() {
                       )
                     })()}
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
           </div>
 
-          {/* Isolation — clone vs. direct mount changes how your working tree is
-              exposed. Defaults on for project sessions (they share one folder). */}
-          <div className="fg">
-            <label className="flabel">Isolation</label>
-            <div className="tog-row">
-              <button
-                className={`s-toggle${clone ? ' on' : ''}`}
-                onClick={() => { if (!feature) setClone(!clone) }}
-                disabled={feature}
-                title={feature ? 'A feature always runs on an isolated clone' : undefined}
-              />
-              Git clone isolation{' '}
-              <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
-                --clone
-              </code>
-            </div>
-            <div className="fhint">
-              {feature
-                ? 'A feature always runs on an isolated clone — work here, then Merge work to host when it’s done.'
-                : <>Work in a standalone clone; your changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.
-                  {newSandboxWorkspace && ' On by default here because sessions in a project share its folder.'}</>}
-            </div>
-
-            {clone && wsIsRepo === false && (
-              <div className="clone-warn">
-                <span>
-                  This folder isn't a Git repository, so <code>--clone</code> has nothing to clone.
-                </span>
-                <button className="btn btn-default btn-sm" onClick={handleGitInit} disabled={gitIniting}>
-                  {gitIniting ? 'Initializing…' : 'Initialize repository'}
-                </button>
-              </div>
-            )}
-
-            {/* Guard: creating a non-isolated sandbox in a folder that already
-                has one means both mount the same working tree — edits collide. */}
-            {!clone && (() => {
-              const inUse = sandboxes.filter((s) => s.workspace === workspace).length
-              return inUse > 0 ? (
-                <div className="clone-warn">
-                  <span>
-                    This folder already has {inUse} sandbox{inUse > 1 ? 'es' : ''}. Without isolation they mount the
-                    same working tree — concurrent edits can collide or corrupt the Git index.
-                  </span>
-                  <button className="btn btn-default btn-sm" onClick={() => setClone(true)}>Enable isolation</button>
-                </div>
-              ) : null
-            })()}
           </div>
-          </Section>
-
-          {/* Advanced — collapsible */}
-          <Section title="Advanced" open={advancedOpen} onToggle={() => setAdvanced((v) => !v)}>
-                {/* Base: new agent image vs an existing template */}
-                <div className="fg">
-                  <label className="flabel">Base image</label>
-                  <div className="src-seg">
-                    <button className={`src-seg-item${source === 'new' ? ' active' : ''}`} onClick={() => setSource('new')}>
-                      Default
-                    </button>
-                    <button
-                      className={`src-seg-item${source === 'template' ? ' active' : ''}`}
-                      onClick={() => setSource('template')}
-                      disabled={templates.length === 0}
-                      title={templates.length === 0 ? 'No templates available' : undefined}
-                    >
-                      From template
-                    </button>
-                  </div>
-                  {source === 'template' && (
-                    <>
-                      <input
-                        className="finput"
-                        style={{ marginTop: 8 }}
-                        list="tpl-refs"
-                        value={template}
-                        spellCheck={false}
-                        placeholder="registry/repo:tag — pick a local template or paste an OCI reference"
-                        onChange={(e) => setTemplate(e.target.value)}
-                      />
-                      <datalist id="tpl-refs">
-                        {templates.map((t) => (
-                          <option key={t.id} value={`${t.repository}:${t.tag}`}>{t.tag} · {t.flavor}</option>
-                        ))}
-                      </datalist>
-                      <div className="fhint">Local templates autocomplete; or paste a full OCI reference — sbx pulls it at creation.</div>
-                    </>
-                  )}
-                </div>
-
-                <div className="fg">
-                  <label className="flabel" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    Memory
-                    <span className="mem-slider-value">{memValue}</span>
-                  </label>
-                  <div className="mem-slider-wrap">
-                    <input
-                      type="range" className="mem-slider"
-                      min={0} max={MEM_VALUES.length - 1} value={memIdx}
-                      style={{ '--pct': memPct } as React.CSSProperties}
-                      onChange={(e) => setMemIdx(+e.target.value)}
-                    />
-                    <div className="mem-slider-labels">
-                      {MEM_VALUES.map((v) => <span key={v}>{v}</span>)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Published ports. Only settable at creation — `sbx run`/`create`
-                    apply -p when the sandbox is made and ignore it on re-attach,
-                    so afterwards the Network panel (sbx ports) is the way in. */}
-                <div className="fg">
-                  <label className="flabel">
-                    Publish ports <span className="flabel-hint">host access to sandbox services</span>
-                  </label>
-                  <input
-                    className="finput"
-                    value={portsRaw}
-                    spellCheck={false}
-                    placeholder="8080:80, 3000"
-                    onChange={(e) => setPortsRaw(e.target.value)}
-                  />
-                  <div className="fhint">
-                    <code>[[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL]</code>, comma-separated. Creation-time only
-                    (sbx v0.37+) — add or remove them later from the Network panel.
-                  </div>
-                </div>
-
-                {/* Environment variables (sbx v0.39). Hidden on an older runtime,
-                    where -e isn't accepted by create. */}
-                {caps.hasEnvFiles && (
-                <div className="fg">
-                  <label className="flabel">
-                    Environment variables <span className="flabel-hint">one KEY=value per line</span>
-                  </label>
-                  <textarea
-                    className="finput"
-                    value={envRaw}
-                    spellCheck={false}
-                    rows={3}
-                    placeholder={'NODE_ENV=development\nLOG_LEVEL=debug'}
-                    onChange={(e) => setEnvRaw(e.target.value)}
-                    style={{ resize: 'vertical', fontFamily: 'var(--mono)' }}
-                  />
-                  {badEnvLines(envRaw).length > 0 && (
-                    <div className="fhint" style={{ color: 'var(--destruct)' }}>
-                      Ignored — no <code>=</code>: {badEnvLines(envRaw).map((l) => `"${l}"`).join(', ')}
-                    </div>
-                  )}
-                  <div className="fhint">
-                    Passed as <code>-e</code> (sbx v0.39+). <strong>Not for secrets</strong> — a value here
-                    goes on the command line, where any process on this Mac can read it. Use{' '}
-                    <strong>Settings → Secrets</strong>, which injects through the proxy instead.
-                  </div>
-                </div>
-                )}
-
-                {/* Shared skills store (sbx v0.37+). Default on, matching sbx. */}
-                <div className="fg">
-                  <label className="flabel">Shared agent skills</label>
-                  <div className="tog-row">
-                    <button
-                      className={`s-toggle${shareSkills ? ' on' : ''}`}
-                      onClick={() => setShareSkills((v) => !v)}
-                    />
-                    Mount the shared skills store{' '}
-                    <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
-                      --no-share-skills
-                    </code>
-                  </div>
-                  <div className="fhint">
-                    Skills imported with <code>sbx skills import</code> are mounted read-write, so this sandbox both
-                    reads them and can add to them. Uncheck to isolate it (<code>--no-share-skills</code>).
-                  </div>
-                </div>
-          </Section>
-
-          {/* Command preview — collapsible */}
-          <Section
-            title="Command preview"
-            open={cmdOpen}
-            onToggle={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('den:showCreateCmd', v ? '1' : '0') }}
-          >
-                <div className="cmd-blk">
-                  {cmdTokens.map((word, i) => {
-                    const cls =
-                      word === 'sbx' ? 'cm-b'
-                        : word === 'create' || word === agent ? 'cm-a'
-                        : word.startsWith('-') ? 'cm-f'
-                        : 'cm-v'
-                    return <span key={i} className={cls}>{word} </span>
-                  })}
-                </div>
-          </Section>
-          </>
           )}
 
-          {error && (
-            <div style={{ color: 'var(--destruct)', fontSize: 12, marginTop: 10, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: 6 }}>
-              {error}
+          {tab === 'advanced' && (
+          <div className="m-tabpanel" role="tabpanel">
+          {/* What the sandbox runs on, and how much of the machine it gets. */}
+          <div className="fgroup">
+            <div className="fgroup-hdr">Runtime</div>
+            {/* Base: new agent image vs an existing template */}
+            <div className="fg">
+              <label className="flabel">Base image</label>
+              <div className="src-seg">
+                <button className={`src-seg-item${source === 'new' ? ' active' : ''}`} onClick={() => setSource('new')}>
+                  Default
+                </button>
+                <button
+                  className={`src-seg-item${source === 'template' ? ' active' : ''}`}
+                  onClick={() => setSource('template')}
+                  disabled={templates.length === 0}
+                  title={templates.length === 0 ? 'No templates available' : undefined}
+                >
+                  From template
+                </button>
+              </div>
+              {source === 'template' && (
+                <>
+                  <input
+                    className="finput"
+                    style={{ marginTop: 8 }}
+                    list="tpl-refs"
+                    value={template}
+                    spellCheck={false}
+                    placeholder="registry/repo:tag — pick a local template or paste an OCI reference"
+                    onChange={(e) => setTemplate(e.target.value)}
+                  />
+                  <datalist id="tpl-refs">
+                    {templates.map((t) => (
+                      <option key={t.id} value={`${t.repository}:${t.tag}`}>{t.tag} · {t.flavor}</option>
+                    ))}
+                  </datalist>
+                  <div className="fhint">Local templates autocomplete; or paste a full OCI reference — sbx pulls it at creation.</div>
+                </>
+              )}
             </div>
+            <div className="fg">
+              <label className="flabel" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                Memory
+                <span className="mem-slider-value">{memValue}</span>
+              </label>
+              <div className="mem-slider-wrap">
+                <input
+                  type="range" className="mem-slider"
+                  min={0} max={MEM_VALUES.length - 1} value={memIdx}
+                  style={{ '--pct': memPct } as React.CSSProperties}
+                  onChange={(e) => setMemIdx(+e.target.value)}
+                />
+                <div className="mem-slider-labels">
+                  {MEM_VALUES.map((v) => <span key={v}>{v}</span>)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* What the sandbox exposes outward and what gets passed in. */}
+          <div className="fgroup">
+            <div className="fgroup-hdr">Ports & environment</div>
+            {/* Published ports. Only settable at creation — `sbx run`/`create`
+                apply -p when the sandbox is made and ignore it on re-attach,
+                so afterwards the Network panel (sbx ports) is the way in. */}
+            <div className="fg">
+              <label className="flabel">
+                Publish ports <span className="flabel-hint">host access to sandbox services</span>
+              </label>
+              <input
+                className="finput"
+                value={portsRaw}
+                spellCheck={false}
+                placeholder="8080:80, 3000"
+                onChange={(e) => setPortsRaw(e.target.value)}
+              />
+              <div className="fhint">
+                <code>[[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL]</code>, comma-separated. Creation-time only
+                (sbx v0.37+) — add or remove them later from the Network panel.
+              </div>
+            </div>
+            {/* Environment variables (sbx v0.39). Hidden on an older runtime,
+                where -e isn't accepted by create. */}
+            {caps.hasEnvFiles && (
+            <div className="fg">
+              <label className="flabel">
+                Environment variables <span className="flabel-hint">one KEY=value per line</span>
+              </label>
+              <textarea
+                className="finput"
+                value={envRaw}
+                spellCheck={false}
+                rows={3}
+                placeholder={'NODE_ENV=development\nLOG_LEVEL=debug'}
+                onChange={(e) => setEnvRaw(e.target.value)}
+                style={{ resize: 'vertical', fontFamily: "'SF Mono','Menlo',monospace" }}
+              />
+              {badEnvLines(envRaw).length > 0 && (
+                <div className="fhint" style={{ color: 'var(--destruct)' }}>
+                  Ignored — no <code>=</code>: {badEnvLines(envRaw).map((l) => `"${l}"`).join(', ')}
+                </div>
+              )}
+              <div className="fhint">
+                Passed as <code>-e</code> (sbx v0.39+). <strong>Not for secrets</strong> — a value here
+                goes on the command line, where any process on this Mac can read it. Use{' '}
+                <strong>Settings → Secrets</strong>, which injects through the proxy instead.
+              </div>
+            </div>
+            )}
+          </div>
+
+          <div className="fgroup">
+            <div className="fgroup-hdr">Skills</div>
+            {/* Shared skills store (sbx v0.37+). Default on, matching sbx. The
+                group header names the field, so no second label here. */}
+            <div className="fg">
+              <div className="tog-row">
+                <button
+                  className={`s-toggle${shareSkills ? ' on' : ''}`}
+                  onClick={() => setShareSkills((v) => !v)}
+                />
+                Mount the shared skills store{' '}
+                <code style={{ fontSize: 11, background: 'var(--bg-subtle)', padding: '1px 6px', borderRadius: 4 }}>
+                  --no-share-skills
+                </code>
+              </div>
+              <div className="fhint">
+                Skills imported with <code>sbx skills import</code> are mounted read-write, so this sandbox both
+                reads them and can add to them. Uncheck to isolate it (<code>--no-share-skills</code>).
+              </div>
+            </div>
+          </div>
+          </div>
+          )}
+          </>
           )}
         </div>
 
+        {/* Errors are pinned rather than left in the scroll flow: with two
+            tabs, a message about a field in the other panel would otherwise
+            render off-screen with nothing to point at. */}
+        {error && <div className="m-err">{error}</div>}
+
+        {/* Command preview — pinned above the footer, not a third tab. It is
+            a readout of the whole form, so it has to stay reachable while you
+            edit the flags it renders. */}
+        {!creating && (
+          <div className="cmd-strip">
+            <button
+              className="cmd-strip-tog"
+              aria-expanded={cmdOpen}
+              onClick={() => { const v = !cmdOpen; setCmdOpen(v); localStorage.setItem('den:showCreateCmd', v ? '1' : '0') }}
+            >
+              <ChevronDown size={13} className="cmd-strip-chev" style={{ transform: cmdOpen ? undefined : 'rotate(-90deg)' }} />
+              Command preview
+            </button>
+            {cmdOpen && (
+              <div className="cmd-blk">
+                {cmdTokens.map((word, i) => {
+                  const cls =
+                    word === 'sbx' ? 'cm-b'
+                      : word === 'create' || word === agent ? 'cm-a'
+                      : word.startsWith('-') ? 'cm-f'
+                      : 'cm-v'
+                  return <span key={i} className={cls}>{word} </span>
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="m-ftr">
           {creating ? (
             <>

@@ -130,7 +130,8 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   // A kit panel opens in read-only view mode; editing the code / saving is gated
   // behind an explicit "Edit" toggle.
   const [editing, setEditing] = useState(false)
-  // Row "⋮" menu (Open in Finder / Upload to Hub / Delete).
+  // Row "⋮" menu, in three groups: where the kit goes (Finder / Export /
+  // Upload), whether it's sound (Validate / Sign / Verify), then Delete.
   const [moreFor, setMoreFor] = useState<string | null>(null)
   const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
   // "Upload to Hub" — push the kit as an OCI artifact to a registry.
@@ -812,17 +813,24 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                     </button>
                     {moreFor === k.dir && morePos && (
                       <div className="kit-more-menu" style={{ top: morePos.top, right: morePos.right }}>
+                        {/* Where the kit goes: reveal it, hand it to someone,
+                            publish it. */}
                         <button className="kit-more-item" onClick={() => { setMoreFor(null); window.den?.openInFinder(k.dir) }}>
                           <FolderOpen size={14} /> Open in Finder
-                        </button>
-                        <button className="kit-more-item" onClick={() => doValidate(k)}>
-                          <Check size={14} /> Validate spec
                         </button>
                         <button className="kit-more-item" onClick={() => doExport(k)}>
                           <DownloadCloud size={14} /> Export as zip…
                         </button>
                         <button className="kit-more-item" onClick={() => openPush(k)}>
                           <UploadCloud size={14} /> Upload to Hub…
+                        </button>
+                        <div className="kit-more-sep" />
+                        {/* Whether the kit is sound: does the spec hold up, and
+                            is it the one it claims to be. Split from the moving
+                            actions above — "Validate spec" sat between Finder and
+                            Export, reading as another way to ship it. */}
+                        <button className="kit-more-item" onClick={() => doValidate(k)}>
+                          <Check size={14} /> Validate spec
                         </button>
                         {caps.hasEnvFiles && <>
                           <button className="kit-more-item" onClick={() => doSign(k)}>

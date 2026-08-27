@@ -4,7 +4,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
-  ArrowUp, ArrowDown, Plug, FileCode2 } from 'lucide-react'
+  ArrowUp, ArrowDown, Plug, FileCode2, CircleDot } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
@@ -260,6 +260,7 @@ export function Sidebar() {
     applySort('manual', 'asc')
   }
   const hasFilter = !!filter || !showGroups || agentFilter.length > 0 || statusFilter !== 'all' || sortBy !== 'manual'
+  const runningCount = sandboxes.filter((s) => s.status === 'running').length
 
   // Agents that actually appear in the current sandboxes — the only ones worth
   // offering as a filter.
@@ -403,6 +404,22 @@ export function Sidebar() {
                 onClick={() => setActivePage('sandboxes')}
               >
                 Sandboxes
+              </button>
+              {/* Active-only toggle. Flipping this pair was three interactions
+                  through the filter popover (open, pick, dismiss) and it's the
+                  switch used most, so it gets a button of its own. It drives the
+                  same statusFilter the popover writes, so the two never
+                  disagree — and 'stopped' resolves to 'active', since that's
+                  what someone reaching for this button is asking for. */}
+              <button
+                className={`sb-add sb-only-active${statusFilter === 'active' ? ' on' : ''}`}
+                aria-pressed={statusFilter === 'active'}
+                onClick={() => setStatus(statusFilter === 'active' ? 'all' : 'active')}
+                title={statusFilter === 'active'
+                  ? `Showing ${runningCount} active — click to show all ${sandboxes.length}`
+                  : `Show only active (${runningCount} of ${sandboxes.length})`}
+              >
+                <CircleDot size={14} />
               </button>
               <div className="sb-filter-wrap" ref={filterRef}>
                 <button

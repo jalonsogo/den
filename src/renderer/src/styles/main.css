@@ -698,6 +698,17 @@ html, body, #root {
 
 /* Filter icon active state */
 .sb-add.has-filter { color: var(--green); }
+.sb-only-active {
+  width: 20px; height: 20px;
+  /* Pulls it against the filter icon (6px gap -> 2px): the two are one cluster
+     of filtering controls, and the header has no width to spare at 216px. */
+  margin-right: -4px;
+}
+.sb-only-active.on {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+}
+.sb-only-active.on:hover { background: color-mix(in srgb, var(--green) 24%, transparent); }
 
 /* Inline filter row — lives inside the sidebar, never overflows outward */
 .sb-filter-row {
@@ -824,9 +835,12 @@ html, body, #root {
 /* Section header whose title navigates */
 .sb-sec-head { display: flex; align-items: center; gap: 6px; padding: 0 8px 5px; }
 .sb-sec-title {
-  flex: 1; text-align: left;
+  flex: 1; min-width: 0; text-align: left;
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
   color: var(--sb-muted); background: none; border: none; cursor: pointer; padding: 2px 0;
+  /* Yields before the icon row does — the header is tight at the default 216px
+     and the buttons matter more than the full word. */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sb-sec-title:hover { color: var(--sb-fg); }
 .sb-sec-title.active { color: var(--sb-active-fg); }
@@ -1561,12 +1575,25 @@ html, body, #root {
 .np-dec-opt {
   display: inline-flex; align-items: center; gap: 5px;
   font: inherit; font-size: 12px; padding: 4px 12px;
-  border: none; background: none; color: var(--t2); border-radius: 4px; cursor: pointer;
+  border: none; background: none; color: var(--t3); border-radius: 4px; cursor: pointer;
 }
 .np-dec-opt:hover { color: var(--t1); }
-.np-dec-opt.on { background: var(--bg); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
-.np-dec-ic-allow { color: var(--green); }
-.np-dec-ic-block { color: var(--destruct); }
+/* The selected side carries its own decision colour. It used to be `--bg` on a
+   `--bg-subtle` track — all but identical in light mode — with a 1px shadow
+   doing the work, so neither side looked chosen. Allow/Block is a binary worth
+   being certain about, so it reuses the palette of the ALLOW/BLOCK badges
+   (.np-dec-allow / .np-dec-deny) rather than a neutral raised pill. */
+.np-dec-opt-allow.on {
+  background: var(--green-dim); color: var(--green);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 45%, transparent);
+}
+.np-dec-opt-block.on {
+  background: color-mix(in srgb, var(--destruct) 16%, transparent); color: var(--destruct);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--destruct) 45%, transparent);
+}
+/* Icons inherit, so neither is tinted until its side is picked — a green tick
+   beside an unselected "Allow" was itself reading as the selection. */
+.np-dec-opt svg { color: currentColor; }
 .np-add-form-actions { display: flex; justify-content: flex-end; gap: 7px; }
 .np-rule-pending { border-style: dashed; }
 .np-pending-x {
@@ -2615,11 +2642,73 @@ html, body, #root {
 .toast-ic { color: var(--destruct); flex-shrink: 0; margin-top: 1px; }
 .toast-main { flex: 1; min-width: 0; padding-right: 14px; }
 .toast-title { font-size: 12.5px; font-weight: 600; color: var(--t1); }
+/* The sandbox leads — which one hit the rule is the part not already on screen.
+   Chipped rather than set as text: as a bare bold line it ran into the copy
+   under it and read as one sentence ("den-evolution tried to reach …"), so the
+   identifier has to look like an identifier. Bordered pill, not just a heavier
+   weight, because weight alone still scans as emphasis within a phrase. */
+.toast-sbx {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 100%; margin: 6px 0 5px; padding: 2px 9px 2px 7px;
+  border: 1px solid var(--border-hi); border-radius: 100px;
+  background: var(--bg-subtle);
+  font-size: 11.5px; font-weight: 600; color: var(--t1);
+}
+.toast-sbx > svg { flex-shrink: 0; color: var(--t3); }
+.toast-sbx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toast-sub { font-size: 11.5px; color: var(--t2); margin-top: 1px; word-break: break-all; }
+.toast-host { font-family: 'SF Mono','Menlo',monospace; color: var(--t1); }
 .toast-note { font-size: 11px; margin-top: 5px; }
 .toast-note.ok { color: var(--green); }
 .toast-note.err { color: var(--destruct); }
-.toast-actions { margin-top: 8px; }
+.toast-actions { margin-top: 9px; display: flex; align-items: center; gap: 7px; }
+
+/* Split button: Allow, plus a caret for the alternatives.
+   The CONTAINER paints the pill and clips its halves, rather than each half
+   rounding its own outer corners. Two reasons: `.btn` sets `border-radius`
+   later in this file at equal specificity, so per-half corner overrides were
+   silently dead and it rendered as two separate rounded pills; and one
+   background means the seam is a real divider instead of two shapes that have
+   to be talked into looking joined.
+   Every child selector is `.toast-split > .x` (two classes) so it outranks
+   `.btn` whatever the source order. No `overflow: hidden` to clip the halves —
+   .toast-menu is absolutely positioned against this box, so clipping here would
+   swallow the dropdown; the halves carry matching outer radii instead, which
+   also keeps their hover fill inside the pill. */
+.toast-split {
+  position: relative;
+  display: inline-flex;
+  gap: 0;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--prim-fg, white);
+}
+.toast-split > .btn { background: none; color: inherit; }
+.toast-split > .btn:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+.toast-split > .toast-split-main { border-radius: var(--radius) 0 0 var(--radius); }
+.toast-split > .toast-split-caret {
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding-left: 7px; padding-right: 7px;
+  border-left: 1px solid rgba(255,255,255,0.24);
+}
+.toast-menu {
+  position: absolute; bottom: calc(100% + 5px); right: 0; z-index: 10;
+  min-width: 210px; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+.toast-menu-item {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  font: inherit; font-size: 12px; color: var(--t1);
+  background: none; border: none; border-radius: 5px; padding: 6px 8px; cursor: pointer;
+}
+.toast-menu-item:hover { background: var(--bg-subtle); }
+.toast-menu-item svg { flex-shrink: 0; color: var(--t3); }
+.toast-menu-host {
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11px; color: var(--t3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.toast-menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 .toast-x {
   position: absolute; right: 6px; top: 6px;
   display: flex; align-items: center; justify-content: center;
@@ -2850,8 +2939,10 @@ html, body, #root {
   padding: 7px 10px;
 }
 .kit-dd-trigger:hover { border-color: var(--border-hi); color: var(--t1); }
+/* Portaled to document.body with fixed coords set inline (see kitDdPlace) so
+   the modal's scrolling body can't clip it; z-index clears the modal overlay. */
 .kit-dd-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  position: fixed; z-index: 3000;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.18); overflow: hidden;
 }
@@ -3117,7 +3208,9 @@ html, body, #root {
 
 /* Capability hover popover (fixed-positioned to escape table overflow) */
 .kit-pop {
-  position: fixed; z-index: 300; min-width: 200px; max-width: 340px;
+  /* Above .kit-dd-menu (3000): the caps chips this describes are rendered
+     inside that menu, so a tooltip below it would be invisible. */
+  position: fixed; z-index: 3001; min-width: 200px; max-width: 340px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.18); padding: 8px; cursor: default;
 }
@@ -4029,23 +4122,84 @@ html, body, #root {
 .agent-dd-item:hover { background: var(--bg-subtle); }
 .agent-dd-item.on { background: var(--bg-subtle); }
 
-/* Advanced collapsible */
-.adv { border-top: 1px solid var(--border); }
-/* First section (Basic) sits right under the modal header divider — no second
-   line above it. */
-.m-body > .adv:first-child { border-top: none; }
-.adv-toggle {
+/* Form tabs (Basic / Advanced). The bar lives between .m-hdr and .m-body so it
+   stays fixed while the panel scrolls. */
+.m-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  flex-shrink: 0;
+}
+.m-tab {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t3);
+  padding: 10px 12px;
+  /* Reserve the indicator's height on every tab so activating one doesn't
+     shift the row by 2px. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.m-tab:hover { color: var(--t1); }
+.m-tab.active { color: var(--t1); font-weight: 600; border-bottom-color: var(--primary); }
+
+.m-tabpanel { display: flex; flex-direction: column; gap: 18px; padding-bottom: 4px; }
+/* The panel owns spacing via gap; drop the field's own margin so the two don't
+   stack. */
+.m-tabpanel .fg { margin-bottom: 0; }
+
+/* Fields that only make sense together — Workspace path + Isolation, Base
+   image + Memory — boxed under one header so each set reads as a single
+   decision instead of a flat run of controls. */
+.fgroup {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+.fgroup-hdr {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--t3);
+}
+
+/* Command preview — pinned between .m-body and .m-ftr, collapsed to a single
+   toggle row by default so it costs one line when unused. */
+.cmd-strip { border-top: 1px solid var(--border); flex-shrink: 0; padding: 0 20px; }
+.cmd-strip-tog {
   display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
   background: none; border: none; cursor: pointer; line-height: 1;
-  font-size: 12.5px; font-weight: 600; color: var(--t2); padding: 12px 0;
+  font-size: 12px; font-weight: 500; color: var(--t3); padding: 9px 0;
 }
-.adv-toggle svg { flex-shrink: 0; display: block; }
-.adv-chev { color: var(--t3); transition: transform 0.12s; }
-.adv-toggle:hover { color: var(--t1); }
-.adv-body { margin-top: 2px; padding-bottom: 12px; display: flex; flex-direction: column; gap: 16px; }
-/* Section bodies own the spacing via gap; drop the field's own margin so they
-   don't stack (14px + 16px). */
-.adv-body .fg { margin-bottom: 0; }
+.cmd-strip-tog:hover { color: var(--t1); }
+.cmd-strip-tog svg { flex-shrink: 0; display: block; }
+.cmd-strip-chev { transition: transform 0.12s; }
+.cmd-strip .cmd-blk {
+  margin-bottom: 12px;
+  /* A long flag list shouldn't grow the strip without bound — scroll instead. */
+  max-height: 22vh;
+  overflow-y: auto;
+}
+
+/* Validation errors are pinned above the preview strip, outside the scrolling
+   body, so one raised by a field in the inactive tab is still visible. */
+.m-err {
+  flex-shrink: 0;
+  color: var(--destruct);
+  font-size: 12px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+  background: rgba(239,68,68,0.06);
+}
 
 .cmd-blk {
   background: #111;

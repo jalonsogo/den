@@ -450,13 +450,24 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
               {/* The draft "fake card" for a new rule sits above the CTA row. */}
               {addOpen && (
                 <div className="np-add-form np-rule np-rule-draft">
-                  <div className="np-dec-seg">
-                    <button className={`np-dec-opt${addDecision === 'allow' ? ' on' : ''}`} onClick={() => setAddDecision('allow')}>
-                      <Check size={13} className="np-dec-ic-allow" /> Allow
+                  {/* The chosen side is tinted with its own decision colour;
+                      the icons inherit it, so nothing is coloured until it's
+                      actually selected. */}
+                  <div className="np-dec-seg" role="group" aria-label="Rule decision">
+                    <button
+                      className={`np-dec-opt np-dec-opt-allow${addDecision === 'allow' ? ' on' : ''}`}
+                      aria-pressed={addDecision === 'allow'}
+                      onClick={() => setAddDecision('allow')}
+                    >
+                      <Check size={13} /> Allow
                     </button>
                     {!policy?.governance && (
-                      <button className={`np-dec-opt${addDecision === 'block' ? ' on' : ''}`} onClick={() => setAddDecision('block')}>
-                        <Ban size={13} className="np-dec-ic-block" /> Block
+                      <button
+                        className={`np-dec-opt np-dec-opt-block${addDecision === 'block' ? ' on' : ''}`}
+                        aria-pressed={addDecision === 'block'}
+                        onClick={() => setAddDecision('block')}
+                      >
+                        <Ban size={13} /> Block
                       </button>
                     )}
                   </div>
