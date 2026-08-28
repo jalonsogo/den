@@ -191,8 +191,10 @@ export function NewSandboxModal() {
                 : deriveName(effAgent, workspace)
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
-  // Fixed viewport coords for the portaled menu (see kitDdPlace).
-  const [kitDdPos, setKitDdPos]       = useState<{ left: number; top: number; width: number } | null>(null)
+  // Fixed viewport coords for the portaled menu (see kitDdPlace). Exactly one
+  // of top/bottom is set — which one is how the menu anchors to the trigger.
+  const [kitDdPos, setKitDdPos]       =
+    useState<{ left: number; width: number; maxHeight: number; top?: number; bottom?: number } | null>(null)
   const kitDdRef = useRef<HTMLDivElement>(null)
   const kitDdTrigRef = useRef<HTMLButtonElement>(null)
   const kitDdMenuRef = useRef<HTMLDivElement>(null)
@@ -264,15 +266,23 @@ export function NewSandboxModal() {
     const el = kitDdTrigRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
-    // Search row (~38px) plus the 200px options cap, and its own padding.
+    // Only an estimate, and only ever used to choose a direction: search row
+    // (~38px) plus the 200px options cap and padding.
     const menuH = 250
     const below = window.innerHeight - r.bottom
     const openUp = below < menuH + 8 && r.top > below
-    setKitDdPos({
-      left: r.left,
-      top: openUp ? Math.max(8, r.top - menuH - 4) : r.bottom + 4,
-      width: r.width
-    })
+    // Anchor the edge that touches the trigger. Opening upward used to set `top`
+    // to `r.top - menuH`, which only lines up when the menu is exactly as tall as
+    // the guess — with fewer kits than that it came out short and left the menu
+    // floating well above the field. Pinning `bottom` instead is exact at any
+    // height, so the estimate above can stay an estimate.
+    // Never taller than the side it opened on, so a short window can't push the
+    // search row off the top. The menu is a flex column, so this shrinks the
+    // scrollable list rather than clipping the chrome.
+    const room = Math.max(120, (openUp ? r.top : below) - 12)
+    setKitDdPos(openUp
+      ? { left: r.left, width: r.width, maxHeight: room, bottom: window.innerHeight - r.top + 4 }
+      : { left: r.left, width: r.width, maxHeight: room, top: r.bottom + 4 })
   }
   useLayoutEffect(() => { if (kitDdOpen) kitDdPlace() }, [kitDdOpen])
 
@@ -694,7 +704,7 @@ export function NewSandboxModal() {
                 <div
                   className="kit-dd-menu"
                   ref={kitDdMenuRef}
-                  style={{ left: kitDdPos.left, top: kitDdPos.top, width: kitDdPos.width }}
+                  style={{ left: kitDdPos.left, width: kitDdPos.width, maxHeight: kitDdPos.maxHeight, top: kitDdPos.top, bottom: kitDdPos.bottom }}
                 >
                   <div className="kit-dd-search">
                     <Search size={13} className="kit-dd-search-ic" />
