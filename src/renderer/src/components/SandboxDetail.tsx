@@ -5,12 +5,13 @@ import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
 import { NetworkPanel } from './NetworkPanel'
 import { FilesPanel } from './FilesPanel'
+import { StatsPanel } from './StatsPanel'
 import { SandboxAvatar } from './SandboxAvatar'
 import { ChangesList } from './ChangesList'
 import { formatUptime } from '../lib/utils'
 import type { FileChange } from '../types'
 
-type Dock = 'files' | 'info' | 'network' | null
+type Dock = 'files' | 'info' | 'network' | 'stats' | null
 
 export function SandboxDetail() {
   const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen, clearSandboxError, pendingDock, setPendingDock } = useStore()
@@ -383,6 +384,7 @@ export function SandboxDetail() {
             onShowInfo={() => setDock((d) => (d === 'info' ? null : 'info'))}
             onShowNetwork={() => setDock((d) => (d === 'network' ? null : 'network'))}
             onShowChanges={toggleChanges}
+            onShowStats={() => setDock((d) => (d === 'stats' ? null : 'stats'))}
             onStart={handleStart}
           />
         </div>
@@ -394,6 +396,8 @@ export function SandboxDetail() {
                 ? <FilesPanel sandbox={sandbox} tab={filesTab} onTabChange={setFilesTab} />
                 : dock === 'network'
                 ? <NetworkPanel sandbox={sandbox} />
+                : dock === 'stats'
+                ? <StatsPanel sandbox={sandbox} />
                 : <InfoPanel sandbox={sandbox} />}
             </div>
           </>

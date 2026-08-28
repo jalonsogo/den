@@ -270,6 +270,13 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
             )}
           </div>
         )}
+        {/* `openPath` (below) only reaches host filesystem paths — for a file
+            outside the sandbox's bind-mounted workspace (e.g. a transcript
+            under ~/.claude), that silently does nothing. `downloadFrom` works
+            for any container path, via a save dialog + `sbx cp`. */}
+        <button className="btn btn-ghost btn-sm" onClick={() => window.den?.downloadFrom(sandbox, path)} title="Download">
+          <Download size={13} />
+        </button>
         <button className="btn btn-ghost btn-sm" onClick={() => window.den?.openPath(path)} title="Open in default app">
           <ExternalLink size={13} />
         </button>

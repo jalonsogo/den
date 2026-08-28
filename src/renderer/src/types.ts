@@ -209,6 +209,27 @@ export interface PromptConfig {
 // process exited).
 export type AgentState = 'working' | 'waiting'
 
+// A Claude Code statusline payload (https://code.claude.com/docs/en/statusline),
+// captured from inside the sandbox via a den-injected `statusLine` command and
+// trimmed to the fields den's UI shows. Everything but `updatedAt` is optional:
+// most fields are null/absent early in a session or on models that don't
+// support them (e.g. `effort`, `rateLimit*`).
+export interface AgentStatusLine {
+  model?: string
+  effort?: string
+  contextUsedPct?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+  costUsd?: number
+  durationMs?: number
+  rateLimitFiveHourPct?: number
+  rateLimitSevenDayPct?: number
+  transcriptPath?: string
+  updatedAt: number
+}
+
 // A network-policy denial — an agent's request that was blocked. Surfaced so
 // the user can allow the host in one click.
 export interface PolicyBlock {
@@ -499,6 +520,12 @@ declare global {
       daemonStatus(): Promise<{ ok: boolean; running: boolean; raw?: string; error?: string }>
       daemonLogLevel(level?: string): Promise<{ ok: boolean; level?: string; raw?: string; error?: string }>
       sbxInspect(name: string): Promise<{ ok: boolean; json?: unknown; raw?: string; error?: string }>
+      // Claude Code's own account info + configured proxy, read from inside the
+      // sandbox (~/.claude.json's oauthAccount + proxy env vars) — not from
+      // `sbx inspect`, which doesn't carry organization/email/friendly login tier.
+      claudeAccount(name: string): Promise<{
+        ok: boolean; loginMethod?: string; organization?: string; email?: string; proxy?: string; caCert?: string; error?: string
+      }>
       setRuntimeEnv(key: string, value: string | boolean | null): Promise<{ ok: boolean; error?: string }>
       onDiagnoseOutput(cb: (chunk: string) => void): () => void
       onDaemonOutput(cb: (chunk: string) => void): () => void
@@ -605,6 +632,7 @@ declare global {
       onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
       onAgentAttention(cb: (name: string) => void): () => void
       onFilesChanged(cb: (name: string) => void): () => void
+      onAgentStatus(cb: (name: string, status: AgentStatusLine) => void): () => void
       onNavigate(cb: (page: string) => void): () => void
       onOpenSandbox(cb: (name: string) => void): () => void
       onOpenModal(cb: (modal: string) => void): () => void

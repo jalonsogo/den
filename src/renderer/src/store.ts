@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { applyTheme, DEFAULT_THEME } from './lib/themes'
-import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, SandboxError, AgentState, PromptConfig, Template, Group } from './types'
+import type { Sandbox, PageType, TabType, ModalType, LogLine, FileEntry, SecretService, PolicyBlock, SandboxError, AgentState, AgentStatusLine, PromptConfig, Template, Group } from './types'
 
 type ThemePref = 'light' | 'dark' | 'system'
 const prefersDark = (): boolean => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -157,6 +157,9 @@ interface AppState {
   sandboxErrors: Record<string, SandboxError>
   // Per-sandbox agent state (working / waiting); absent = unknown/stopped.
   agentActivity: Record<string, AgentState>
+  // Per-sandbox latest Claude Code statusline payload (context usage, cost,
+  // rate limits, …); absent until the first statusline event arrives.
+  agentStatus: Record<string, AgentStatusLine>
   // Mixin-kit names auto-added to every new sandbox (marked in the Kits page).
   defaultKits: string[]
   // Name of a just-created sandbox to briefly flash in the sidebar. Auto-clears.
@@ -235,6 +238,7 @@ interface AppState {
   setSandboxError:    (err: SandboxError) => void
   clearSandboxError:  (sandboxName: string) => void
   setAgentActivity:   (name: string, state: AgentState | null) => void
+  setAgentStatus:     (name: string, status: AgentStatusLine) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -302,6 +306,7 @@ export const useStore = create<AppState>((set) => ({
   toasts: [],
   sandboxErrors: {},
   agentActivity: {},
+  agentStatus: {},
   highlightSandbox: null,
   logsSandbox: null,
   logsReturn: null,
@@ -636,8 +641,11 @@ export const useStore = create<AppState>((set) => ({
       const agentActivity = Object.fromEntries(
         Object.entries(state.agentActivity).filter(([name]) => runningNames.has(name))
       )
+      const agentStatus = Object.fromEntries(
+        Object.entries(state.agentStatus).filter(([name]) => runningNames.has(name))
+      )
 
-      return { sandboxes: merged, activeSandboxId, deletingIds, agentActivity, stopHolds }
+      return { sandboxes: merged, activeSandboxId, deletingIds, agentActivity, agentStatus, stopHolds }
     }),
 
   addCreatingSandbox: (sandbox) =>
@@ -671,13 +679,20 @@ export const useStore = create<AppState>((set) => ({
   updateSandbox: (id, updates) =>
     set((state) => {
       const sandboxes = state.sandboxes.map((s) => (s.id === id ? { ...s, ...updates } : s))
-      // Stopping/stopping/deleting: clear any lingering "Working…"/"Waiting".
+      // Stopping/stopping/deleting: clear any lingering "Working…"/"Waiting"
+      // and the last statusline reading — both are only meaningful while the
+      // agent is actually running.
       let agentActivity = state.agentActivity
+      let agentStatus = state.agentStatus
       if (updates.status && updates.status !== 'running') {
         const sb = sandboxes.find((s) => s.id === id)
         if (sb && agentActivity[sb.name] !== undefined) {
           agentActivity = { ...agentActivity }
           delete agentActivity[sb.name]
+        }
+        if (sb && agentStatus[sb.name] !== undefined) {
+          agentStatus = { ...agentStatus }
+          delete agentStatus[sb.name]
         }
       }
       // Track a user-initiated stop so a stale poll can't flip it back to
@@ -702,7 +717,7 @@ export const useStore = create<AppState>((set) => ({
           delete policyRestartPending[sb.name]
         }
       }
-      return { sandboxes, agentActivity, stopHolds, policyRestartPending }
+      return { sandboxes, agentActivity, agentStatus, stopHolds, policyRestartPending }
     }),
 
   setActiveSandboxId: (id) => set({ activeSandboxId: id, activePage: 'sandbox', activeTab: 'terminal', logsReturn: null }),
@@ -813,7 +828,10 @@ export const useStore = create<AppState>((set) => ({
       if (state === null) delete next[name]
       else next[name] = state
       return { agentActivity: next }
-    })
+    }),
+
+  setAgentStatus: (name, status) =>
+    set((s) => ({ agentStatus: { ...s.agentStatus, [name]: status } }))
 }))
 
 // When the theme preference is "system", follow the OS appearance live.

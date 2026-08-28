@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { Folder, Info, Play, AlertTriangle, Network, SquareTerminal, GitCompare } from 'lucide-react'
+import { Folder, Info, Play, AlertTriangle, Network, SquareTerminal, GitCompare, Videotape, ChartColumn } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -491,7 +491,12 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       style={{ position: 'relative', flex: 1, minHeight: 0, width: '100%', height: '100%' }}
       {...dnd}
     >
-      <div ref={ref} style={{ width: '100%', height: '100%', padding: '6px 8px' }} />
+      {/* Breathing room around the grid. The agent draws its own full-bleed UI
+          (prompt box borders, the status line) hard against column 0, so at 8px
+          it read as clipped rather than as an edge. Costs roughly a column and a
+          row: box-sizing is border-box globally, so this eats the content box
+          the fit measures — worth it, but not worth inflating. */}
+      <div ref={ref} style={{ width: '100%', height: '100%', padding: '9px 13px' }} />
       {dragging && (
         <div className="term-drop">
           <span>Drop files to attach to the agent</span>
@@ -598,11 +603,85 @@ function ShellTerminal({ sandbox, visible, theme, onStart }: { sandbox: Sandbox;
   )
 }
 
+// ── Status bar ────────────────────────────────────────────────────────────
+// A thin row under the Agent terminal surfacing the same data Claude Code's
+// own statusline draws inside the TUI (context usage, cost, rate limits, …),
+// but read from outside the sandbox so it stays visible regardless of what's
+// scrolled into view. Only Claude Code emits this data (see den's injected
+// `statusLine` hook in main/index.ts), so this renders nothing until the
+// first payload arrives.
+
+function formatCost(usd?: number): string | null {
+  return usd == null ? null : `$${usd.toFixed(2)}`
+}
+
+function formatDuration(ms?: number): string | null {
+  if (ms == null) return null
+  const totalSec = Math.floor(ms / 1000)
+  return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
+}
+
+function AgentStatusBar({ sandboxName }: { sandboxName: string }) {
+  const status = useStore((s) => s.agentStatus[sandboxName])
+  if (!status) return null
+
+  const pct = status.contextUsedPct != null ? Math.round(status.contextUsedPct) : null
+  const cost = formatCost(status.costUsd)
+  const duration = formatDuration(status.durationMs)
+
+  return (
+    <div className="term-status-bar">
+      {status.model && <span className="tsb-item tsb-strong">{status.model}</span>}
+      {status.effort && <span className="tsb-item tsb-badge">{status.effort}</span>}
+      {pct != null && (
+        <span className="tsb-item tsb-ctx">
+          <span className="tsb-ctx-track"><span className="tsb-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} /></span>
+          {pct}% ctx
+        </span>
+      )}
+      {cost && <span className="tsb-item">{cost}</span>}
+      {duration && <span className="tsb-item">{duration}</span>}
+      {status.rateLimitFiveHourPct != null && (
+        <span className="tsb-item">5h {Math.round(status.rateLimitFiveHourPct)}%</span>
+      )}
+      {status.rateLimitSevenDayPct != null && (
+        <span className="tsb-item">7d {Math.round(status.rateLimitSevenDayPct)}%</span>
+      )}
+      {status.transcriptPath && (
+        <Tooltip.Provider delayDuration={300} skipDelayDuration={500}>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <button
+                className="tsb-transcript"
+                // `openPath` only reaches host paths (or http(s) URLs) —
+                // transcript_path lives inside the sandbox container, so it
+                // needs the same sandbox-aware viewer the file browser uses to
+                // open a file by path. Its toolbar has a Download button for
+                // getting the file itself onto the host.
+                onClick={() => window.den?.openFileWindow(sandboxName, status.transcriptPath!, status.transcriptPath!.split('/').pop() ?? 'transcript.jsonl')}
+              >
+                <Videotape size={12} />
+              </button>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="term-tip" side="top" sideOffset={9}>
+                <span className="term-tip-title">Session Transcript</span>
+                <span className="term-tip-sub">Download your .jsonl tape from here</span>
+                <Tooltip.Arrow className="sb-tip-arrow" />
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      )}
+    </div>
+  )
+}
+
 // ── Panel ─────────────────────────────────────────────────────────────────
 
-export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowInfo, onShowNetwork, onShowChanges, onStart }: {
+export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowInfo, onShowNetwork, onShowChanges, onShowStats, onStart }: {
   sandbox: Sandbox
-  dock?: 'files' | 'info' | 'network' | null
+  dock?: 'files' | 'info' | 'network' | 'stats' | null
   // Which sub-tab the Files dock is showing — lets the rail highlight Files vs
   // Changes distinctly even though both open the same dock.
   filesTab?: 'files' | 'changes'
@@ -610,6 +689,7 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
   onShowInfo?: () => void
   onShowNetwork?: () => void
   onShowChanges?: () => void
+  onShowStats?: () => void
   onStart?: () => void
 }) {
   const [segment, setSegment] = useState<'agent' | 'shell'>('agent')
@@ -671,12 +751,16 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
         }}>
           <ShellTerminal sandbox={sandbox} visible={segment === 'shell'} theme={theme} onStart={onStart} />
         </div>
+
+        {segment === 'agent' && (sandbox.agent === 'claude' || sandbox.agent === 'claude-bedrock') && (
+          <AgentStatusBar sandboxName={sandbox.name} />
+        )}
       </div>
 
       {/* Vertical activity rail: the terminal switch (Agent / Shell) on top, then
-          the docked panels (Info / Network / Files / Changes) below a separator —
-          what the pane shows, then what opens beside it. Hover previews carry the
-          labels the rail itself hides. */}
+          the docked panels (Info / Network / Files / Changes / Stats) below a
+          separator — what the pane shows, then what opens beside it. Hover
+          previews carry the labels the rail itself hides. */}
       <Tooltip.Provider delayDuration={300} skipDelayDuration={500}>
         <div className="term-rail">
           {tip(agentLabel, 'Agent terminal',
@@ -741,6 +825,16 @@ export function TerminalPanel({ sandbox, dock, filesTab, onToggleFiles, onShowIn
             >
               <GitCompare size={17} />
               {changeCount > 0 && <span className="term-rail-badge">{changeCount > 99 ? '99+' : changeCount}</span>}
+            </button>
+          )}
+          {/* Claude Code only — the statusline data this reads never arrives
+              for other agents. */}
+          {onShowStats && (sandbox.agent === 'claude' || sandbox.agent === 'claude-bedrock') && tip('Stats', 'Tokens & cost',
+            <button
+              className={`term-rail-btn${dock === 'stats' ? ' active' : ''}`}
+              onClick={onShowStats}
+            >
+              <ChartColumn size={17} />
             </button>
           )}
         </div>

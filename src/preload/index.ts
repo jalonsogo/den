@@ -98,6 +98,7 @@ const api = {
   daemonStatus:  ()                     => ipcRenderer.invoke('den:daemon-status'),
   daemonLogLevel:(level?: string)       => ipcRenderer.invoke('den:daemon-log-level', level),
   sbxInspect:    (name: string)         => ipcRenderer.invoke('den:sbx-inspect', name),
+  claudeAccount: (name: string)         => ipcRenderer.invoke('den:claude-account', name),
   setRuntimeEnv: (key: string, value: string | boolean | null) => ipcRenderer.invoke('den:set-runtime-env', key, value),
   onDiagnoseOutput: (cb: (chunk: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
@@ -253,6 +254,13 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, name: string) => cb(name)
     ipcRenderer.on('den:files-changed', handler)
     return () => ipcRenderer.removeListener('den:files-changed', handler)
+  },
+  // A Claude Code statusline payload arrived for a sandbox (context usage,
+  // cost, rate limits, …) — see AgentStatusLine in main/index.ts.
+  onAgentStatus: (cb: (name: string, status: unknown) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, name: string, status: unknown) => cb(name, status)
+    ipcRenderer.on('den:agent-status', handler)
+    return () => ipcRenderer.removeListener('den:agent-status', handler)
   },
   onNavigate: (cb: (page: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, page: string) => cb(page)

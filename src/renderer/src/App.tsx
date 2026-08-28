@@ -140,6 +140,12 @@ export function App() {
       if (sb) useStore.getState().refreshSandboxChanges(name, sb.workspace)
     })
 
+    // Claude Code statusline data (context usage, cost, rate limits, …) for the
+    // terminal's status bar and the Info panel's Stats section.
+    const unsubStatus = window.den?.onAgentStatus?.((name, status) => {
+      useStore.getState().setAgentStatus(name, status)
+    })
+
     // Menu-bar (tray) quick-open: jump to a sandbox.
     const unsub6 = window.den?.onOpenSandbox((name) => setActiveSandboxId(name))
 
@@ -198,6 +204,7 @@ export function App() {
       unsub6?.()
       unsubAction?.()
       unsubFiles?.()
+      unsubStatus?.()
     }
   }, [])
 

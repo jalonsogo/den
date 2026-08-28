@@ -481,7 +481,14 @@ html, body, #root {
 .sb-nav-item.active { background: var(--sb-active); color: var(--sb-active-fg); }
 
 .sb-foot {
-  padding: 8px 12px;
+  /* Fixed height (not padding-derived) so every bottom bar in the app —
+     this, .term-status-bar, .files-local — lines up at the exact same
+     height regardless of each one's own font-size/content. */
+  height: 34px;
+  /* 16px, not 12px: every nav row above (.sb-section/.sb-bottom's 8px wrapper
+     padding + .sb-item/.sb-nav-item's own 8px) lands its icon at a 16px
+     indent — this must match or the plug icon reads as shifted left. */
+  padding: 0 16px;
   border-top: 1px solid var(--sb-border);
   display: flex;
   align-items: center;
@@ -1308,6 +1315,55 @@ html, body, #root {
   font-size: 9px; font-weight: 700; line-height: 1;
   border-radius: 8px;
   color: #fff; background: var(--primary);
+}
+
+/* Status bar under the Agent terminal: Claude Code's own statusline data
+   (context usage, cost, rate limits, …), read from outside the sandbox so it
+   stays visible regardless of scroll position. Themed off the same --tbg/--tfg
+   the terminal itself uses, not the app chrome, so it reads as part of the
+   terminal rather than a den panel. */
+.term-status-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 12px;
+  /* Fixed height, matching .sb-foot and .files-local, so every bottom bar in
+     the app lines up at the same height instead of each deriving its own
+     from padding + font-size. */
+  height: 34px;
+  padding: 0 13px;
+  font-size: 11px; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--tfg, #fff) 62%, transparent);
+  background: var(--tbg, #0a0a0a);
+  box-shadow: inset 0 1px 0 var(--tline);
+  overflow-x: auto; white-space: nowrap;
+}
+.tsb-item { display: inline-flex; align-items: center; gap: 5px; }
+.tsb-strong { color: var(--tfg, #fff); font-weight: 600; }
+.tsb-badge {
+  padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
+}
+.tsb-ctx-track {
+  width: 42px; height: 4px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--tfg, #fff) 16%, transparent);
+}
+.tsb-ctx-fill { display: block; height: 100%; background: var(--primary); }
+/* Sized to sit close to the row's own text line-height (~16px) — a fixed
+   20x20 box here used to force the whole bar taller than that, since a flex
+   row stretches to its tallest child, which threw off alignment with the
+   sidebar footer. */
+.tsb-transcript {
+  margin-left: auto; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--tfg, #fff) 25%, transparent);
+  color: color-mix(in srgb, var(--tfg, #fff) 55%, transparent);
+  background: none; cursor: pointer;
+}
+.tsb-transcript:hover {
+  color: var(--tfg, #fff);
+  border-color: color-mix(in srgb, var(--tfg, #fff) 45%, transparent);
+  background: color-mix(in srgb, var(--tfg, #fff) 10%, transparent);
 }
 
 /* Drag-and-drop overlay shown while dragging a file over the agent terminal */
@@ -2945,11 +3001,14 @@ html, body, #root {
   position: fixed; z-index: 3000;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.18); overflow: hidden;
+  /* A column so an inline max-height (the room on whichever side it opened)
+     lands on the options list rather than clipping the search row off. */
+  display: flex; flex-direction: column;
 }
 .kit-dd-search { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .kit-dd-search-ic { color: var(--t3); flex-shrink: 0; }
 .kit-dd-search input { flex: 1; border: none; background: none; outline: none; font-size: 12.5px; color: var(--t1); }
-.kit-dd-options { max-height: 200px; overflow-y: auto; padding: 5px; }
+.kit-dd-options { flex: 1; min-height: 0; max-height: 200px; overflow-y: auto; padding: 5px; }
 .kit-dd-opt {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   font-size: 12.5px; color: var(--t1); cursor: pointer;

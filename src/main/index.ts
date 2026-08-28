@@ -1868,6 +1868,23 @@ const eventTails = new Map<string, ReturnType<typeof spawn>>()
 const APPEND_EVENT =
   `awk -v t="$(date -u +%FT%T.%3NZ)" 'NR==1{sub(/^\\{/, "{\\"den_ts\\":\\"" t "\\",")} 1' 2>/dev/null >> ~/.den/events.jsonl || true`
 
+// Claude Code's `statusLine` command receives the same kind of JSON (model,
+// context window, cost, rate limits, …) on stdin, but unlike a hook its stdout
+// IS what gets drawn — so unlike APPEND_EVENT, this can't just pipe stdin
+// straight into the append; it has to read stdin once into a variable, reuse
+// it for the append, then print something back for Claude's own statusline
+// row. `jq` isn't guaranteed to be in the sandbox (injectClaudeHooks itself
+// only uses it when present), so the tiny bit of stdout we produce is done
+// with grep/cut instead — den's own bar (built from the full JSON captured
+// below) is the real data source, this is only cosmetic parity with Claude's
+// in-TUI row.
+const STATUS_LINE_CMD =
+  'input=$(cat); ' +
+  `printf '%s' "$input" | awk -v t="$(date -u +%FT%T.%3NZ)" 'NR==1{sub(/^\\{/, "{\\"den_ts\\":\\"" t "\\",")} 1' 2>/dev/null >> ~/.den/events.jsonl || true; ` +
+  `model=$(printf '%s' "$input" | grep -o '"display_name":"[^"]*"' | head -1 | cut -d'"' -f4); ` +
+  `pct=$(printf '%s' "$input" | grep -o '"used_percentage":[0-9.]*' | head -1 | cut -d: -f2 | cut -d. -f1); ` +
+  '[ -n "$model" ] && printf \'%s · %s%% context\\n\' "$model" "${pct:-0}" || true'
+
 const DEN_HOOKS = {
   hooks: {
     UserPromptSubmit: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
@@ -1879,9 +1896,75 @@ const DEN_HOOKS = {
     Notification: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
     Stop: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
     SessionStart: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }]
-  }
+  },
+  statusLine: { type: 'command', command: STATUS_LINE_CMD }
 }
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+// Trimmed-down view of a Claude Code statusline payload (see
+// https://code.claude.com/docs/en/statusline) — only the fields den's UI
+// actually shows. Everything is optional: most fields are null/absent early in
+// a session or on models that don't support them.
+interface AgentStatusLine {
+  model?: string
+  effort?: string
+  contextUsedPct?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+  costUsd?: number
+  durationMs?: number
+  rateLimitFiveHourPct?: number
+  rateLimitSevenDayPct?: number
+  transcriptPath?: string
+  updatedAt: number
+}
+
+// Raw shape of the JSON a statusLine command receives on stdin — only the
+// parts we read. Everything nested is optional/absent-tolerant.
+interface RawStatusLine {
+  hook_event_name?: string
+  model?: { display_name?: string }
+  effort?: { level?: string }
+  transcript_path?: string
+  context_window?: {
+    used_percentage?: number | null
+    current_usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    } | null
+  }
+  cost?: { total_cost_usd?: number; total_duration_ms?: number }
+  rate_limits?: {
+    five_hour?: { used_percentage?: number }
+    seven_day?: { used_percentage?: number }
+  }
+}
+
+const agentStatus = new Map<string, AgentStatusLine>()
+
+function handleStatusLine(name: string, raw: RawStatusLine): void {
+  const status: AgentStatusLine = {
+    model: raw.model?.display_name,
+    effort: raw.effort?.level,
+    contextUsedPct: raw.context_window?.used_percentage ?? undefined,
+    inputTokens: raw.context_window?.current_usage?.input_tokens,
+    outputTokens: raw.context_window?.current_usage?.output_tokens,
+    cacheCreationInputTokens: raw.context_window?.current_usage?.cache_creation_input_tokens,
+    cacheReadInputTokens: raw.context_window?.current_usage?.cache_read_input_tokens,
+    costUsd: raw.cost?.total_cost_usd,
+    durationMs: raw.cost?.total_duration_ms,
+    rateLimitFiveHourPct: raw.rate_limits?.five_hour?.used_percentage,
+    rateLimitSevenDayPct: raw.rate_limits?.seven_day?.used_percentage,
+    transcriptPath: raw.transcript_path,
+    updatedAt: Date.now()
+  }
+  agentStatus.set(name, status)
+  mainWindow?.webContents.send('den:agent-status', name, status)
+}
 
 function setAgentState(name: string, state: AgentState): void {
   if (agentState.get(name) === state) return
@@ -1979,8 +2062,11 @@ function startEventTail(name: string, attempt = 0): void {
     buf = lines.pop() ?? ''
     for (const line of lines) {
       if (!line.trim()) continue
-      let ev: { hook_event_name?: string; tool_name?: string; source?: string }
+      let ev: RawStatusLine & { tool_name?: string; source?: string }
       try { ev = JSON.parse(line) } catch { hookLog(`${name} unparsable line:`, line.slice(0, 120)); continue }
+      // A statusLine payload carries no hook_event_name — that field only
+      // exists on actual hook events (Stop, PreToolUse, …).
+      if (!ev.hook_event_name) { handleStatusLine(name, ev); continue }
       hookLog(`${name} ▸`, ev.hook_event_name, ev.tool_name ?? '')
       switch (ev.hook_event_name) {
         case 'Notification':
@@ -2033,6 +2119,7 @@ function clearAgentActivity(name: string): void {
   eventTails.get(name)?.kill()
   eventTails.delete(name)
   agentState.delete(name)
+  agentStatus.delete(name)
   mainWindow?.webContents.send('den:agent-activity', name, null)
 }
 
@@ -4267,6 +4354,47 @@ function setupIPC(): void {
         raw = await sbx(['inspect', name], { timeout: 15000 })
       }
       return { ok: true, json, raw }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
+  // Claude Code's own account info (organization, email, login tier) and the
+  // proxy it's actually configured to use — NOT in `sbx inspect --json` (that
+  // only knows a generic `auth_mode` like "oauth · anthropic" and the proxy's
+  // address from the host/network side, e.g. a raw container IP rather than
+  // the `gateway.docker.internal` hostname the sandbox itself resolves).
+  // Read straight from what Claude Code itself already has inside the sandbox:
+  // the OAuth account it cached at login (`~/.claude.json`'s `oauthAccount`,
+  // the same data behind Claude's own `/status` screen) and the proxy env vars
+  // sbx injects into the container.
+  ipcMain.handle('den:claude-account', async (_, name: string) => {
+    try {
+      const script =
+        'cat ~/.claude.json 2>/dev/null; ' +
+        'printf "\\n@@@DEN_ENV@@@\\n"; ' +
+        'printf "HTTPS_PROXY=%s\\n" "${HTTPS_PROXY:-$https_proxy}"; ' +
+        'printf "CA_CERT=%s\\n" "${NODE_EXTRA_CA_CERTS:-$SSL_CERT_FILE}"'
+      const raw = await sbx(['exec', name, 'sh', '-c', script], { timeout: 12000 })
+      const [fileRaw, envRaw] = raw.split('@@@DEN_ENV@@@')
+      let oauthAccount: { organizationName?: string; emailAddress?: string; organizationType?: string } | undefined
+      try { oauthAccount = JSON.parse(fileRaw.trim())?.oauthAccount } catch { /* not logged in via OAuth, or no ~/.claude.json yet */ }
+      const env = Object.fromEntries(
+        (envRaw ?? '').trim().split('\n').filter(Boolean).map((l) => {
+          const i = l.indexOf('=')
+          return [l.slice(0, i), l.slice(i + 1)]
+        })
+      )
+      return {
+        ok: true,
+        loginMethod: oauthAccount
+          ? (oauthAccount.organizationType === 'claude_enterprise' ? 'Claude Enterprise account' : 'Claude account')
+          : undefined,
+        organization: oauthAccount?.organizationName,
+        email: oauthAccount?.emailAddress,
+        proxy: env.HTTPS_PROXY || undefined,
+        caCert: env.CA_CERT || undefined
+      }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
