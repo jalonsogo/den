@@ -2122,7 +2122,7 @@ function injectClaudeHooks(name: string, attempt = 0): Promise<void> {
     '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
     'else cp "$den_tmp" ~/.claude/settings.json && echo wrote; fi'
   return new Promise((resolve) => {
-    execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
+    execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
       if (err) {
         if (attempt < EXEC_RETRIES) {
           hookLog(`inject retry ${attempt + 1}/${EXEC_RETRIES} for ${name}: ${err.message}`)
@@ -2143,7 +2143,7 @@ function startEventTail(name: string, attempt = 0): void {
   // `mkdir -p ~/.den` first: this tail can start before injectClaudeHooks has
   // created the directory (it retries with a backoff), and without it `touch`
   // and `tail` both fail with "No such file or directory".
-  const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'mkdir -p ~/.den && touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
+  const proc = spawn(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', 'mkdir -p ~/.den && touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
   eventTails.set(name, proc)
   hookLog(`tailing events for ${name}`)
   let buf = ''
@@ -2236,7 +2236,7 @@ async function gitStatus(name: string, workspace: string): Promise<{ isRepo: boo
       // produced paths like "EADME.md" that nothing could then open.
       // `core.quotePath=false`: otherwise a non-ASCII name arrives C-quoted
       // ("caf\303\251.md") and is equally unopenable.
-      ['exec', name, 'git', '-C', workspace, '-c', 'core.quotePath=false',
+      [...cloudArgsFor(name), 'exec', name, 'git', '-C', workspace, '-c', 'core.quotePath=false',
         'status', '--porcelain=v1', '--untracked-files=all'],
       { timeout: 10000, raw: true }
     )
@@ -2288,7 +2288,7 @@ function inSandboxFileDiff(name: string, path: string): Promise<string> {
       'd=$(git diff --text HEAD -- "$2" 2>/dev/null); ' +
       '[ -z "$d" ] && d=$(git diff --text --no-index -- /dev/null "$2" 2>/dev/null); ' +
       'printf %s "$d"'
-    execFile(getSbxPath(), ['exec', name, 'sh', '-c', script, 'sh', dir, path],
+    execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', script, 'sh', dir, path],
       { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (_e, stdout) => resolve(stdout ?? ''))
   })
 }
@@ -2398,7 +2398,7 @@ async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
 
   let out: string
   try {
-    out = await sbx(['exec', name, 'sh', '-c', cmd, 'sh', dir || '.'])
+    out = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', cmd, 'sh', dir || '.'])
   } catch (err) {
     // Rethrow so the caller can tell a real listing failure (sandbox not ready
     // yet on reconnect, exec transport error, path gone) apart from a genuinely
@@ -2454,12 +2454,11 @@ function cancelPendingSpawn(name: string): void {
 // Attach to a sandbox's agent via `sbx run NAME` in a PTY. Agents like Claude
 // Code are full-screen TUIs that need a real TTY, and their raw ANSI output is
 // streamed straight to the renderer's xterm (no line reformatting).
-// Local sandboxes only, deliberately: this is `sbx run --name <existing>`,
-// which reattaches a *local* sandbox's agent session. A cloud sandbox's
-// equivalent is a genuinely different command — `sbx --cloud attach
-// <id-or-name>` — not the same verb with --cloud spliced in, and its
-// detach-gesture/PTY semantics haven't been exercised against a live cloud
-// sandbox. Needs its own path, not a flag threaded through this one.
+// Local: `sbx run --name <existing>`, reattaching a local sandbox's agent
+// session. Cloud is a genuinely different command — `sbx --cloud attach
+// <id-or-name>` for an already-running one, `sbx --cloud run --name <name>
+// <agent>` otherwise — not the same verb with --cloud spliced in (see the
+// branch below for what's confirmed vs. inferred about that).
 async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { continueSession?: boolean }) {
   const existing = sbxProcesses.get(name)
   if (existing) {
@@ -2491,8 +2490,26 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
   // conversation rather than starting fresh. `--continue` is a claude agent
   // flag (gated by the caller), passed through after the `--` separator.
   const useContinue = !!opts?.continueSession
-  const args = ['run', '--name', name]
-  if (useContinue) args.push('--', '--continue')
+  let args: string[]
+  if (sandboxLocations.get(name) === 'cloud') {
+    // Cloud has no equivalent of local's "run --name to reattach": `attach`
+    // only works on an already-running cloud sandbox ("must already exist
+    // and be in a running state" — attach --help). A stopped one instead
+    // needs `run`, which per its --help prompts interactively to pick a
+    // sandbox unless --name narrows it to one match — the exact disambiguation
+    // behavior is unverified live (no cloud account was available this
+    // session to confirm it), so if sbx still prompts, it surfaces in this
+    // same pty rather than failing silently. --continue has no cloud
+    // equivalent either way: attach reconnects to whatever the agent process
+    // already is, and run's reuse-prompt is a different mechanism entirely.
+    const status = lastGoodSandboxes?.find((s) => s.name === name)?.status
+    args = status === 'running'
+      ? ['--cloud', 'attach', name]
+      : ['--cloud', 'run', '--name', name, sandboxAgents.get(name) ?? 'claude']
+  } else {
+    args = ['run', '--name', name]
+    if (useContinue) args.push('--', '--continue')
+  }
 
   const proc = pty.spawn(getSbxPath(), args, {
     name: 'xterm-256color',
@@ -3523,7 +3540,7 @@ function setupIPC(): void {
   ipcMain.handle('den:workspace-root', async (_, name: string, hint: string) => {
     const script = 'for d in "$1" "$PWD" "$HOME" /; do [ -n "$d" ] && [ -d "$d" ] && { printf %s "$d"; exit 0; }; done; printf /'
     try {
-      const out = await sbx(['exec', name, 'sh', '-c', script, 'sh', hint || ''])
+      const out = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', script, 'sh', hint || ''])
       return (out.trim() || null)
     } catch {
       // Couldn't ask the container — usually it reports "running" a moment
@@ -4480,7 +4497,7 @@ function setupIPC(): void {
         'printf "\\n@@@DEN_ENV@@@\\n"; ' +
         'printf "HTTPS_PROXY=%s\\n" "${HTTPS_PROXY:-$https_proxy}"; ' +
         'printf "CA_CERT=%s\\n" "${NODE_EXTRA_CA_CERTS:-$SSL_CERT_FILE}"'
-      const raw = await sbx(['exec', name, 'sh', '-c', script], { timeout: 12000 })
+      const raw = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', script], { timeout: 12000 })
       const [fileRaw, envRaw] = raw.split('@@@DEN_ENV@@@')
       let oauthAccount: { organizationName?: string; emailAddress?: string; organizationType?: string } | undefined
       try { oauthAccount = JSON.parse(fileRaw.trim())?.oauthAccount } catch { /* not logged in via OAuth, or no ~/.claude.json yet */ }
@@ -4928,7 +4945,7 @@ function setupIPC(): void {
 
   // Read a file's contents (untrimmed, up to 10 MB) via `sbx exec cat`.
   ipcMain.handle('den:read-file', (_, name: string, path: string) => new Promise<string>((resolve, reject) => {
-    execFile(getSbxPath(), ['exec', name, 'cat', path], { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'cat', path], { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message))
       else resolve(stdout)
     })
@@ -4943,7 +4960,7 @@ function setupIPC(): void {
     new Promise<{ base64: string; size: number }>((resolve, reject) => {
       execFile(
         getSbxPath(),
-        ['exec', name, 'cat', path],
+        [...cloudArgsFor(name), 'exec', name, 'cat', path],
         { timeout: 30000, encoding: 'base64', maxBuffer: 64 * 1024 * 1024 },
         (err, stdout, stderr) => {
           if (err) {
@@ -4992,7 +5009,7 @@ function setupIPC(): void {
       // Direct-mount: in-sandbox working-tree changes.
       const st = await gitStatus(name, repoDir)
       const numOut = await new Promise<string>((resolve) => {
-        execFile(getSbxPath(), ['exec', name, 'git', '-C', repoDir, 'diff', '--no-renames', '--numstat', 'HEAD'],
+        execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'git', '-C', repoDir, 'diff', '--no-renames', '--numstat', 'HEAD'],
           { timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (_e, so) => resolve(so || ''))
       })
       const nums = parseNumstat(numOut)
@@ -5072,7 +5089,7 @@ function setupIPC(): void {
       const script =
         'f="$1/.gitignore"; shift; ' +
         'for p in "$@"; do grep -qxF -- "$p" "$f" 2>/dev/null || printf "%s\\n" "$p" >> "$f"; done'
-      execFile(getSbxPath(), ['exec', name, 'sh', '-c', script, 'sh', repoDir, ...pats],
+      execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', script, 'sh', repoDir, ...pats],
         { timeout: 10000 }, (err, _so, se) =>
           resolve(err ? { ok: false, error: (se || err.message || 'Failed to update .gitignore.').trim() } : { ok: true }))
     })
@@ -5080,7 +5097,7 @@ function setupIPC(): void {
 
   // Write contents back to a file (content piped to `cat > FILE`).
   ipcMain.handle('den:write-file', async (_, name: string, path: string, content: string) => {
-    await sbxWithInput(['exec', name, 'sh', '-c', 'cat > "$1"', 'sh', path], content)
+    await sbxWithInput([...cloudArgsFor(name), 'exec', name, 'sh', '-c', 'cat > "$1"', 'sh', path], content)
   })
 
   // Open a host path (the workspace is bind-mounted) in the OS default app,
@@ -5140,7 +5157,7 @@ function setupIPC(): void {
 
   // Delete a file or directory inside the sandbox workspace.
   ipcMain.handle('den:delete-path', async (_, name: string, path: string) => {
-    await sbx(['exec', name, 'rm', '-rf', path])
+    await sbx([...cloudArgsFor(name), 'exec', name, 'rm', '-rf', path])
   })
 
   // Write dropped files' bytes into a directory inside the sandbox. Mirrors the
@@ -5158,7 +5175,7 @@ function setupIPC(): void {
       }
       const r = await new Promise<{ name: string; ok: boolean; error?: string }>((resolve) => {
         // Positional args ($1 dir, $2 name) keep paths with spaces/quotes safe.
-        const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'cat > "$1/$2"', 'sh', destDir, safe])
+        const proc = spawn(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', 'cat > "$1/$2"', 'sh', destDir, safe])
         let err = ''
         proc.stderr.on('data', (d) => { err += d.toString() })
         proc.on('error', (e) => resolve({ name: safe, ok: false, error: String(e) }))
@@ -5341,7 +5358,7 @@ function setupIPC(): void {
   ipcMain.handle('den:sandbox-log', async (_, name: string, which: 'kit' | 'sandbox') => {
     const path = which === 'sandbox' ? '/var/log/dockerd.log' : '/var/log/sbx-kit-startup.log'
     try {
-      const text = await sbx(['exec', name, 'sh', '-c', `cat ${path} 2>/dev/null`], { timeout: 10000 })
+      const text = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', `cat ${path} 2>/dev/null`], { timeout: 10000 })
       return { ok: true, text }
     } catch (e) {
       return { ok: false, text: '', error: e instanceof Error ? e.message : String(e) }
@@ -5825,7 +5842,7 @@ function setupIPC(): void {
     const safe = ((fileName.split(/[\\/]/).pop() || 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(-120)) || 'file'
     return new Promise((resolve) => {
       const proc = spawn(getSbxPath(), [
-        'exec', name, 'sh', '-c',
+        ...cloudArgsFor(name), 'exec', name, 'sh', '-c',
         'd=/tmp/den-dropped; mkdir -p "$d" && cat > "$d/$1" && printf %s "$d/$1"',
         'sh', safe
       ])

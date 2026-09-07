@@ -1,12 +1,16 @@
 # Test Plan — sbx 0.42.0 adoption (branch `rename-minipit-to-den`)
 
 Manual QA for den's move to requiring sbx **0.42.0 or newer**, the new surface that
-unlocks, and a real bug the upgrade would otherwise have shipped. Covers commits
-`278c332`..`cfdb5ec` (see `git log --oneline 278c332^..HEAD` for the exact list).
+unlocks, and a real bug the upgrade would otherwise have shipped. Covers every
+commit from `278c332` through the end of the branch's sbx-0.42 work (see
+`git log --oneline 278c332^..HEAD`).
 
-> **In progress, not covered here yet:** cloud port publish/unpublish, `sbx move`
-> (local↔cloud), and the Agent terminal tab's cloud reattach. These need their own
-> pass once implemented — don't block sign-off on them.
+> **Least-verified area:** cloud sandbox support (Phases 5–10). Every `--cloud`
+> flag/argv shape was confirmed against a real sbx 0.42.0 binary's `--help` output,
+> but nothing behind actual Docker Hub/cloud auth could be exercised live this
+> session (no account was available) — so these phases are exactly where a real
+> pass matters most. `docs/sbx-quirks.md`'s v0.42 entry lists precisely which
+> pieces are confirmed vs. inferred.
 
 Each `sbx` call is verifiable independently in a terminal — run the noted command
 to confirm the GUI produced the same effect.
@@ -122,7 +126,44 @@ simply work, with no leftover "needs sbx 0.39" messaging anywhere.
 | 6.3 | Open the **Shell** terminal tab on a running cloud sandbox | Connects (via `--cloud exec -it ... bash`), interactive shell works | — |
 | 6.4 | Trigger any den feature that shells a one-off command into a cloud sandbox (e.g. whatever calls `den:exec`) | Works, dispatched with `--cloud` | — |
 | 6.5 | Regression: same four actions on a **local** sandbox | Completely unchanged — no `--cloud` flag, same as before this release | — |
-| Known gap | Open the **Agent** terminal tab on a cloud sandbox | Not yet wired to cloud's `attach`/`run` — note what actually happens (likely tries the local `run --name` path and fails) so it's tracked, not silently broken |
+| 6.6 | Any other den feature that touches sandbox files/git while viewing a cloud sandbox (Changes tab, file editor open/save/delete, dropped-file copy into the Agent terminal, kit/sandbox log viewer) | All dispatch `--cloud` too — confirm none of them silently target the local daemon instead (that would show as "sandbox not found" or an empty/wrong result) | — |
+
+---
+
+## Phase 6b — Agent terminal cloud reattach (least-verified — see the note at the top)
+
+| # | Step | Expected | Verify |
+|---|------|----------|--------|
+| 6b.1 | Open the **Agent** terminal tab on a **running** cloud sandbox | Connects via `sbx --cloud attach <name>`; the agent's live session appears | — |
+| 6b.2 | Open the **Agent** terminal tab on a **stopped** cloud sandbox | Attempts `sbx --cloud run --name <name> <agent>`. **This is the one path nobody could verify live this session** — note exactly what happens: does it reattach cleanly, does sbx's own interactive picker prompt appear in the terminal (den doesn't hide it if so), or does it error? Whatever happens, it should be visible in the terminal, not silently wrong. | — |
+| 6b.3 | While attached to a cloud sandbox's Agent tab, check theming/activity indicator (the sidebar "Working…"/"Waiting for you" state) | Hook injection and event-tailing were also switched to dispatch `--cloud` — confirm they aren't silently failing against the local daemon (which would show as no theme applied / activity never updating) | — |
+| 6b.4 | Regression: Agent tab on a **local** sandbox, both running and stopped-then-reattached, with and without `--continue` | Completely unchanged | — |
+
+---
+
+## Phase 6c — Cloud ports
+
+| # | Step | Expected | Verify |
+|---|------|----------|--------|
+| 6c.1 | Open the Ports panel on a cloud sandbox | Add-port form shows a single "sandbox port" field only — no host port, no protocol picker, no "Expose to network" | — |
+| 6c.2 | Publish a port on a running cloud sandbox | Runs `--cloud --publish <port>` (bare number); row appears | `sbx --cloud ports <name>` |
+| 6c.3 | Click **Open** on a cloud port row | Opens the control-plane-assigned public URL, not `http://127.0.0.1:<port>` — if no URL comes back from `--json`, the button should be disabled with a tooltip explaining why, not silently broken | — |
+| 6c.4 | Unpublish a cloud port | Runs `--cloud --unpublish <port>`; row disappears | `sbx --cloud ports <name>` |
+| 6c.5 | Regression: Ports panel on a **local** sandbox | Completely unchanged — host/sandbox/protocol form, "Expose to network", `http://127.0.0.1:<port>` Open link | — |
+
+---
+
+## Phase 6d — Move between local and cloud
+
+| # | Step | Expected | Verify |
+|---|------|----------|--------|
+| 6d.1 | Right-click a **local** sandbox | Context menu shows **"Move to Cloud…"** | — |
+| 6d.2 | Click it, accept the default name, confirm | Runs `sbx move <name> --to cloud --force --name <name>`; on success the sandbox list refreshes and a new cloud sandbox appears | `sbx --cloud ls` |
+| 6d.3 | Check the source local sandbox afterward | Per `move --help`, it's stopped, not deleted | `sbx ls` still lists it, stopped |
+| 6d.4 | Right-click a **cloud** sandbox | Context menu shows **"Move to Local…"** instead | — |
+| 6d.5 | Move a cloud sandbox to local, giving it a custom destination name | New local sandbox appears under that name | `sbx ls` |
+| 6d.6 | Cancel the prompt instead of confirming | Nothing runs, no sandbox created | — |
+| 6d.7 | Trigger a failure (e.g. move a sandbox whose workspace won't travel, or with no cloud entitlement) | Error surfaces in the prompt modal, modal stays open with the message — no crash, no silent failure | — |
 
 ---
 
@@ -185,7 +226,10 @@ simply work, with no leftover "needs sbx 0.39" messaging anywhere.
 - [ ] Phase 3 — workspace-optional create (3.1–3.5)
 - [ ] Phase 4 — kit arguments (4.1–4.8)
 - [ ] Phase 5 — cloud listing (5.0, or 5.1–5.5 with a cloud plan)
-- [ ] Phase 6 — cloud sandbox actions (6.1–6.5)
+- [ ] Phase 6 — cloud sandbox actions (6.1–6.6)
+- [ ] Phase 6b — Agent terminal cloud reattach (6b.1–6b.4) — least-verified, see note at top
+- [ ] Phase 6c — cloud ports (6c.1–6c.5)
+- [ ] Phase 6d — move between local and cloud (6d.1–6d.7)
 - [ ] Phase 7 — cloud network policy (7.1–7.5)
 - [ ] Phase 8 — cloud secrets (8.1–8.8)
 - [ ] Phase 9 — Devin + `--kit` mixin-only fix (9.1–9.6)

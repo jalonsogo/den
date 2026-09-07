@@ -403,12 +403,31 @@ Template:
     `tcp4`/`udp4` explicitly for the old default, so this was already a no-op.
 - **New, resolving prior open questions:**
   - **`sbx move SANDBOX --to local|cloud [--name X] [-f/--force]`** — exact
-    flags confirmed via `move --help`. Not yet wired into den (M3).
+    flags confirmed via `move --help`. Wired into den as a context-menu
+    action (`den:move-sandbox`); always passes `--force` since den's own
+    confirm dialog already covers what sbx's prompt would ask.
   - **`sbx --cloud secret` / `sbx --cloud policy`** — same subcommand tree as
     local, just with `--cloud` added; no separate cloud-specific verbs.
     `secret set --oauth`'s help text confirms `--cloud` changes *where* a
     secret is stored (cloud-only store, "never the local secrets-engine"),
-    not just which sandbox it's scoped to.
+    not just which sandbox it's scoped to. `secret ls --cloud` confirmed via
+    `secret ls --help` — same flags (`-g`/`--sandbox`/`--service`/`--json`),
+    a separate listing to merge in, not a filter on one combined list.
+  - **Cloud ports** — confirmed via `ports --help`: cloud `--publish`/
+    `--unpublish` take a bare `SANDBOX_PORT`, and only a sandbox ID/name is
+    accepted as the target (no host:container mapping). The JSON field name
+    for the assigned public URL is still unconfirmed (no live cloud sandbox
+    to check `--json` output against) — `normalizePorts()`'s cloud branch
+    tries several candidates the same tolerant way every other field here
+    already does.
+  - **Cloud agent reattach** — confirmed via `run --help` and `attach --help`:
+    `sbx --cloud attach <name>` only works on an already-*running* cloud
+    sandbox; a stopped one needs `sbx --cloud run --name <name> <agent>`,
+    which the help text says prompts interactively to pick a sandbox unless
+    `--name` narrows it to one match. That disambiguation claim is *not*
+    verified live (no cloud account was available this session) —
+    `spawnSandboxProcess`'s cloud branch relies on it, and if wrong, sbx's
+    own prompt will appear in the pty rather than silently misbehaving.
   - **Cloud entitlement/plan status**: still no dedicated read-only command —
     checked the full top-level and `secret`/`policy`/`volume` help text, found
     nothing resembling "does this account have a plan". The practical answer
