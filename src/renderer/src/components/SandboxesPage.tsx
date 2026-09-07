@@ -110,7 +110,6 @@ export function SandboxesPage() {
                   ) : s.uptimeSeconds ? (
                     <span className="home-row-up">{formatUptime(s.uptimeSeconds)}</span>
                   ) : null}
-                  <span className={`proj-dot ${s.status === 'running' ? 'running' : creating ? 'creating' : 'stopped'}`} />
                 </span>
               </div>
             )

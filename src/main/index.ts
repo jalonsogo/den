@@ -3394,6 +3394,12 @@ function setupIPC(): void {
     noShareSkills?: boolean
     env?: string[]
     envFile?: string
+    // sbx v0.42: create on Docker's hosted cloud infrastructure. The renderer
+    // never sends a workspace/ports alongside this (see NewSandboxModal.tsx —
+    // a local path can't mount into a remote sandbox, and cloud's creation-time
+    // ports shape isn't confirmed), so this handler doesn't need to reconcile
+    // those itself.
+    cloud?: boolean
   }) => {
     // Ensure the target workspace folder exists — defaults like ~/den/<name>
     // won't have been created yet (no-op for existing project/clone folders).
@@ -3402,7 +3408,7 @@ function setupIPC(): void {
       catch (err) { console.error('could not create workspace folder:', err) }
     }
     const buildArgs = (agent: string): string[] => {
-      const args = ['create']
+      const args = [...(config.cloud ? ['--cloud'] : []), 'create']
       if (config.name) args.push('--name', config.name)
       if (config.memory) args.push('-m', config.memory)
       if (config.branch) args.push('--clone')
@@ -3488,6 +3494,10 @@ function setupIPC(): void {
       (config.workspace ? `${agent}-${config.workspace.split('/').pop()}` : agent)
     recordKits(sandboxName, config.kits ?? [])
     recordIsolation(sandboxName, !!config.branch)
+    // Recorded immediately, not just on the next listSandboxes() poll — an
+    // action taken on this sandbox before that poll lands (stop, exec, ports)
+    // would otherwise dispatch to the wrong daemon.
+    if (config.cloud) sandboxLocations.set(sandboxName, 'cloud')
     // Brand-new sandbox: its first agent session must start fresh, never
     // `--continue` (there is no conversation yet). See freshSandboxes.
     freshSandboxes.add(sandboxName)

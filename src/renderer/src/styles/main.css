@@ -1187,11 +1187,12 @@ html, body, #root {
   display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
   font-size: 12px; color: var(--t3); white-space: nowrap;
 }
-.d-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--border-hi); }
-.d-status.on::before { background: var(--green); }
-/* Agent-activity states — match the sidebar/toolbar dots so the header agrees. */
-.d-status.working::before { background: var(--yellow); animation: activity-pulse 1.3s ease-in-out infinite; }
-.d-status.waiting::before { background: var(--blue); animation: activity-pulse 1.3s ease-in-out infinite; }
+/* Color the text itself rather than drawing a second dot — the avatar right
+   next to this already carries an always-on pulsing corner dot for the same
+   state (SandboxAvatar's .sbx-avatar-activity), so a dot here duplicated it. */
+.d-status.on { color: var(--green); }
+.d-status.working { color: var(--yellow); }
+.d-status.waiting { color: var(--blue); }
 .d-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .d-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 .d-back {
@@ -2502,11 +2503,8 @@ html, body, #root {
   display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
   font-size: 11.5px; color: var(--t3);
 }
-.home-row-status.is-working { color: var(--green); }
-.home-row-status.is-waiting { color: var(--yellow); }
-.home-row-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-hi); flex-shrink: 0; }
-.home-row-dot.on { background: var(--green); }
-.home-row-status.is-waiting .home-row-dot { background: var(--yellow); }
+.home-row-status.is-working { color: var(--yellow); }
+.home-row-status.is-waiting { color: var(--blue); }
 .home-row-agent { font-size: 11.5px; color: var(--t3); flex-shrink: 0; }
 /* Metadata chips take the middle, pushing uptime + menu to the right edge. */
 .home-row-meta { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
@@ -3155,10 +3153,6 @@ html, body, #root {
 
 .proj-box-new { color: var(--t2); border-style: dashed; }
 .proj-box-new:hover { color: var(--t1); border-color: var(--border-hi); }
-.proj-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.proj-dot.running { background: var(--green); }
-.proj-dot.stopped { background: var(--t4); }
-.proj-dot.creating { background: var(--amber, #f59e0b); animation: pulse 1.4s infinite; }
 
 /* --clone on a non-repo folder: warn + offer to initialize one. */
 .clone-warn {

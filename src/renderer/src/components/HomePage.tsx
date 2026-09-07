@@ -373,7 +373,6 @@ export function HomePage() {
                   <SandboxAvatar sandbox={s} size={26} alert={hasUnacked(s.name)} activity={activity} />
                   <span className="home-row-name">{s.name}</span>
                   <span className={`home-row-status${activity === 'working' ? ' is-working' : ''}${activity === 'waiting' ? ' is-waiting' : ''}`}>
-                    <i className={`home-row-dot${isRunning ? ' on' : ''}`} />
                     {statusText}
                   </span>
                   {isRunning && <span className="home-row-agent">{agentLabel}</span>}

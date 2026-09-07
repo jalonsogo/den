@@ -659,7 +659,11 @@ export function SbxRuntimePanel({
           {rt?.source === 'managed'
             ? version && rt.adopted && version.includes(rt.pinned)
               ? <span className="rt-badge rt-badge-ok">Pinned to {rt.pinned}</span>
-              : null
+              // Adopted a build before this den release moved the pin (or never
+              // adopted one at all) — the "Managed runtime" row below already has
+              // a working Install/Reinstall button for this; flag it up here too
+              // so a stale pin isn't invisible until you scroll to it.
+              : <span className="rt-badge rt-badge-update">Update to {rt.pinned} available</span>
             : updateAvailable
               ? <span className="rt-badge rt-badge-update">Update available → {latest}</span>
               : version && latest
@@ -976,8 +980,7 @@ export function SbxRuntimePanel({
           <div>
             <div className="ss-lbl">Filesystem cache (virtiofs)</div>
             <div className="ss-sub">
-              Faster filesystem performance (<code>DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE</code>). On by default in
-              sbx v0.35.
+              Faster filesystem performance (<code>DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE</code>). On by default.
             </div>
           </div>
           <button
@@ -1028,8 +1031,7 @@ export function SbxRuntimePanel({
             <div className="ss-sub">
               Chain sandbox egress through an upstream proxy (<code>DOCKER_SANDBOXES_PROXY</code>). Supports{' '}
               <code>http://</code>, <code>https://</code> and <code>socks5://</code> / <code>socks5h://</code>, or{' '}
-              <code>system</code> to follow this Mac's own proxy settings — including a PAC auto-config URL
-              (sbx v0.37+).
+              <code>system</code> to follow this Mac's own proxy settings — including a PAC auto-config URL.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
