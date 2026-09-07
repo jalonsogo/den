@@ -67,6 +67,9 @@ interface AppState {
   // Scope the secret modal targets when editing: '(global)' or a sandbox name.
   // Null when adding a new secret (the modal then lets the user pick the scope).
   secretScopeTarget: string | null
+  // Which store the targeted secret lives in — local vs cloud (a wholly
+  // separate secrets store). Null when adding (defaults to local in the modal).
+  secretCloudTarget: boolean | null
   // The signed-in Docker Hub account (username/email/orgs). Null until loaded.
   dockerAccount: DockerAccount | null
   // The active namespace for push/publish (the user's own username or a selected
@@ -174,7 +177,7 @@ interface AppState {
   removeCreatingSandbox: (name: string) => void
   setHighlightSandbox: (name: string | null) => void
   toggleDefaultKit:   (name: string) => void
-  setSecretTarget:    (service: SecretService | null, scope?: string | null) => void
+  setSecretTarget:    (service: SecretService | null, scope?: string | null, cloud?: boolean | null) => void
   setNewSandboxWorkspace: (path: string | null) => void
   setNewSandboxTemplate: (ref: string | null) => void
   setNewSandboxGroup: (id: string | null) => void
@@ -257,6 +260,7 @@ export const useStore = create<AppState>((set) => ({
   stopHolds: {},
   secretTarget: null,
   secretScopeTarget: null,
+  secretCloudTarget: null,
   dockerAccount: null,
   activeOrg: localStorage.getItem('den:activeOrg'),
   newSandboxWorkspace: null,
@@ -314,7 +318,7 @@ export const useStore = create<AppState>((set) => ({
     try { return JSON.parse(localStorage.getItem('den:defaultKits') ?? '[]') ?? [] } catch { return [] }
   })(),
 
-  setSecretTarget: (service, scope = null) => set({ secretTarget: service, secretScopeTarget: scope }),
+  setSecretTarget: (service, scope = null, cloud = null) => set({ secretTarget: service, secretScopeTarget: scope, secretCloudTarget: cloud }),
 
   // Star/unstar a mixin kit as a "default" — new sandboxes pre-select these.
   toggleDefaultKit: (name) =>

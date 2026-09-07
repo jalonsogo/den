@@ -61,8 +61,8 @@ const sandboxAgents = new Map<string, string>()
 // question it already has to ask (`sbx ls`) and never asked the caller.
 const sandboxLocations = new Map<string, 'local' | 'cloud'>()
 /** `['--cloud']` for a sandbox last seen on the cloud listing, else `[]`. */
-function cloudArgsFor(name: string): string[] {
-  return sandboxLocations.get(name) === 'cloud' ? ['--cloud'] : []
+function cloudArgsFor(name?: string): string[] {
+  return name && sandboxLocations.get(name) === 'cloud' ? ['--cloud'] : []
 }
 // Sandboxes created in this app instance that have not yet had an agent session
 // started. A brand-new sandbox has no conversation to resume, so its first
@@ -1146,6 +1146,10 @@ interface StoredSecret {
   type: string
   name: string
   masked: string
+  // Which secrets store reported this row: local (sandboxd's own) or cloud
+  // (a wholly separate store — a cloud-stored secret, per `secret set --oauth
+  // --help`, is "never" mirrored into the local one).
+  location: 'local' | 'cloud'
 }
 
 // ── Anthropic OAuth ──────────────────────────────────────────────────────────
@@ -1248,9 +1252,10 @@ function secretScopeArgs(scope?: string): string[] {
 // versions, so parse defensively: take the first three fields as scope/type/
 // name, treat the rest as the masked-preview-plus-flags tail, and detect the
 // annotations by keyword anywhere in the row.
-async function listSecrets(): Promise<StoredSecret[]> {
+async function listSecretsFor(location: 'local' | 'cloud'): Promise<StoredSecret[]> {
   try {
-    const out = await sbx(['secret', 'ls'])
+    const args = location === 'cloud' ? ['--cloud', 'secret', 'ls'] : ['secret', 'ls']
+    const out = await sbx(args)
     const lines = out.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim())
     if (!lines.length || /no secrets/i.test(lines[0])) return []
     return lines
@@ -1268,12 +1273,22 @@ async function listSecrets(): Promise<StoredSecret[]> {
         // annotation we keep verbatim for display.
         const masked = tail[0] ?? ''
         const note = tail.slice(1).join(' ').trim() || undefined
-        return { scope, type, name, masked, envOnly, oauthShadowed, note }
+        return { scope, type, name, masked, envOnly, oauthShadowed, note, location }
       })
       .filter((r) => r.name)
   } catch {
     return []
   }
+}
+
+// Local + cloud are wholly separate stores (see `location` on StoredSecret) —
+// merge both listings rather than picking one. A cloud listing failure
+// (no entitlement, older runtime, wrong flag placement) is swallowed the same
+// way listCloudSandboxes() does it: silently empty, never surfaced as an error
+// for what is otherwise a healthy local-only setup.
+async function listSecrets(): Promise<StoredSecret[]> {
+  const [local, cloud] = await Promise.all([listSecretsFor('local'), listSecretsFor('cloud')])
+  return [...local, ...cloud]
 }
 
 async function listTemplates() {
@@ -1790,7 +1805,7 @@ function parsePolicyLogJson(raw: string, fallbackSandbox?: string): PolicyBlock[
 // fetch returned nothing even once the payload was parsed correctly. Ask for the
 // full log and narrow by the row's own sandbox name instead.
 function fetchPolicyLog(name?: string): Promise<PolicyBlock[]> {
-  return sbx(['policy', 'log', '--json'], { timeout: 12000 })
+  return sbx([...cloudArgsFor(name), 'policy', 'log', '--json'], { timeout: 12000 })
     .then((out) => {
       const blocks = parsePolicyLogJson(out, name)
       return name ? blocks.filter((b) => !b.sandbox || b.sandbox === name) : blocks
@@ -5146,8 +5161,11 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('den:set-secret', async (_, service: string, value: string, scope?: string) => {
-    await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
+  ipcMain.handle('den:set-secret', async (_, service: string, value: string, scope?: string, cloud?: boolean) => {
+    await sbxWithInput(
+      [...(cloud ? ['--cloud'] : []), 'secret', 'set', ...secretScopeArgs(scope), service],
+      value.endsWith('\n') ? value : value + '\n'
+    )
   })
 
   // Is the 1Password CLI installed? Gates the "Load from 1Password" option.
@@ -5156,10 +5174,13 @@ function setupIPC(): void {
   // Resolve a 1Password reference with `op read` and store the result — mirrors
   // `op read "op://…" | sbx secret set <scope> <service>`. The real value stays
   // on the host and is never pasted into den.
-  ipcMain.handle('den:set-secret-op', async (_, service: string, ref: string, scope?: string) => {
+  ipcMain.handle('den:set-secret-op', async (_, service: string, ref: string, scope?: string, cloud?: boolean) => {
     const value = await opRead(ref)
     if (!value) throw new Error('1Password returned an empty value for that reference.')
-    await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
+    await sbxWithInput(
+      [...(cloud ? ['--cloud'] : []), 'secret', 'set', ...secretScopeArgs(scope), service],
+      value.endsWith('\n') ? value : value + '\n'
+    )
   })
 
   // Dynamic secrets (v0.39): sbx resolves the value itself, from a reference or
@@ -5178,6 +5199,7 @@ function setupIPC(): void {
     kind: 'reference' | 'command'
     refresh?: string
     custom?: boolean
+    cloud?: boolean
   }) => {
     // `secret set-custom` is the non-catalog form; both take the same options.
     const verb = opts.custom ? 'set-custom' : 'set'
@@ -5188,7 +5210,9 @@ function setupIPC(): void {
         `This sbx build doesn't document a ${opts.kind} option for \`secret ${verb}\`. ` +
         `Store the value directly instead, or update sbx.` }
     }
-    const args = ['secret', verb, ...secretScopeArgs(opts.scope), opts.service, kindFlag, opts.source]
+    const args = [
+      ...(opts.cloud ? ['--cloud'] : []), 'secret', verb, ...secretScopeArgs(opts.scope), opts.service, kindFlag, opts.source
+    ]
     if (opts.refresh) {
       const refreshFlag = await sbxFlag(['secret', verb], ['--refresh', '--refresh-interval', '--ttl'])
       // A missing refresh flag is not worth failing the whole write over: the
@@ -5203,15 +5227,17 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('den:remove-secret', async (_, service: string, scope?: string) => {
-    await sbx(['secret', 'rm', ...secretScopeArgs(scope), service, '-f'])
+  ipcMain.handle('den:remove-secret', async (_, service: string, scope?: string, cloud?: boolean) => {
+    await sbx([...(cloud ? ['--cloud'] : []), 'secret', 'rm', ...secretScopeArgs(scope), service, '-f'])
   })
 
   ipcMain.handle('den:anthropic-oauth', () => anthropicOAuth())
 
   // sbx has a built-in OAuth flow for OpenAI (opens the browser, stores tokens).
-  ipcMain.handle('den:oauth-secret', (_, service: string) => new Promise((resolve, reject) => {
-    const proc = spawn(getSbxPath(), ['secret', 'set', service, '--oauth'])
+  // With --cloud, per `secret set --help`, --oauth also supports anthropic and
+  // stores only in the cloud store, never the local one.
+  ipcMain.handle('den:oauth-secret', (_, service: string, cloud?: boolean) => new Promise((resolve, reject) => {
+    const proc = spawn(getSbxPath(), [...(cloud ? ['--cloud'] : []), 'secret', 'set', service, '--oauth'])
     let err = ''
     proc.stderr?.on('data', (d) => (err += d))
     proc.on('error', reject)
@@ -5435,7 +5461,7 @@ function setupIPC(): void {
       // every rule and filter in-process rather than relying on the `--type`
       // flag or a positional sandbox filter (their availability isn't pinned
       // across sbx versions, and a bad flag would blank the whole view).
-      const out = await withPolicyInitRetry(() => sbx(['policy', 'ls', '--wide'], { timeout: 12000 }))
+      const out = await withPolicyInitRetry(() => sbx([...cloudArgsFor(name), 'policy', 'ls', '--wide'], { timeout: 12000 }))
       const parsed = parsePolicyLs(out)
       let rules = parsed.rules.filter((r) => !r.type || r.type === 'network')
       // Narrow to the rules that actually apply to this sandbox: its own rules
@@ -5452,14 +5478,14 @@ function setupIPC(): void {
   // Test whether the current policy would allow a network request, without
   // running anything — `sbx policy check network <resource>` (new in v0.35).
   // Returns the parsed decision (allow/deny) plus the raw output for detail.
-  ipcMain.handle('den:policy-check', async (_, resource: string, _name?: string) => {
+  ipcMain.handle('den:policy-check', async (_, resource: string, name?: string) => {
     // Read the decision from `--json` (v0.37+) rather than scanning the text.
     // The old regex tested the whole output, so an ALLOWED host that merely
     // contains "blocked"/"deny" in its name parsed as a denial. `allowed` is an
     // explicit boolean, and the same payload carries the governance detail.
     try {
       const raw = await withPolicyInitRetry(() =>
-        sbx(['policy', 'check', 'network', '--json', resource], { timeout: 12000 })
+        sbx([...cloudArgsFor(name), 'policy', 'check', 'network', '--json', resource], { timeout: 12000 })
       )
       const j = JSON.parse(raw) as {
         allowed?: boolean
@@ -5480,7 +5506,7 @@ function setupIPC(): void {
       // evaluates the daemon-side authorizer, so no per-sandbox flag is passed
       // (its availability isn't pinned, and a bad flag would error the check).
       const raw = await withPolicyInitRetry(() =>
-        sbx(['policy', 'check', 'network', resource], { timeout: 12000 })
+        sbx([...cloudArgsFor(name), 'policy', 'check', 'network', resource], { timeout: 12000 })
       )
       // Only look at the decision line, not the whole body (which repeats the
       // host). sbx prints "Allowed: <target>" / "Denied: <target>" first.
@@ -5500,7 +5526,7 @@ function setupIPC(): void {
 
   ipcMain.handle('den:policy-allow', async (_, name: string, resources: string) => {
     try {
-      const args = ['policy', 'allow', 'network']
+      const args = [...cloudArgsFor(name), 'policy', 'allow', 'network']
       if (name) args.push('--sandbox', name)
       args.push(resources)
       const output = await sbx(args, { timeout: 15000 })
@@ -5514,7 +5540,7 @@ function setupIPC(): void {
   // resources and an optional per-sandbox scope are both supported by the CLI.
   ipcMain.handle('den:policy-deny', async (_, name: string, resources: string) => {
     try {
-      const args = ['policy', 'deny', 'network']
+      const args = [...cloudArgsFor(name), 'policy', 'deny', 'network']
       if (name) args.push('--sandbox', name)
       args.push(resources)
       const output = await sbx(args, { timeout: 15000 })
@@ -5529,7 +5555,7 @@ function setupIPC(): void {
   // otherwise.
   ipcMain.handle('den:policy-rm', async (_, name: string, resource: string) => {
     try {
-      const args = ['policy', 'rm', 'network']
+      const args = [...cloudArgsFor(name), 'policy', 'rm', 'network']
       if (name) args.push('--sandbox', name)
       args.push('--resource', resource)
       const output = await sbx(args, { timeout: 15000 })

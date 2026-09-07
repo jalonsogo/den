@@ -129,11 +129,18 @@ export function HomePage() {
   const [dismissed, setDismissed] = useState<string | null>(
     () => localStorage.getItem('den:updateDismissed')
   )
+  // Below MIN_SBX_VERSION already gets the app-wide OutdatedRuntimeBanner
+  // ("needs sbx X or newer... will misbehave until updated") — a stronger,
+  // accurate message. Showing this page's own soft "update available" bar
+  // too would say the same thing twice in two different registers (one
+  // optional-sounding, one urgent) for the exact same runtime.
+  const [outdated, setOutdated] = useState(false)
 
   useEffect(() => {
     window.den?.sbxVersion().then((r) => setVersion(r?.ok ? (r.version ?? null) : null)).catch(() => {})
     window.den?.sbxReleases().then((r) => setRelease(r?.find((rel) => !rel.prerelease) ?? r?.[0] ?? null)).catch(() => {})
     window.den?.storageUsage().then((r) => setStorage(r ?? null)).catch(() => {})
+    window.den?.sbxVersionCheck?.().then((r) => setOutdated(!!r?.outdated)).catch(() => {})
   }, [])
 
   // Total disk across sandboxes + templates; null when this sbx build reports no sizes.
@@ -151,7 +158,7 @@ export function HomePage() {
 
   const latest = release?.version ?? null
   const updateAvailable = isOlder(baseSemver(version), baseSemver(latest))
-  const showUpdateBar = updateAvailable && dismissed !== latest
+  const showUpdateBar = updateAvailable && dismissed !== latest && !outdated
 
   const dismissUpdate = () => {
     if (!latest) return

@@ -187,6 +187,11 @@ export interface StoredSecret {
   envOnly?: boolean
   oauthShadowed?: boolean
   note?: string   // any extra flag/annotation text sbx printed for the row
+  // Which secrets store reported this row — local (sandboxd's own) or cloud,
+  // a wholly separate store (see `secret set --oauth`'s "never the local
+  // secrets-engine" wording). Independent of `scope`: a cloud secret can be
+  // global or --sandbox-scoped the same as a local one.
+  location: 'local' | 'cloud'
 }
 
 export interface Template {
@@ -494,12 +499,12 @@ declare global {
       onLoginOutput(cb: (chunk: string) => void): () => void
       listSecrets(): Promise<StoredSecret[]>
       secretImport(): Promise<{ ok: boolean; output?: string; error?: string }>
-      setSecret(service: string, value: string, scope?: string): Promise<void>
-      setSecretOp(service: string, ref: string, scope?: string): Promise<void>
+      setSecret(service: string, value: string, scope?: string, cloud?: boolean): Promise<void>
+      setSecretOp(service: string, ref: string, scope?: string, cloud?: boolean): Promise<void>
       opAvailable(): Promise<boolean>
-      removeSecret(service: string, scope?: string): Promise<void>
+      removeSecret(service: string, scope?: string, cloud?: boolean): Promise<void>
       anthropicOAuth(): Promise<{ ok: true }>
-      oauthSecret(service: string): Promise<{ ok: true }>
+      oauthSecret(service: string, cloud?: boolean): Promise<{ ok: true }>
       openInFinder(path: string): Promise<void>
       exec(name: string, cmd: string): Promise<string>
       listLogs(): Promise<{ name: string; path: string }[]>
@@ -605,7 +610,7 @@ declare global {
       }>
       setSecretDynamic(opts: {
         service: string; scope?: string; source: string
-        kind: 'reference' | 'command'; refresh?: string; custom?: boolean
+        kind: 'reference' | 'command'; refresh?: string; custom?: boolean; cloud?: boolean
       }): Promise<{ ok: boolean; output?: string; error?: string; refreshing?: boolean }>
       kitSign(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitVerify(ref: string): Promise<{

@@ -17,13 +17,17 @@ function OnePasswordIcon({ size = 18 }: { size?: number }) {
 }
 
 export function NewSecretModal() {
-  const { setModal, secretTarget, secretScopeTarget, sandboxes } = useStore()
+  const { setModal, secretTarget, secretScopeTarget, secretCloudTarget, sandboxes } = useStore()
   // Editing an existing secret (provider stays locked; scope can be changed,
   // which moves the secret) vs. adding a new one.
   const editing = secretTarget != null
   const [stored, setStored] = useState<StoredSecret[]>([])
   const [service, setService] = useState<SecretService>(secretTarget ?? SECRET_SERVICES[0].id)
   const [scope, setScope] = useState<string>(secretScopeTarget ?? GLOBAL_SCOPE)
+  // Which secrets store this is written to — local (sandboxd's own) or cloud,
+  // a wholly separate store. Independent of scope: either can be global or
+  // scoped to one sandbox.
+  const [cloud, setCloud] = useState<boolean>(!!secretCloudTarget)
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [oauthing, setOauthing] = useState(false)
@@ -43,10 +47,11 @@ export function NewSecretModal() {
     window.den?.opAvailable?.().then((v) => setOpAvail(!!v)).catch(() => setOpAvail(false))
   }, [])
 
-  // Services already stored in the currently-selected scope (to disable them).
+  // Services already stored in the currently-selected scope + store (to disable them).
   const configured = new Set(
     stored
       .filter((s) => (isGlobalScope(scope) ? isGlobalScope(s.scope) : s.scope === scope))
+      .filter((s) => s.location === (cloud ? 'cloud' : 'local'))
       .map((s) => s.name)
   )
 
@@ -56,8 +61,10 @@ export function NewSecretModal() {
   // Human label for a scope value.
   const scopeLabel = (s: string) => (isGlobalScope(s) ? 'Global — all sandboxes' : `Sandbox: ${s}`)
   const sameScope = (a: string, b: string) => (isGlobalScope(a) && isGlobalScope(b)) || a === b
-  // Editing + a different scope = a move (write to new scope, remove from old).
-  const moving = editing && !sameScope(scope, secretScopeTarget ?? GLOBAL_SCOPE)
+  const oldCloud = !!secretCloudTarget
+  // Editing + a different scope and/or store (local vs cloud) = a move: write
+  // to the new location, remove from the old one.
+  const moving = editing && (!sameScope(scope, secretScopeTarget ?? GLOBAL_SCOPE) || cloud !== oldCloud)
 
   // Options for the custom (icon) dropdowns.
   const providerOptions: FieldOption[] = SECRET_SERVICES.map((s) => {
@@ -80,7 +87,13 @@ export function NewSecretModal() {
     isGlobalScope(scope) && (service === 'anthropic' || service === 'openai') ? service : null
 
   const handleOAuth = async () => {
-    const fn = service === 'anthropic' ? window.den?.anthropicOAuth : () => window.den?.oauthSecret('openai')
+    // sbx's own --oauth covers anthropic too once --cloud is set ("openai/
+    // global only" locally; "openai or anthropic" with --cloud, per `secret
+    // set --help`) — so only the local anthropic case needs den's own PKCE
+    // flow (anthropicOAuth), which has no cloud-storage variant.
+    const fn = cloud || service === 'openai'
+      ? () => window.den?.oauthSecret(service, cloud)
+      : window.den?.anthropicOAuth
     if (typeof window.den?.anthropicOAuth !== 'function' || typeof window.den?.oauthSecret !== 'function') {
       setError('OAuth needs an app restart to load. Quit den and relaunch, then try again.')
       return
@@ -113,7 +126,7 @@ export function NewSecretModal() {
       if (firstFree) setService(firstFree.id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, stored, editing])
+  }, [scope, cloud, stored, editing])
 
 
   const handleSave = async () => {
@@ -122,11 +135,12 @@ export function NewSecretModal() {
       setError('1Password support needs an app restart to load. Quit den and relaunch, then try again.')
       return
     }
-    // Moving scope removes the secret from its old scope — confirm first.
+    // Moving scope and/or store removes the secret from the old one — confirm first.
     const oldScope = secretScopeTarget ?? GLOBAL_SCOPE
     if (moving && !window.confirm(
-      `Move the ${serviceLabel(service)} secret from “${scopeLabel(oldScope)}” to “${scopeLabel(scope)}”?\n\n` +
-      `It will be written to the new scope and removed from the old one.`
+      `Move the ${serviceLabel(service)} secret from “${scopeLabel(oldScope)}${oldCloud ? ' · cloud' : ''}” ` +
+      `to “${scopeLabel(scope)}${cloud ? ' · cloud' : ''}”?\n\n` +
+      `It will be written to the new location and removed from the old one.`
     )) return
     setSaving(true)
     setError('')
@@ -138,13 +152,13 @@ export function NewSecretModal() {
         // bridge error — surface it rather than closing on a write that failed.
         const r = await window.den?.setSecretDynamic({
           service, scope, source: opRef.trim(), kind: dynKind,
-          refresh: dynRefresh.trim() || undefined
+          refresh: dynRefresh.trim() || undefined, cloud
         })
         if (!r?.ok) { setError(r?.error || 'sbx could not store that dynamic secret.'); setSaving(false); return }
       }
-      else if (useOp) await window.den?.setSecretOp(service, opRef.trim(), scope)
-      else await window.den?.setSecret(service, apiKey, scope)
-      if (moving) await window.den?.removeSecret(service, oldScope)
+      else if (useOp) await window.den?.setSecretOp(service, opRef.trim(), scope, cloud)
+      else await window.den?.setSecret(service, apiKey, scope, cloud)
+      if (moving) await window.den?.removeSecret(service, oldScope, oldCloud)
       setModal(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -184,6 +198,27 @@ export function NewSecretModal() {
               {moving
                 ? `Changing scope moves this secret: it’s written to ${scopeLabel(scope)} and removed from ${scopeLabel(secretScopeTarget ?? GLOBAL_SCOPE)}.`
                 : 'Global secrets are available to every sandbox; a sandbox scope applies to that one only.'}
+            </div>
+          </div>
+
+          <div className="fg">
+            <div className="secret-op-row">
+              <span className="secret-op-label">
+                <span className="flabel" style={{ marginBottom: 0 }}>Store in the cloud</span>
+              </span>
+              <button
+                type="button"
+                className={`s-toggle${cloud ? ' on' : ''}`}
+                role="switch"
+                aria-checked={cloud}
+                aria-label="Store in the cloud"
+                disabled={saving}
+                onClick={() => setCloud((v) => !v)}
+              />
+            </div>
+            <div className="fhint">
+              A wholly separate store from the local one above — for cloud sandboxes. Off stores it
+              locally, the same as every secret before this.
             </div>
           </div>
 
