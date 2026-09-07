@@ -289,7 +289,10 @@ export function Sidebar() {
   // Filter by selected agents, then by the free-text query (name/agent/status).
   const q = filter.trim().toLowerCase()
   const filtered = sandboxes.filter((s) =>
-    (statusFilter === 'all' || (statusFilter === 'active' ? s.status === 'running' : s.status !== 'running')) &&
+    // Active means "not idle-stopped", not strictly "running" — a sandbox mid
+    // create/restart/stop/delete is still doing something and shouldn't wink
+    // out of the Active view only to reappear once it settles.
+    (statusFilter === 'all' || (statusFilter === 'active' ? s.status !== 'stopped' : s.status === 'stopped')) &&
     (locationFilter === 'all' || s.location === locationFilter) &&
     (agentFilter.length === 0 || agentFilter.includes(s.agent)) &&
     (!q ||
