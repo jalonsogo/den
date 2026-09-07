@@ -1029,6 +1029,22 @@ function updatePowerBlocker(runningCount: number): void {
 // (nothing yet fetched) still reports empty rather than fabricating entries.
 let lastGoodSandboxes: ReturnType<typeof normalizeSandbox>[] | null = null
 
+// Cloud sandboxes (sbx v0.42) live under `sbx --cloud ls`, a separate listing
+// from the local one. Best-effort and silent on failure: a `--cloud` verb
+// placement that turns out wrong, an account with no Docker Agentic Platform
+// plan, or an older/misconfigured daemon should all just mean "no cloud
+// sandboxes", not an error — this is read-only and additive to the local
+// list, never the only source of truth for what's running.
+async function listCloudSandboxes(): Promise<SbxSandbox[]> {
+  try {
+    const out = await sbx(['--cloud', 'ls', '--json'], { timeout: 20000 })
+    const parsed = JSON.parse(out)
+    return parsed.sandboxes ?? parsed
+  } catch {
+    return []
+  }
+}
+
 async function listSandboxes() {
   // One retry after a brief pause: `sbx ls` occasionally fails transiently when
   // the daemon is briefly busy (e.g. mid start/stop). A generous timeout avoids
@@ -1041,7 +1057,11 @@ async function listSandboxes() {
     catch { await new Promise((r) => setTimeout(r, 500)); out = await attempt() }
     const parsed = JSON.parse(out)
     const sandboxes: SbxSandbox[] = parsed.sandboxes ?? parsed
-    const list = sandboxes.map((s) => normalizeSandbox(s))
+    const cloud = await listCloudSandboxes()
+    const list = [
+      ...sandboxes.map((s) => normalizeSandbox(s)),
+      ...cloud.map((s) => normalizeSandbox(s, 'cloud'))
+    ]
     updatePowerBlocker(list.filter((s) => s.status === 'running').length)
     lastGoodSandboxes = list
     return list

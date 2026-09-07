@@ -431,6 +431,7 @@ html, body, #root {
   line-height: 1.25;
 }
 .sb-item.active .sb-item-name { font-weight: 500; }
+.sb-item-cloud { color: var(--sb-muted); margin-left: 4px; vertical-align: -1px; flex-shrink: 0; }
 
 .sb-item-sub {
   font-size: 11px;

@@ -4,7 +4,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
-  ArrowUp, ArrowDown, Plug, FileCode2, CircleDot } from 'lucide-react'
+  ArrowUp, ArrowDown, Plug, FileCode2, CircleDot, Cloud } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
@@ -105,6 +105,7 @@ function SandboxItem({ sandbox, active, collapsed, onReorder, nextName, groupKey
         >
           <div className="sb-item-pop-hd">
             <span className="sb-item-pop-name">{sandbox.name}</span>
+            {sandbox.location === 'cloud' && <span title="Cloud sandbox"><Cloud size={12} /></span>}
             <span className="sb-item-pop-status" data-on={isRunning}>{statusLabel}</span>
           </div>
           <div className="sb-item-pop-sep" />
@@ -124,7 +125,12 @@ function SandboxItem({ sandbox, active, collapsed, onReorder, nextName, groupKey
       {!collapsed && (
         <>
           <div className="sb-item-body">
-            <div className="sb-item-name">{sandbox.name}</div>
+            <div className="sb-item-name">
+              {sandbox.name}
+              {sandbox.location === 'cloud' && (
+                <span className="sb-item-cloud" title="Cloud sandbox"><Cloud size={11} /></span>
+              )}
+            </div>
             {showSub && (
               <div className={`sb-item-sub${isRunning && activity === 'working' ? ' is-working' : ''}`}>
                 {isCreating
@@ -210,6 +216,9 @@ export function Sidebar() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'stopped'>(
     () => (localStorage.getItem('den:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
   )
+  const [locationFilter, setLocationFilter] = useState<'all' | 'local' | 'cloud'>(
+    () => (localStorage.getItem('den:sbxLocation') as 'all' | 'local' | 'cloud') ?? 'all'
+  )
   // Selected agents to filter by; empty = all agents.
   const [agentFilter, setAgentFilter] = useState<AgentType[]>(() => {
     try { return JSON.parse(localStorage.getItem('den:sbxAgents') ?? '[]') } catch { return [] }
@@ -243,6 +252,10 @@ export function Sidebar() {
     setStatusFilter(s)
     localStorage.setItem('den:sbxStatus', s)
   }
+  const setLocation = (l: 'all' | 'local' | 'cloud') => {
+    setLocationFilter(l)
+    localStorage.setItem('den:sbxLocation', l)
+  }
   // Order-by: clicking Manual selects it; clicking Name/Status cycles asc → desc
   // → back to Manual (the default arrangement).
   const applySort = (by: 'name' | 'status' | 'manual', dir: 'asc' | 'desc') => {
@@ -255,12 +268,14 @@ export function Sidebar() {
     applySort(field, 'asc')
   }
   const clearFilters = () => {
-    setFilter(''); setAgents([]); setStatus('all'); setAgentMenuOpen(false)
+    setFilter(''); setAgents([]); setStatus('all'); setLocation('all'); setAgentMenuOpen(false)
     if (!showGroups) toggleShowGroups()
     applySort('manual', 'asc')
   }
-  const hasFilter = !!filter || !showGroups || agentFilter.length > 0 || statusFilter !== 'all' || sortBy !== 'manual'
+  const hasFilter = !!filter || !showGroups || agentFilter.length > 0 || statusFilter !== 'all' ||
+    locationFilter !== 'all' || sortBy !== 'manual'
   const runningCount = sandboxes.filter((s) => s.status === 'running').length
+  const hasCloudSandboxes = sandboxes.some((s) => s.location === 'cloud')
 
   // Agents that actually appear in the current sandboxes — the only ones worth
   // offering as a filter.
@@ -275,6 +290,7 @@ export function Sidebar() {
   const q = filter.trim().toLowerCase()
   const filtered = sandboxes.filter((s) =>
     (statusFilter === 'all' || (statusFilter === 'active' ? s.status === 'running' : s.status !== 'running')) &&
+    (locationFilter === 'all' || s.location === locationFilter) &&
     (agentFilter.length === 0 || agentFilter.includes(s.agent)) &&
     (!q ||
       s.name.toLowerCase().includes(q) ||
@@ -467,6 +483,23 @@ export function Sidebar() {
                         ))}
                       </div>
                     </div>
+
+                    {hasCloudSandboxes && (
+                      <div className="sb-filter-grp">
+                        <span className="sb-filter-lbl">Location</span>
+                        <div className="sb-filter-seg">
+                          {(['all', 'local', 'cloud'] as const).map((l) => (
+                            <button
+                              key={l}
+                              className={`sb-filter-seg-btn${locationFilter === l ? ' active' : ''}`}
+                              onClick={() => setLocation(l)}
+                            >
+                              {l === 'all' ? 'All' : l === 'local' ? 'Local' : 'Cloud'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="sb-filter-grp">
                       <span className="sb-filter-lbl">Groups</span>
