@@ -12,6 +12,8 @@ den is a beautiful desktop GUI for [Docker Sandboxes](https://docs.docker.com/ai
 
 </div>
 
+<img src="docs/screenshots/sandboxes-overview.png" alt="den — Sandboxes overview" width="100%" />
+
 ---
 
 ## What it does
