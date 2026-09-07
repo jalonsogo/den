@@ -193,6 +193,31 @@ export function ContextMenu() {
     }
   }
 
+  // Move a sandbox between local and cloud (sbx v0.42). Captures its
+  // filesystem as a template and starts a new sandbox from it on the other
+  // side — filesystem-only, and per `move --help` the source is never deleted
+  // (den's own confirm already covers what sbx's own --force-skipped prompt
+  // would have asked: a bind-mounted workspace's files won't travel).
+  const handleMove = () => {
+    setContextMenu({ visible: false })
+    const to = sandbox.location === 'cloud' ? 'local' : 'cloud'
+    openPrompt({
+      title: to === 'cloud' ? 'Move to Cloud' : 'Move to Local',
+      message: to === 'cloud'
+        ? `Move "${sandbox.name}" to the cloud. This captures its filesystem and starts a new sandbox from it there; the local one is stopped, not deleted. In-memory state and running processes don't carry over, and a bind-mounted workspace's files won't travel.`
+        : `Move "${sandbox.name}" to the local host. This captures its filesystem and starts a new sandbox from it here. In-memory state and running processes don't carry over.`,
+      label: 'Name for the destination sandbox',
+      defaultValue: sandbox.name,
+      confirmText: 'Move',
+      onSubmit: async (newName) => {
+        const res = await window.den?.moveSandbox(sandbox.name, to, newName)
+        if (!res?.ok) throw new Error(res?.error || 'Move failed.')
+        const list = await window.den?.listSandboxes()
+        if (list) setSandboxes(list)
+      }
+    })
+  }
+
   // Save the sandbox's current state as a reusable template via `sbx template save`.
   const handleSaveSnapshot = () => {
     setContextMenu({ visible: false })
@@ -295,6 +320,9 @@ export function ContextMenu() {
       {/* Lifecycle-adjacent: both are things you reach for while the sandbox is
           running, so they sit with Start/Restart rather than at the bottom. */}
       <div className="ctx-item" onClick={handleSaveSnapshot}>Save Snapshot…</div>
+      <div className="ctx-item" onClick={handleMove}>
+        Move to {sandbox.location === 'cloud' ? 'Local' : 'Cloud'}…
+      </div>
       <div className="ctx-item" onClick={() => { setContextMenu({ visible: false }); setLogsSandbox(sandbox.name); setLogsReturn(sandbox.id); setActivePage('logs') }}>Logs <span className="ctx-kbd">⌘L</span></div>
       <div className="ctx-sep" />
       <div className="ctx-item" onClick={handleOpenInFinder}>

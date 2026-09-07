@@ -623,6 +623,8 @@ declare global {
         ok: boolean; state: 'verified' | 'unsigned' | 'invalid'; detail: string
       }>
       onKitSignOutput(cb: (chunk: string) => void): () => void
+      moveSandbox(name: string, to: 'local' | 'cloud', newName?: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      onMoveOutput(cb: (chunk: string) => void): () => void
       envDiscover(): Promise<{ files: SbxEnvFile[] }>
       envProvisioned(): Promise<Record<string, string>>
       envRead(path: string): Promise<{ ok: boolean; text?: string; error?: string }>

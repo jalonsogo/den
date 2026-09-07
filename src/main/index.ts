@@ -4539,6 +4539,30 @@ function setupIPC(): void {
     }
   })
 
+  // Move a sandbox between local and cloud (sbx v0.42). Captures the source's
+  // filesystem as a template and launches a new sandbox from it on the other
+  // side — filesystem-only (no in-memory state), and per `move --help` the
+  // source is never deleted (a local→cloud move stops it; a cloud→local move
+  // tries to). No --cloud needed: `move` is inherently cross-boundary and
+  // resolves the source wherever it actually is. `--force` skips sbx's own
+  // confirmation for a bind-mounted workspace that won't travel to the cloud —
+  // den's own dialog already covers that (see MoveSandboxModal), matching how
+  // policy-reset/kit-sign already treat "our dialog confirms, --force skips
+  // sbx's own prompt". Streams like kit-sign/mcp auth (this can take minutes
+  // for a large workspace/session).
+  ipcMain.handle('den:move-sandbox', async (event, name: string, to: 'local' | 'cloud', newName?: string) => {
+    try {
+      const send = (chunk: string) => event.sender.send('den:move-output', chunk)
+      const args = ['move', name, '--to', to, '--force', ...(newName ? ['--name', newName] : [])]
+      const { code, output } = await ptyRun(args, send, 600000)
+      return code === 0
+        ? { ok: true as const, output: output.trim() }
+        : { ok: false as const, error: output.trim() || `sbx move exited ${code}` }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Kit signing (v0.39): cosign-compatible Sigstore signatures, so a kit pulled
   // from a registry can be checked against who published it. Signing is
   // keyless-by-default in Sigstore, which means a browser flow on the host — so

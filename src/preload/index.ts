@@ -207,6 +207,13 @@ const api = {
     ipcRenderer.on('den:kit-sign-output', handler)
     return () => ipcRenderer.removeListener('den:kit-sign-output', handler)
   },
+  moveSandbox: (name: string, to: 'local' | 'cloud', newName?: string) =>
+    ipcRenderer.invoke('den:move-sandbox', name, to, newName),
+  onMoveOutput: (cb: (chunk: string) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, chunk: string) => cb(chunk)
+    ipcRenderer.on('den:move-output', handler)
+    return () => ipcRenderer.removeListener('den:move-output', handler)
+  },
   envDiscover: ()                            => ipcRenderer.invoke('den:env-discover'),
   envProvisioned: ()                         => ipcRenderer.invoke('den:env-provisioned'),
   envRead:   (path: string)                  => ipcRenderer.invoke('den:env-read', path),
