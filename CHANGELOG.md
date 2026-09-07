@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Duplicated status dots** in three places — the sandbox detail header, Home's project-tree row, and the flat Sandboxes list. Each drew its own colored dot right next to (or alongside) `SandboxAvatar`'s built-in corner activity dot, showing the same running/working/waiting/stopped state twice. The detail header and tree row now color their status *text* instead (matching how the sidebar already did it correctly), and the flat list drops its redundant dot entirely — the avatar's is enough. Also fixed the tree row's `is-working`/`is-waiting` text colors, which were swapped/wrong (green for working, no color for waiting) relative to every other state indicator in the app (yellow for working, blue for waiting).
+
 ## [0.11.0] - 2026-09-07
 
 ### Changed
