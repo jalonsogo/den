@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-07
+
 ### Changed
 - **den 0.11.0 requires sbx 0.42 or newer, full stop.** Unlike the v0.39 rollout — which kept den working on v0.38 and hid the new surface behind a runtime probe — this release raises `MIN_SBX_VERSION` itself. A runtime below 0.42 now shows the same outdated-runtime banner den already had for anything below its old floor, rather than a working app with a few things quietly missing. That retires the whole gate-don't-require mechanism the v0.39 adoption built: `sbxAtLeast()`, the `SBX_ENV_VERSION`/`SBX_CLOUD_VERSION` constants, and the `hasEnvFiles`/`hasCloud`/`hasKitArgs`/`hasNoWorkspaceCreate` capability flags are gone, along with the "needs a newer runtime" empty states and the "what you're missing" disclosure list in Settings → Runtime they backed — every one of those checks was unconditionally true the moment the app was even running, so they were dead weight rather than a real guard. Kit signing/verification, dynamic secrets, pruning, sandbox environments, and per-sandbox env vars at creation — all previously gated on v0.39 — are simply always there now.
 - The managed runtime pin moves to 0.42.0 to match. v0.42's one deprecation (`sbx run <name> --kit <ref>`) never touched den: `sbx create` already invokes kits via `--kit <dir>` plus a resolved agent-name positional, the recommended shape, and den's only `sbx run` usage is reattaching to an already-created sandbox.
