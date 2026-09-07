@@ -43,7 +43,9 @@ export interface Group {
 }
 
 export interface Port {
-  host: number
+  // Absent for a cloud port: there's no host-side mapping, just a sandbox port
+  // the control plane exposes at `url` (see below).
+  host?: number
   container: number
   // May carry an address-family suffix (TCP4/UDP4/TCP6/UDP6) so unpublish can
   // reproduce the exact spec sbx reported. Strip the suffix for display.
@@ -53,6 +55,10 @@ export interface Port {
   // defaults to loopback and would miss it.
   hostIp?: string
   active: boolean
+  location: 'local' | 'cloud'
+  // Cloud only: the publicly reachable URL the control plane assigned this
+  // port. There's no host:container mapping to show instead.
+  url?: string
 }
 
 export interface LogLine {

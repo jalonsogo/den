@@ -937,14 +937,32 @@ function pickField(p: RawPort, keys: string[]): unknown {
   return undefined
 }
 
-function normalizePorts(ports?: RawPort[]) {
+function normalizePorts(ports?: RawPort[], location: 'local' | 'cloud' = 'local') {
+  // Cloud ports have no host-side mapping — just a sandbox port and a public
+  // URL the control plane assigned it (per `ports --help`'s "cloud mode...
+  // only the sandbox port number is accepted... assigns a publicly reachable
+  // URL"). Field names for the URL aren't pinned down (no live cloud sandbox
+  // was available to confirm the exact JSON shape), so try several candidates
+  // the same tolerant way every other field here already does.
+  if (location === 'cloud') {
+    return (ports ?? [])
+      .map((p) => ({
+        container: toPortNum(pickField(p, ['sandbox_port', 'sandbox', 'container_port', 'container', 'target_port', 'port'])),
+        protocol: String(pickField(p, ['protocol', 'proto']) ?? 'tcp').toUpperCase(),
+        active: true,
+        location: 'cloud' as const,
+        url: String(pickField(p, ['url', 'public_url', 'publicurl', 'endpoint', 'address']) ?? '') || undefined
+      }))
+      .filter((p) => !Number.isNaN(p.container))
+  }
   const mapped = (ports ?? [])
     .map((p) => ({
       host: toPortNum(pickField(p, ['host_port', 'host', 'hostport', 'published_port', 'public_port'])),
       container: toPortNum(pickField(p, ['sandbox_port', 'sandbox', 'container_port', 'container', 'target_port', 'port'])),
       protocol: String(pickField(p, ['protocol', 'proto']) ?? 'tcp').toUpperCase(),
       hostIp: String(pickField(p, ['host_ip', 'hostip', 'ip', 'address']) ?? ''),
-      active: true
+      active: true,
+      location: 'local' as const
     }))
     .filter((p) => !Number.isNaN(p.host) && !Number.isNaN(p.container))
   // Below sbx v0.42, a single published port was reported once per host
@@ -1008,7 +1026,7 @@ function normalizeSandbox(raw: SbxSandbox, location: 'local' | 'cloud' = 'local'
     agent: raw.agent ?? 'claude',
     workspace: raw.workspaces?.[0] ?? '~',
     uptimeSeconds,
-    ports: normalizePorts(raw.ports),
+    ports: normalizePorts(raw.ports, location),
     logs: [] as unknown[],
     location
   }
@@ -1086,9 +1104,10 @@ async function listSandboxes() {
 
 async function getPortsForSandbox(name: string) {
   try {
+    const location = sandboxLocations.get(name) === 'cloud' ? 'cloud' as const : 'local' as const
     const out = await sbx([...cloudArgsFor(name), 'ports', name, '--json'])
     const trimmed = out.trim()
-    const ports = normalizePorts(extractPortArray(JSON.parse(trimmed), name))
+    const ports = normalizePorts(extractPortArray(JSON.parse(trimmed), name), location)
     // If sbx returned data but we parsed nothing, the shape/field names have
     // drifted again — log the raw output so it's diagnosable.
     if (ports.length === 0 && trimmed && trimmed !== '[]' && trimmed !== '{}') {
@@ -3464,28 +3483,28 @@ function setupIPC(): void {
     return getPortsForSandbox(name)
   })
 
-  // Publish a port from the sandbox to the host. `spec` is the sbx port form
-  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL], e.g. "8080:8080/tcp".
-  // Requires the sandbox to be running; mappings don't persist across stops.
-  // Local only, deliberately: a cloud sandbox's --publish spec is just a bare
-  // SANDBOX_PORT (the control plane assigns the public URL), not the
-  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL] spec PortsPanel.tsx builds —
-  // sending this form with --cloud would either error or misinterpret. Reading
-  // ports back already works for both (getPortsForSandbox threads --cloud
-  // through); publishing/unpublishing on a cloud sandbox needs its own UI.
+  // Publish a port from the sandbox to the host. `spec` is the sbx port form —
+  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL] locally, or a bare
+  // SANDBOX_PORT for a cloud sandbox (the control plane assigns the public
+  // URL; see `ports --help`'s cloud-mode note). PortsPanel.tsx builds
+  // whichever shape fits the sandbox it's showing, so this handler only adds
+  // --cloud, never reshapes `spec` itself. Requires the sandbox to be
+  // running; mappings don't persist across a local sandbox's stops.
   ipcMain.handle('den:port-publish', async (_, name: string, spec: string) => {
     try {
-      const output = await sbx(['ports', name, '--publish', spec], { timeout: 15000 })
+      const output = await sbx([...cloudArgsFor(name), 'ports', name, '--publish', spec], { timeout: 15000 })
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
-  // Remove a published port. sbx wants the explicit host:sandbox[/proto] form.
+  // Remove a published port. sbx wants the explicit host:sandbox[/proto] form
+  // locally, or the bare SANDBOX_PORT for cloud — same spec PortsPanel.tsx
+  // used to publish it.
   ipcMain.handle('den:port-unpublish', async (_, name: string, spec: string) => {
     try {
-      const output = await sbx(['ports', name, '--unpublish', spec], { timeout: 15000 })
+      const output = await sbx([...cloudArgsFor(name), 'ports', name, '--unpublish', spec], { timeout: 15000 })
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
