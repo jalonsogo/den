@@ -970,8 +970,8 @@ export function NewSandboxModal() {
                 onChange={(e) => setPortsRaw(e.target.value)}
               />
               <div className="fhint">
-                <code>[[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL]</code>, comma-separated. Creation-time only
-                (sbx v0.37+) — add or remove them later from the Network panel.
+                <code>[[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL]</code>, comma-separated. Creation-time
+                only — add or remove them later from the Network panel.
               </div>
             </div>
             )}

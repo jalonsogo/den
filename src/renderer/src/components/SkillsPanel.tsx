@@ -56,7 +56,7 @@ export function SkillsPanel() {
           <div className="ss-lbl">Shared skills store</div>
           <div className="ss-sub">
             Skills copied here are mounted into every sandbox that has sharing enabled. Cleared by{' '}
-            <code>sbx reset</code>. Requires sbx v0.37+.
+            <code>sbx reset</code>.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>

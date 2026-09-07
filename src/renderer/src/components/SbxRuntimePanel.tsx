@@ -980,8 +980,7 @@ export function SbxRuntimePanel({
           <div>
             <div className="ss-lbl">Filesystem cache (virtiofs)</div>
             <div className="ss-sub">
-              Faster filesystem performance (<code>DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE</code>). On by default in
-              sbx v0.35.
+              Faster filesystem performance (<code>DOCKER_SANDBOXES_ENABLE_VIRTIOFS_CACHE</code>). On by default.
             </div>
           </div>
           <button
@@ -1032,8 +1031,7 @@ export function SbxRuntimePanel({
             <div className="ss-sub">
               Chain sandbox egress through an upstream proxy (<code>DOCKER_SANDBOXES_PROXY</code>). Supports{' '}
               <code>http://</code>, <code>https://</code> and <code>socks5://</code> / <code>socks5h://</code>, or{' '}
-              <code>system</code> to follow this Mac's own proxy settings — including a PAC auto-config URL
-              (sbx v0.37+).
+              <code>system</code> to follow this Mac's own proxy settings — including a PAC auto-config URL.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
