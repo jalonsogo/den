@@ -7,6 +7,7 @@ export type AgentType =
   | 'codex'
   | 'copilot'
   | 'cursor'
+  | 'devin'
   | 'docker-agent'
   | 'droid'
   | 'gemini'
@@ -21,6 +22,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'codex',          label: 'Codex' },
   { id: 'copilot',        label: 'Copilot' },
   { id: 'cursor',         label: 'Cursor' },
+  { id: 'devin',          label: 'Devin' },
   { id: 'docker-agent',   label: 'Docker Agent' },
   { id: 'droid',          label: 'Droid' },
   { id: 'gemini',         label: 'Gemini' },

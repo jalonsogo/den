@@ -46,9 +46,10 @@ export function AgentIcon({ agent, size = 14, style, mono = false }: AgentIconPr
     case 'copilot':        return <CopilotMono  {...p} />
     case 'cursor':         return <CursorMono   {...p} />
     case 'docker-agent':   return <DockerIcon   size={size} mono={mono} />
-    // droid and kiro have no brand icon shipped — fall back to the shell glyph.
+    // droid, kiro and devin have no brand icon shipped — fall back to the shell glyph.
     case 'droid':
     case 'kiro':
+    case 'devin':
     case 'shell':
     default:               return <Terminal size={size} style={style} />
   }

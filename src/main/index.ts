@@ -3307,7 +3307,14 @@ function setupIPC(): void {
     branch?: boolean
     name?: string
     template?: string
+    // Every kit den applied to this sandbox (base agent kit + mixins), for
+    // den's own "kits applied to this sandbox" bookkeeping (recordKits below)
+    // — NOT what becomes `--kit` argv; see mixinArgs.
     kits?: string[]
+    // sbx v0.42: `--kit` is mixin-only ("must be a mixin" per `sbx create
+    // --help") — a sandbox/agent kit is the bare positional instead, so this
+    // excludes it even though it's also present in `kits` above.
+    mixinArgs?: string[]
     // sbx v0.42: each entry already `name=value` or `kit.name=value` (the
     // renderer resolves disambiguation, since it's the one place that knows
     // every selected kit's declared arg names).
@@ -3336,8 +3343,10 @@ function setupIPC(): void {
       // The shared skills store is mounted by default, so only the opt-out is ever
       // passed. Hidden from `sbx create --help` in v0.37.0 but accepted.
       if (config.noShareSkills) args.push('--no-share-skills')
-      // --kit can only be passed at creation; stack one flag per kit directory.
-      for (const dir of config.kits ?? []) args.push('--kit', dir)
+      // --kit can only be passed at creation; stack one flag per mixin
+      // directory. The base agent/sandbox kit (if any) is never included
+      // here — it's the positional agent below, not a --kit argument.
+      for (const dir of config.mixinArgs ?? []) args.push('--kit', dir)
       for (const kv of config.kitArgs ?? []) args.push('--kit-arg', kv)
       // Static MCP mode: pre-load these registered servers. Passing none leaves the
       // agent in dynamic mode, discovering servers itself via the gateway.

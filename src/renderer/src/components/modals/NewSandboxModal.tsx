@@ -177,14 +177,18 @@ export function NewSandboxModal() {
   const [kitArgValues, setKitArgValues] = useState<Record<string, Record<string, string>>>({})
 
   // An agent kit (den calls it a sandbox kit) supplies the agent itself, and
-  // sbx refuses to pair one with a generic subcommand:
-  //   "agent kit X (kind: agent) cannot be combined with the shell subcommand;
-  //    invoke as `sbx create --kit <kit> X ...` instead"
-  // So when one is selected its NAME becomes the positional, replacing whatever
-  // the agent picker says — which otherwise defaulted to claude and failed.
+  // sbx refuses to pair one with a generic subcommand — its NAME (or, since
+  // sbx v0.42, a bare kit reference) becomes the positional instead, replacing
+  // whatever the agent picker says, which otherwise defaulted to claude and
+  // failed. `--kit` is mixin-only as of v0.42 ("must be a mixin" per
+  // `sbx create --help`) — passing the base kit through it too, redundant with
+  // the positional, is the pre-0.42 shape and no longer valid, so it's kept
+  // out of the `--kit` list below (mixinKits) even though it stays selectable
+  // like any other entry in selKits.
   const baseKitDir = selKits.find((d) => kitKinds[d]?.kind === 'sandbox') ?? null
   const baseKitName = baseKitDir ? kitKinds[baseKitDir].name : null
   const effAgent = baseKitName ?? agent
+  const mixinKits = selKits.filter((d) => d !== baseKitDir)
 
   // A sandbox kit names the sandbox after itself and the agent it runs
   // (claude-nanoclaw); everything else keeps the sbx-style <agent>-<workdir>.
@@ -437,7 +441,11 @@ export function NewSandboxModal() {
           memory: memValue !== 'default' ? memValue : undefined,
           branch: noWorkspace ? false : clone,
           template: source === 'template' && template ? template : undefined,
+          // Full selection (base + mixins) for den's own "kits applied to this
+          // sandbox" bookkeeping; `mixinArgs` is the (possibly narrower) set
+          // that actually becomes `--kit` flags — see mixinKits above.
           kits: selKits,
+          mixinArgs: mixinKits,
           staticMcps: selMcps,
           ports: parsePorts(portsRaw),
           env: parseEnv(envRaw),
@@ -477,7 +485,7 @@ export function NewSandboxModal() {
     ...parsePorts(portsRaw).flatMap((p) => ['-p', p]),
     ...parseEnv(envRaw).flatMap((e) => ['-e', e]),
     ...(shareSkills ? [] : ['--no-share-skills']),
-    ...selKits.flatMap((entry) => ['--kit', q(entry)]),
+    ...mixinKits.flatMap((entry) => ['--kit', q(entry)]),
     ...kitArgFlags().flatMap((kv) => ['--kit-arg', q(kv)]),
     ...selMcps.flatMap((m) => ['--static-mcp', m]),
     effAgent,

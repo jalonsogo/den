@@ -28,6 +28,7 @@ const AGENT_BASES: Record<string, { image: string; entrypoint: string }> = {
   codex:            { image: 'docker/sandbox-templates:codex-docker', entrypoint: 'codex' },
   copilot:          { image: 'docker/sandbox-templates:copilot-docker', entrypoint: 'copilot' },
   cursor:           { image: 'docker/sandbox-templates:cursor-docker', entrypoint: 'cursor-agent' },
+  devin:            { image: 'docker/sandbox-templates:devin-docker', entrypoint: 'devin' },
   'docker-agent':   { image: 'docker/sandbox-templates:docker-agent', entrypoint: 'docker-agent' },
   droid:            { image: 'docker/sandbox-templates:droid-docker', entrypoint: 'droid' },
   gemini:           { image: 'docker/sandbox-templates:gemini-docker', entrypoint: 'gemini' },
