@@ -90,7 +90,10 @@ export function HomePage() {
   // Apply the free-text query (name or agent label), status, and agent filters.
   const q = query.trim().toLowerCase()
   const matches = (s: Sandbox) =>
-    (statusFilter === 'all' || (statusFilter === 'active' ? s.status === 'running' : s.status !== 'running')) &&
+    // Active means "not idle-stopped", not strictly "running" — a sandbox mid
+    // create/restart/stop/delete is still doing something and shouldn't wink
+    // out of the Active view only to reappear once it settles.
+    (statusFilter === 'all' || (statusFilter === 'active' ? s.status !== 'stopped' : s.status === 'stopped')) &&
     (agentFilter.length === 0 || agentFilter.includes(s.agent)) &&
     (!q || s.name.toLowerCase().includes(q) || (AGENTS.find((a) => a.id === s.agent)?.label ?? s.agent).toLowerCase().includes(q))
   const visibleSandboxes = sandboxes.filter(matches)
