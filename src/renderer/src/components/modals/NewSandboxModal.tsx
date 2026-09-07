@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes, Zap, Pin } from 'lucide-react'
+import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes, Zap, Pin, HardDrive, Cloud } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
 import { KitCaps } from '../KitCaps'
@@ -524,6 +524,33 @@ export function NewSandboxModal() {
           <>
           {tab === 'basic' && (
           <div className="m-tabpanel" role="tabpanel">
+          {/* Where the sandbox runs. Cloud forces "no workspace" below it: a
+              local host path structurally can't be bind-mounted into a
+              sandbox running on Docker's hosted infrastructure. Hidden for a
+              Feature — that's always a clone of an existing local repo, which
+              a cloud sandbox has no workspace to be a clone of. Leads the
+              form: it changes what several fields below even mean. */}
+          {!feature && (
+          <div className="fgroup">
+            <div className="fgroup-hdr">Location</div>
+            <div className="fg">
+              <div className="src-seg">
+                <button className={`src-seg-item${!cloud ? ' active' : ''}`} onClick={() => setCloud(false)}>
+                  <HardDrive size={13} /> Local
+                </button>
+                <button className={`src-seg-item${cloud ? ' active' : ''}`} onClick={() => setCloud(true)}>
+                  <Cloud size={13} /> Cloud
+                </button>
+              </div>
+              <div className="fhint">
+                {cloud
+                  ? <>Runs on Docker's hosted infrastructure instead of this machine — needs a Docker Agentic Platform plan. No workspace bind mount; add files afterward with <code>sbx --cloud cp</code>.</>
+                  : 'Runs in a container on this machine.'}
+              </div>
+            </div>
+          </div>
+          )}
+
           {/* Name — random by default, regenerate or edit */}
           <div className="fg">
             <label className="flabel">Name</label>
@@ -578,28 +605,6 @@ export function NewSandboxModal() {
             </div>
           )}
           </div>
-
-          {/* Where the sandbox runs. Cloud forces "no workspace" below it: a
-              local host path structurally can't be bind-mounted into a
-              sandbox running on Docker's hosted infrastructure. Hidden for a
-              Feature — that's always a clone of an existing local repo, which
-              a cloud sandbox has no workspace to be a clone of. */}
-          {!feature && (
-          <div className="fgroup">
-            <div className="fgroup-hdr">Location</div>
-            <div className="fg">
-              <div className="src-seg">
-                <button className={`src-seg-item${!cloud ? ' active' : ''}`} onClick={() => setCloud(false)}>Local</button>
-                <button className={`src-seg-item${cloud ? ' active' : ''}`} onClick={() => setCloud(true)}>Cloud</button>
-              </div>
-              <div className="fhint">
-                {cloud
-                  ? <>Runs on Docker's hosted infrastructure instead of this machine — needs a Docker Agentic Platform plan. No workspace bind mount; add files afterward with <code>sbx --cloud cp</code>.</>
-                  : 'Runs in a container on this machine.'}
-              </div>
-            </div>
-          </div>
-          )}
 
           {/* Workspace — which folder to mount, and how it gets exposed.
               Grouped because the isolation toggle is meaningless without the

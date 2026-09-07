@@ -4150,6 +4150,7 @@ html, body, #root {
 .src-seg-item {
   flex: 1; padding: 6px 0; border: none; background: none; cursor: pointer;
   font-size: 12.5px; font-weight: 500; color: var(--t2); border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
 }
 .src-seg-item:hover:not(.active):not(:disabled) { color: var(--t1); }
 .src-seg-item.active { background: var(--bg); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
