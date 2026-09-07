@@ -52,6 +52,18 @@ const uptimeMap = new Map<string, number>()
 // Sandbox name → agent id, refreshed from every `sbx ls`. Read by API-failure
 // traces, which run off the PTY and have no sandbox record to hand.
 const sandboxAgents = new Map<string, string>()
+// Sandbox name → which listing reported it, refreshed from every `sbx ls`
+// (local + `sbx --cloud ls`, merged in listSandboxes()). Lets IPC handlers
+// that only take a name (stop/rm/ports/exec/...) dispatch to the right sbx
+// API without every renderer call site having to plumb location through —
+// same shape as sandboxAgents above, and for the same reason: sbx itself
+// gives no "what is this sandbox" query, so den remembers the answer to the
+// question it already has to ask (`sbx ls`) and never asked the caller.
+const sandboxLocations = new Map<string, 'local' | 'cloud'>()
+/** `['--cloud']` for a sandbox last seen on the cloud listing, else `[]`. */
+function cloudArgsFor(name: string): string[] {
+  return sandboxLocations.get(name) === 'cloud' ? ['--cloud'] : []
+}
 // Sandboxes created in this app instance that have not yet had an agent session
 // started. A brand-new sandbox has no conversation to resume, so its first
 // `agent-ensure` must start fresh rather than pass `--continue` (which would
@@ -976,6 +988,7 @@ function normalizeSandbox(raw: SbxSandbox, location: 'local' | 'cloud' = 'local'
   // Remembered for API-failure traces: which agent produced the error matters,
   // since each one words its failures (and retries) differently.
   sandboxAgents.set(raw.name, raw.agent ?? 'claude')
+  sandboxLocations.set(raw.name, location)
   const startTime = uptimeMap.get(raw.name)
   const uptimeSeconds =
     raw.status === 'running' && startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined
@@ -1073,7 +1086,7 @@ async function listSandboxes() {
 
 async function getPortsForSandbox(name: string) {
   try {
-    const out = await sbx(['ports', name, '--json'])
+    const out = await sbx([...cloudArgsFor(name), 'ports', name, '--json'])
     const trimmed = out.trim()
     const ports = normalizePorts(extractPortArray(JSON.parse(trimmed), name))
     // If sbx returned data but we parsed nothing, the shape/field names have
@@ -2407,6 +2420,12 @@ function cancelPendingSpawn(name: string): void {
 // Attach to a sandbox's agent via `sbx run NAME` in a PTY. Agents like Claude
 // Code are full-screen TUIs that need a real TTY, and their raw ANSI output is
 // streamed straight to the renderer's xterm (no line reformatting).
+// Local sandboxes only, deliberately: this is `sbx run --name <existing>`,
+// which reattaches a *local* sandbox's agent session. A cloud sandbox's
+// equivalent is a genuinely different command — `sbx --cloud attach
+// <id-or-name>` — not the same verb with --cloud spliced in, and its
+// detach-gesture/PTY semantics haven't been exercised against a live cloud
+// sandbox. Needs its own path, not a flag threaded through this one.
 async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { continueSession?: boolean }) {
   const existing = sbxProcesses.get(name)
   if (existing) {
@@ -3212,7 +3231,7 @@ function setupIPC(): void {
     // Clear activity now rather than waiting on the PTY's onExit (which can race
     // or never fire if there's no attached process), so "Working…" doesn't stick.
     clearAgentActivity(name)
-    await sbx(['stop', name])
+    await sbx([...cloudArgsFor(name), 'stop', name])
     uptimeMap.delete(name)
   })
 
@@ -3224,7 +3243,7 @@ function setupIPC(): void {
       sbxProcesses.delete(name)
     }
     clearAgentActivity(name)
-    await sbx(['rm', '--force', name])
+    await sbx([...cloudArgsFor(name), 'rm', '--force', name])
     uptimeMap.delete(name)
     forgetIsolation(name)
     forgetEnvSandbox(name)
@@ -3433,6 +3452,12 @@ function setupIPC(): void {
   // Publish a port from the sandbox to the host. `spec` is the sbx port form
   // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL], e.g. "8080:8080/tcp".
   // Requires the sandbox to be running; mappings don't persist across stops.
+  // Local only, deliberately: a cloud sandbox's --publish spec is just a bare
+  // SANDBOX_PORT (the control plane assigns the public URL), not the
+  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL] spec PortsPanel.tsx builds —
+  // sending this form with --cloud would either error or misinterpret. Reading
+  // ports back already works for both (getPortsForSandbox threads --cloud
+  // through); publishing/unpublishing on a cloud sandbox needs its own UI.
   ipcMain.handle('den:port-publish', async (_, name: string, spec: string) => {
     try {
       const output = await sbx(['ports', name, '--publish', spec], { timeout: 15000 })
@@ -5212,7 +5237,7 @@ function setupIPC(): void {
   })
 
   ipcMain.handle('den:exec', async (_, name: string, command: string) => {
-    return sbx(['exec', name, 'sh', '-c', command], { timeout: 10000 })
+    return sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', command], { timeout: 10000 })
   })
 
   // ── sbx daemon logs ──────────────────────────────────────────────────────
@@ -5683,7 +5708,7 @@ function setupIPC(): void {
     const existing = ptyMap.get(name)
     if (existing) { existing.kill(); ptyMap.delete(name) }
 
-    const proc = pty.spawn(getSbxPath(), ['exec', '-it', name, 'bash'], {
+    const proc = pty.spawn(getSbxPath(), [...cloudArgsFor(name), 'exec', '-it', name, 'bash'], {
       name: 'xterm-256color',
       cols,
       rows,
