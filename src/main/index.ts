@@ -3303,6 +3303,10 @@ function setupIPC(): void {
     name?: string
     template?: string
     kits?: string[]
+    // sbx v0.42: each entry already `name=value` or `kit.name=value` (the
+    // renderer resolves disambiguation, since it's the one place that knows
+    // every selected kit's declared arg names).
+    kitArgs?: string[]
     staticMcps?: string[]
     ports?: string[]
     noShareSkills?: boolean
@@ -3329,6 +3333,7 @@ function setupIPC(): void {
       if (config.noShareSkills) args.push('--no-share-skills')
       // --kit can only be passed at creation; stack one flag per kit directory.
       for (const dir of config.kits ?? []) args.push('--kit', dir)
+      for (const kv of config.kitArgs ?? []) args.push('--kit-arg', kv)
       // Static MCP mode: pre-load these registered servers. Passing none leaves the
       // agent in dynamic mode, discovering servers itself via the gateway.
       for (const m of config.staticMcps ?? []) args.push('--static-mcp', m)

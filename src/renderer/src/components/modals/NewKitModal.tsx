@@ -16,7 +16,8 @@ const CAPS: { key: Cap; label: string }[] = [
   { key: 'env',     label: 'Environment' },
   { key: 'cred',    label: 'Credential' },
   { key: 'network', label: 'Requirements' },
-  { key: 'memory',  label: 'Agent instructions' }
+  { key: 'memory',  label: 'Agent instructions' },
+  { key: 'args',    label: 'Arguments' }
 ]
 
 // Base for a sandbox kit — start from a default agent (image + entrypoint are
@@ -172,6 +173,7 @@ export function NewKitModal() {
     if (key === 'cred') set('creds', [])
     if (key === 'network') setF((p) => ({ ...p, allowedDomains: [], deniedDomains: [] }))
     if (key === 'memory') setF((p) => ({ ...p, agentContext: '', aiFilename: '' }))
+    if (key === 'args') set('args', [])
   }
   const toggleMcp = (id: string) =>
     setF((p) => ({ ...p, mcps: p.mcps.includes(id) ? p.mcps.filter((m) => m !== id) : [...p.mcps, id] }))
@@ -577,6 +579,58 @@ export function NewKitModal() {
                   {f.kind === 'mixin' && (
                     <div className="fhint">Mixin kits land in <code>kits-agent-context/{f.name || 'my-kit'}.md</code> next to the agent's profile.</div>
                   )}
+                </>
+              )}
+
+              {key === 'args' && (
+                <>
+                  <div className="cap-note">
+                    Named values filled in per sandbox in New Sandbox, passed as <code>--kit-arg name=value</code>. Needs sbx 0.42+ — hidden on an older runtime.
+                  </div>
+                  {f.args.map((a, i) => (
+                    <div className="kit-cred" key={i}>
+                      <div className="kit-cred-hd">
+                        <input
+                          className="finput kit-cred-name"
+                          value={a.name}
+                          placeholder="MODEL"
+                          onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                        />
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--t2)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!a.required}
+                            onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))}
+                          />
+                          Required
+                        </label>
+                        <button className="cap-rm" onClick={() => set('args', f.args.filter((_, j) => j !== i))} title="Remove"><X size={13} /></button>
+                      </div>
+                      <div className="frow-2" style={{ marginTop: 8 }}>
+                        <div className="fg" style={{ flex: 1 }}>
+                          <label className="flabel">Description</label>
+                          <input
+                            className="finput"
+                            value={a.description ?? ''}
+                            placeholder="Which model to run"
+                            onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))}
+                          />
+                        </div>
+                        <div className="fg" style={{ flex: 1 }}>
+                          <label className="flabel">Default</label>
+                          <input
+                            className="finput"
+                            value={a.default ?? ''}
+                            placeholder="sonnet"
+                            onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, default: e.target.value } : x)))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button className="kit-add-line" onClick={() => set('args', [...f.args, { name: '' }])}>
+                    <Plus size={12} /> Add argument
+                  </button>
                 </>
               )}
             </div>

@@ -174,6 +174,9 @@ export function NewSandboxModal() {
   const [selMcps, setSelMcps]         = useState<string[]>([])
 
   const [selKits, setSelKits]         = useState<string[]>([])
+  // Values for kit-declared args (sbx >= 0.42), keyed by kit dir → arg name.
+  // Unset entries fall back to the arg's own `default` at submit time.
+  const [kitArgValues, setKitArgValues] = useState<Record<string, Record<string, string>>>({})
 
   // An agent kit (den calls it a sandbox kit) supplies the agent itself, and
   // sbx refuses to pair one with a generic subcommand:
@@ -193,6 +196,26 @@ export function NewSandboxModal() {
   const suggestedName = (): string =>
     baseKitName ? deriveKitName(baseKitName, baseKitDir ? kitSpecs[baseKitDir] : undefined)
                 : deriveName(effAgent, workspace)
+
+  // Selected kits that declare args (sbx >= 0.42), each paired with its
+  // display name for the `kit.name=value` disambiguated flag form.
+  const kitsWithArgs = selKits
+    .map((dir) => ({ dir, name: kitKinds[dir]?.name ?? dir, args: kitSpecs[dir]?.args ?? [] }))
+    .filter((k) => k.args.length > 0)
+  // An arg name declared by more than one selected kit needs `kit.name=value`
+  // to disambiguate; a name unique across the selection can stay bare.
+  const argNameCounts = kitsWithArgs.flatMap((k) => k.args).reduce<Record<string, number>>((acc, a) => {
+    acc[a.name] = (acc[a.name] ?? 0) + 1
+    return acc
+  }, {})
+  const kitArgFlags = (): string[] =>
+    kitsWithArgs.flatMap((k) => k.args.flatMap((a) => {
+      const val = kitArgValues[k.dir]?.[a.name] ?? a.default ?? ''
+      if (!val.trim()) return []
+      const key = argNameCounts[a.name] > 1 ? `${k.name}.${a.name}` : a.name
+      return [`${key}=${val}`]
+    }))
+
   const [kitQuery, setKitQuery]       = useState('')
   const [kitDdOpen, setKitDdOpen]     = useState(false)
   // Fixed viewport coords for the portaled menu (see kitDdPlace). Exactly one
@@ -420,7 +443,8 @@ export function NewSandboxModal() {
           ports: parsePorts(portsRaw),
           env: parseEnv(envRaw),
           // Only sent when opting out — the store is mounted by default.
-          noShareSkills: !shareSkills
+          noShareSkills: !shareSkills,
+          kitArgs: kitArgFlags()
         })
         const sandboxes = await window.den?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
@@ -455,6 +479,7 @@ export function NewSandboxModal() {
     ...parseEnv(envRaw).flatMap((e) => ['-e', e]),
     ...(shareSkills ? [] : ['--no-share-skills']),
     ...selKits.flatMap((entry) => ['--kit', q(entry)]),
+    ...kitArgFlags().flatMap((kv) => ['--kit-arg', q(kv)]),
     ...selMcps.flatMap((m) => ['--static-mcp', m]),
     effAgent,
     ...(noWorkspace ? [] : [q(workspace || '<workspace>')])
@@ -787,6 +812,37 @@ export function NewSandboxModal() {
               )}
             </div>
           </div>
+
+          {/* Kit arguments (sbx >= 0.42): named values a selected kit declares
+              via `args:`, filled in here and passed as `--kit-arg`. Grouped
+              under the declaring kit's name when more than one kit is
+              selected, so an arg's origin is never ambiguous. */}
+          {caps.hasKitArgs && kitsWithArgs.length > 0 && (
+            <div className="fgroup">
+              <div className="fgroup-hdr">Kit arguments</div>
+              {kitsWithArgs.map((k) => (
+                <div className="fg" key={k.dir}>
+                  {kitsWithArgs.length > 1 && <label className="flabel">{k.name}</label>}
+                  {k.args.map((a) => (
+                    <div key={a.name} style={{ marginBottom: 8 }}>
+                      <label className="flabel">
+                        {a.name}{a.required && <span title="Required" style={{ color: 'var(--destruct)' }}> *</span>}
+                        {a.description && <span className="flabel-hint"> {a.description}</span>}
+                      </label>
+                      <input
+                        className="finput"
+                        value={kitArgValues[k.dir]?.[a.name] ?? a.default ?? ''}
+                        placeholder={a.default || a.name}
+                        onChange={(e) => setKitArgValues((v) => ({
+                          ...v, [k.dir]: { ...v[k.dir], [a.name]: e.target.value }
+                        }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
 
           </div>
           )}
