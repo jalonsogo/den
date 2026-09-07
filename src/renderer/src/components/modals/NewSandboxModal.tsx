@@ -125,10 +125,17 @@ export function NewSandboxModal() {
   const [nameEdited, setNameEdited]   = useState(false)
   const [agent, setAgent]             = useState<AgentType>('claude')
   const [workspace, setWorkspace]     = useState(pinnedWs)
+  // sbx >= 0.42: create on Docker's hosted cloud infrastructure instead of this
+  // machine (`sbx --cloud create`). No dedicated entitlement check exists (sbx
+  // has no read-only "does this account have a plan" command) so this is
+  // always offered; an unentitled account just gets sbx's own error back.
+  const [cloud, setCloud]             = useState(false)
   // sbx >= 0.42: create with no workspace bind mount at all. Off by default —
   // most sandboxes want a mounted folder, and it forces an explicit name since
-  // there's no folder left to derive one from.
+  // there's no folder left to derive one from. Forced on for a cloud sandbox:
+  // a local host path structurally can't be mounted into a remote one.
   const [noWorkspace, setNoWorkspace] = useState(false)
+  const effNoWorkspace = noWorkspace || cloud
   const [wsBase, setWsBase]           = useState('')     // ~/den base for the default path
   const [wsEdited, setWsEdited]       = useState(false)  // user picked their own folder
   const [memIdx, setMemIdx]           = useState(0)
@@ -410,7 +417,7 @@ export function NewSandboxModal() {
     // Surface the offending field, not just the message: the error is pinned
     // outside the tab panels, so from the Advanced tab it would otherwise name
     // a control the user can't see.
-    if (noWorkspace) {
+    if (effNoWorkspace) {
       // No folder to derive a name from — an explicit one is the only option.
       if (!name.trim()) { setTab('basic'); setError('Name is required when there is no workspace'); return }
     } else if (!workspace) {
@@ -418,14 +425,14 @@ export function NewSandboxModal() {
     }
     const finalName = (name.trim() || suggestedName() || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
-    if (!noWorkspace) localStorage.setItem('den:lastWorkspace', workspace)
+    if (!effNoWorkspace) localStorage.setItem('den:lastWorkspace', workspace)
     setError('')
     setProgress('')
     setCreating(true)
     addCreatingSandbox({
       id: `creating-${finalName}`, name: finalName, status: 'creating',
-      agent: effAgent as typeof agent, workspace: noWorkspace ? '' : workspace, ports: [], logs: [],
-      location: 'local'
+      agent: effAgent as typeof agent, workspace: effNoWorkspace ? '' : workspace, ports: [], logs: [],
+      location: cloud ? 'cloud' : 'local'
     })
     const unsub = window.den?.onCreateOutput((chunk) => {
       setProgress((p) => p + chunk)
@@ -437,9 +444,9 @@ export function NewSandboxModal() {
         await window.den?.createSandbox({
           name: finalName,
           agent: effAgent,
-          workspace: noWorkspace ? undefined : workspace,
+          workspace: effNoWorkspace ? undefined : workspace,
           memory: memValue !== 'default' ? memValue : undefined,
-          branch: noWorkspace ? false : clone,
+          branch: effNoWorkspace ? false : clone,
           template: source === 'template' && template ? template : undefined,
           // Full selection (base + mixins) for den's own "kits applied to this
           // sandbox" bookkeeping; `mixinArgs` is the (possibly narrower) set
@@ -447,11 +454,15 @@ export function NewSandboxModal() {
           kits: selKits,
           mixinArgs: mixinKits,
           staticMcps: selMcps,
-          ports: parsePorts(portsRaw),
+          // Cloud's -p/--publish shape at creation time isn't confirmed (only
+          // the post-creation `sbx ports --cloud` form is documented), so ports
+          // are left for the Ports panel afterward rather than guessed here.
+          ports: cloud ? [] : parsePorts(portsRaw),
           env: parseEnv(envRaw),
           // Only sent when opting out — the store is mounted by default.
           noShareSkills: !shareSkills,
-          kitArgs: kitArgFlags()
+          kitArgs: kitArgFlags(),
+          cloud
         })
         const sandboxes = await window.den?.listSandboxes()
         if (sandboxes) setSandboxes(sandboxes)
@@ -477,19 +488,19 @@ export function NewSandboxModal() {
   // "Application Support" path).
   const q = (s: string): string => (/\s/.test(s) ? `"${s}"` : s)
   const cmdTokens = [
-    'sbx', 'create',
+    'sbx', ...(cloud ? ['--cloud'] : []), 'create',
     ...(name.trim() ? ['--name', name.trim()] : []),
     ...(source === 'template' && template ? ['-t', template] : []),
     ...(memValue !== 'default' ? ['-m', memValue] : []),
-    ...(!noWorkspace && clone ? ['--clone'] : []),
-    ...parsePorts(portsRaw).flatMap((p) => ['-p', p]),
+    ...(!effNoWorkspace && clone ? ['--clone'] : []),
+    ...(cloud ? [] : parsePorts(portsRaw).flatMap((p) => ['-p', p])),
     ...parseEnv(envRaw).flatMap((e) => ['-e', e]),
     ...(shareSkills ? [] : ['--no-share-skills']),
     ...mixinKits.flatMap((entry) => ['--kit', q(entry)]),
     ...kitArgFlags().flatMap((kv) => ['--kit-arg', q(kv)]),
     ...selMcps.flatMap((m) => ['--static-mcp', m]),
     effAgent,
-    ...(noWorkspace ? [] : [q(workspace || '<workspace>')])
+    ...(effNoWorkspace ? [] : [q(workspace || '<workspace>')])
   ]
 
   return (
@@ -568,12 +579,35 @@ export function NewSandboxModal() {
           )}
           </div>
 
+          {/* Where the sandbox runs. Cloud forces "no workspace" below it: a
+              local host path structurally can't be bind-mounted into a
+              sandbox running on Docker's hosted infrastructure. Hidden for a
+              Feature — that's always a clone of an existing local repo, which
+              a cloud sandbox has no workspace to be a clone of. */}
+          {!feature && (
+          <div className="fgroup">
+            <div className="fgroup-hdr">Location</div>
+            <div className="fg">
+              <div className="src-seg">
+                <button className={`src-seg-item${!cloud ? ' active' : ''}`} onClick={() => setCloud(false)}>Local</button>
+                <button className={`src-seg-item${cloud ? ' active' : ''}`} onClick={() => setCloud(true)}>Cloud</button>
+              </div>
+              <div className="fhint">
+                {cloud
+                  ? <>Runs on Docker's hosted infrastructure instead of this machine — needs a Docker Agentic Platform plan. No workspace bind mount; add files afterward with <code>sbx --cloud cp</code>.</>
+                  : 'Runs in a container on this machine.'}
+              </div>
+            </div>
+          </div>
+          )}
+
           {/* Workspace — which folder to mount, and how it gets exposed.
               Grouped because the isolation toggle is meaningless without the
               path above it: it decides whether that folder is mounted
               directly or cloned first. */}
           <div className="fgroup">
             <div className="fgroup-hdr">Workspace</div>
+            {!cloud && (
             <div className="fg">
               <div className="tog-row">
                 <button
@@ -584,7 +618,8 @@ export function NewSandboxModal() {
               </div>
               <div className="fhint">Create a sandbox with no folder mounted. Requires an explicit name below.</div>
             </div>
-            {!noWorkspace && (
+            )}
+            {!effNoWorkspace && (
             <div className="fg">
               <label className="flabel">Path</label>
               <div className="frow-2">
@@ -600,7 +635,7 @@ export function NewSandboxModal() {
               <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
             </div>
             )}
-            {!noWorkspace && (
+            {!effNoWorkspace && (
             <div className="fg">
               <label className="flabel">Isolation</label>
               <div className="tog-row">
@@ -917,7 +952,12 @@ export function NewSandboxModal() {
             <div className="fgroup-hdr">Ports & environment</div>
             {/* Published ports. Only settable at creation — `sbx run`/`create`
                 apply -p when the sandbox is made and ignore it on re-attach,
-                so afterwards the Network panel (sbx ports) is the way in. */}
+                so afterwards the Network panel (sbx ports) is the way in.
+                Cloud publishes a bare sandbox port with no host mapping (the
+                control plane assigns a public URL) — that creation-time shape
+                isn't confirmed, so this field is local-only; publish a cloud
+                sandbox's ports from the Ports panel once it exists instead. */}
+            {!cloud && (
             <div className="fg">
               <label className="flabel">
                 Publish ports <span className="flabel-hint">host access to sandbox services</span>
@@ -934,6 +974,7 @@ export function NewSandboxModal() {
                 (sbx v0.37+) — add or remove them later from the Network panel.
               </div>
             </div>
+            )}
             <div className="fg">
               <label className="flabel">
                 Environment variables <span className="flabel-hint">one KEY=value per line</span>
