@@ -659,7 +659,11 @@ export function SbxRuntimePanel({
           {rt?.source === 'managed'
             ? version && rt.adopted && version.includes(rt.pinned)
               ? <span className="rt-badge rt-badge-ok">Pinned to {rt.pinned}</span>
-              : null
+              // Adopted a build before this den release moved the pin (or never
+              // adopted one at all) — the "Managed runtime" row below already has
+              // a working Install/Reinstall button for this; flag it up here too
+              // so a stale pin isn't invisible until you scroll to it.
+              : <span className="rt-badge rt-badge-update">Update to {rt.pinned} available</span>
             : updateAvailable
               ? <span className="rt-badge rt-badge-update">Update available → {latest}</span>
               : version && latest
