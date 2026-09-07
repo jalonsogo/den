@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useSbxCaps } from '../../lib/useSbx'
 import { Globe, Box } from 'lucide-react'
 import { useStore } from '../../store'
 import { SECRET_SERVICES, GLOBAL_SCOPE, isGlobalScope, serviceLabel, type SecretService, type StoredSecret } from '../../types'
@@ -115,7 +114,6 @@ export function NewSecretModal() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, stored, editing])
-  const caps = useSbxCaps()
 
 
   const handleSave = async () => {
@@ -220,29 +218,27 @@ export function NewSecretModal() {
             )}
           </div>
 
-          {caps.hasEnvFiles && (
-            <div className="fg">
-              <div className="secret-op-row">
-                <span className="secret-op-label">
-                  <span className="flabel" style={{ marginBottom: 0 }}>Let sbx resolve it</span>
-                </span>
-                <button
-                  type="button"
-                  className={`s-toggle${dynamic ? ' on' : ''}`}
-                  role="switch"
-                  aria-checked={dynamic}
-                  aria-label="Let sbx resolve it"
-                  disabled={saving}
-                  onClick={() => { setDynamic((v) => !v); if (!dynamic) setUseOp(false) }}
-                />
-              </div>
-              <div className="fhint">
-                sbx stores the <em>reference</em>, not the value, and re-resolves it — so a rotated
-                secret reaches sandboxes on its own. Loading from 1Password above captures the value
-                once, and it goes stale when the secret changes.
-              </div>
+          <div className="fg">
+            <div className="secret-op-row">
+              <span className="secret-op-label">
+                <span className="flabel" style={{ marginBottom: 0 }}>Let sbx resolve it</span>
+              </span>
+              <button
+                type="button"
+                className={`s-toggle${dynamic ? ' on' : ''}`}
+                role="switch"
+                aria-checked={dynamic}
+                aria-label="Let sbx resolve it"
+                disabled={saving}
+                onClick={() => { setDynamic((v) => !v); if (!dynamic) setUseOp(false) }}
+              />
             </div>
-          )}
+            <div className="fhint">
+              sbx stores the <em>reference</em>, not the value, and re-resolves it — so a rotated
+              secret reaches sandboxes on its own. Loading from 1Password above captures the value
+              once, and it goes stale when the secret changes.
+            </div>
+          </div>
 
           {dynamic && (
             <div className="fg">

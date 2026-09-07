@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useSbxCaps } from '../lib/useSbx'
 import { Plus, Play, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen, Zap, PenLine, ShieldCheck } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
@@ -335,7 +334,6 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       setMsg({ ok: false, text: res?.error || 'Push failed — make sure you are logged in (docker login) and the reference is valid.' })
     }
   }
-  const caps = useSbxCaps()
   const openPrompt = useStore((st) => st.openPrompt)
 
 
@@ -412,7 +410,6 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     // red would train people to ignore the one state that does matter.
     if (res?.state === 'verified') setMsg({ ok: true, text: `${ref} — signature verified.` })
     else if (res?.state === 'unsigned') setMsg({ ok: true, text: `${ref} carries no signature.` })
-    else if (res?.state === 'unsupported') setMsg({ ok: false, text: 'Kit signing needs sbx 0.39 or newer.' })
     // A signature that doesn't check out is the one state worth interrupting
     // for, so it throws and holds the dialog open rather than closing quietly.
     else throw new Error(res?.detail || `${ref} — signature did NOT verify.`)
@@ -832,14 +829,12 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                         <button className="kit-more-item" onClick={() => doValidate(k)}>
                           <Check size={14} /> Validate spec
                         </button>
-                        {caps.hasEnvFiles && <>
-                          <button className="kit-more-item" onClick={() => doSign(k)}>
-                            <PenLine size={14} /> Sign kit…
-                          </button>
-                          <button className="kit-more-item" onClick={() => doVerify(k)}>
-                            <ShieldCheck size={14} /> Verify signature…
-                          </button>
-                        </>}
+                        <button className="kit-more-item" onClick={() => doSign(k)}>
+                          <PenLine size={14} /> Sign kit…
+                        </button>
+                        <button className="kit-more-item" onClick={() => doVerify(k)}>
+                          <ShieldCheck size={14} /> Verify signature…
+                        </button>
                         <div className="kit-more-sep" />
                         <button className="kit-more-item danger" onClick={() => { setMoreFor(null); remove(k) }}>
                           <Trash2 size={14} /> Delete kit

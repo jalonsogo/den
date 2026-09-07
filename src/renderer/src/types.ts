@@ -122,6 +122,8 @@ export interface Sandbox {
   uptimeSeconds?: number
   ports: Port[]
   logs: LogLine[]
+  // Which `sbx ls` listing produced this row (`sbx ls` vs `sbx --cloud ls`).
+  location: 'local' | 'cloud'
 }
 
 // Services accepted by `sbx secret set` (see `sbx secret set --help`).
@@ -565,17 +567,7 @@ declare global {
       onApiError(cb: (trace: ApiErrorTrace) => void): () => void
       // known=false while the probe is still running or the daemon is down.
       mainBuildId(): Promise<string>
-      sbxVersionCheck(): Promise<{
-        version: string; min: string; known: boolean; outdated: boolean
-        /** sbx >= 0.39: prune, env files, dynamic secrets, kit signing. */
-        hasEnvFiles?: boolean
-        /** sbx >= 0.42: cloud sandboxes. */
-        hasCloud?: boolean
-        /** sbx >= 0.42: kit `args:` block + `--kit-arg`. */
-        hasKitArgs?: boolean
-        /** sbx >= 0.42: `sbx create` without a workspace bind mount. */
-        hasNoWorkspaceCreate?: boolean
-      }>
+      sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
       pickSbxBinary(): Promise<{ ok: boolean; path: string; version?: string; error?: string }>
       runtimeSetupState(): Promise<{
         needsSetup: boolean
@@ -615,10 +607,10 @@ declare global {
       }): Promise<{ ok: boolean; output?: string; error?: string; refreshing?: boolean }>
       kitSign(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitVerify(ref: string): Promise<{
-        ok: boolean; state: 'verified' | 'unsigned' | 'invalid' | 'unsupported'; detail: string
+        ok: boolean; state: 'verified' | 'unsigned' | 'invalid'; detail: string
       }>
       onKitSignOutput(cb: (chunk: string) => void): () => void
-      envDiscover(): Promise<{ supported: boolean; files: SbxEnvFile[] }>
+      envDiscover(): Promise<{ files: SbxEnvFile[] }>
       envProvisioned(): Promise<Record<string, string>>
       envRead(path: string): Promise<{ ok: boolean; text?: string; error?: string }>
       envPick(): Promise<{ ok: boolean; path: string }>

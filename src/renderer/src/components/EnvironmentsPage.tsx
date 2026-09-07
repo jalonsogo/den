@@ -1,12 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   FileCode2, Plus, RefreshCw, Play, Trash2, ChevronDown, Layers,
-  GitBranch, ShieldCheck, AlertTriangle, Boxes, Terminal
+  GitBranch, ShieldCheck, Boxes, Terminal
 } from 'lucide-react'
-import { useStore } from '../store'
 import { EmptyState } from './EmptyState'
 import { parseSbxEnv, envItemCount, hostRefs, type EnvSummary } from '../lib/sbxEnv'
-import { useSbxCaps } from '../lib/useSbx'
 import type { SbxEnvFile } from '../types'
 
 // Sandbox environments (sbx v0.39, experimental).
@@ -27,13 +25,7 @@ interface Row extends SbxEnvFile {
 }
 
 export function EnvironmentsPage() {
-  const setActivePage = useStore((s) => s.setActivePage)
-  const caps = useSbxCaps()
   const [rows, setRows] = useState<Row[]>([])
-  // Tri-state on purpose: `null` is "haven't been told yet". Rendering the
-  // too-old screen for a runtime whose version simply hasn't been read yet
-  // strands a 0.39 user on it, since that screen has nothing to retry with.
-  const [supported, setSupported] = useState<boolean | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -58,7 +50,6 @@ export function EnvironmentsPage() {
 
   const load = useCallback(async () => {
     const res = await window.den?.envDiscover().catch(() => null)
-    setSupported(res ? res.supported : null)
     const found = res?.files ?? []
     setRows(await Promise.all(found.map(readInto)))
     setProvisioned(await window.den?.envProvisioned().catch(() => ({})) ?? {})
@@ -66,11 +57,6 @@ export function EnvironmentsPage() {
   }, [readInto])
 
   useEffect(() => { void load() }, [load])
-
-  // The version read needs the daemon and can land after the first paint; when
-  // it says 0.39, re-run discovery so the page moves off the unsupported state
-  // on its own rather than waiting to be navigated away from and back.
-  useEffect(() => { if (caps.hasEnvFiles && supported === false) void load() }, [caps.hasEnvFiles, supported, load])
 
   useEffect(() => {
     const off = window.den?.onEnvOutput?.((chunk) => setLog((prev) => (prev + chunk).slice(-4000)))
@@ -119,44 +105,6 @@ export function EnvironmentsPage() {
   }
 
   const zero = loaded && rows.length === 0
-
-  if (supported === false && caps.known && !caps.hasEnvFiles) {
-    return (
-      <div className="page">
-        <div className="page-hdr"><span className="page-title">Environments</span></div>
-        <div className="page-body page-body-center">
-          <EmptyState
-            icon={<FileCode2 size={34} />}
-            eyebrow={<><AlertTriangle size={11} /> Needs sbx 0.39</>}
-            title="Sandbox environments need a newer runtime"
-            sub={<>A <code>.sbxenv.yaml</code> commits a whole sandbox definition next to your project.
-              It arrived in sbx 0.39; den works fine on 0.38, it just can't run these.</>}
-            actions={
-              <button className="btn btn-primary" onClick={() => setActivePage('settings')}>
-                Open Settings → Runtime
-              </button>
-            }
-          />
-        </div>
-      </div>
-    )
-  }
-
-  if (supported !== true && !caps.hasEnvFiles) {
-    return (
-      <div className="page">
-        <div className="page-hdr"><span className="page-title">Environments</span></div>
-        <div className="page-body page-body-center">
-          <EmptyState
-            icon={<FileCode2 size={34} />}
-            title="Checking your runtime…"
-            sub={<>den is reading the sbx version. If this stays here, the daemon may not be running.</>}
-            actions={<button className="btn btn-default" onClick={() => void load()}>Try again</button>}
-          />
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="page">

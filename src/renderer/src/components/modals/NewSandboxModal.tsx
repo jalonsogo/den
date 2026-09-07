@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { useSbxCaps } from '../../lib/useSbx'
 import { ChevronDown, Check, Plus, RefreshCw, Search, Layers, X, DownloadCloud, Boxes, Zap, Pin } from 'lucide-react'
 import { useStore } from '../../store'
 import { AgentIcon } from '../AgentIcon'
@@ -135,7 +134,6 @@ export function NewSandboxModal() {
   const [memIdx, setMemIdx]           = useState(0)
   // Ports to publish at creation (sbx v0.37+ accepts -p on create). Free text so
   // the full sbx form works; split on commas/whitespace into one -p per mapping.
-  const caps = useSbxCaps()
   const [portsRaw, setPortsRaw]       = useState('')
   const [envRaw, setEnvRaw]           = useState('')
   // The shared skills store is mounted read-write into new sandboxes by default
@@ -422,7 +420,8 @@ export function NewSandboxModal() {
     setCreating(true)
     addCreatingSandbox({
       id: `creating-${finalName}`, name: finalName, status: 'creating',
-      agent: effAgent as typeof agent, workspace: noWorkspace ? '' : workspace, ports: [], logs: []
+      agent: effAgent as typeof agent, workspace: noWorkspace ? '' : workspace, ports: [], logs: [],
+      location: 'local'
     })
     const unsub = window.den?.onCreateOutput((chunk) => {
       setProgress((p) => p + chunk)
@@ -567,18 +566,16 @@ export function NewSandboxModal() {
               directly or cloned first. */}
           <div className="fgroup">
             <div className="fgroup-hdr">Workspace</div>
-            {caps.hasNoWorkspaceCreate && (
-              <div className="fg">
-                <div className="tog-row">
-                  <button
-                    className={`s-toggle${noWorkspace ? ' on' : ''}`}
-                    onClick={() => setNoWorkspace(!noWorkspace)}
-                  />
-                  No workspace bind mount
-                </div>
-                <div className="fhint">Create a sandbox with no folder mounted. Requires an explicit name below.</div>
+            <div className="fg">
+              <div className="tog-row">
+                <button
+                  className={`s-toggle${noWorkspace ? ' on' : ''}`}
+                  onClick={() => setNoWorkspace(!noWorkspace)}
+                />
+                No workspace bind mount
               </div>
-            )}
+              <div className="fhint">Create a sandbox with no folder mounted. Requires an explicit name below.</div>
+            </div>
             {!noWorkspace && (
             <div className="fg">
               <label className="flabel">Path</label>
@@ -817,7 +814,7 @@ export function NewSandboxModal() {
               via `args:`, filled in here and passed as `--kit-arg`. Grouped
               under the declaring kit's name when more than one kit is
               selected, so an arg's origin is never ambiguous. */}
-          {caps.hasKitArgs && kitsWithArgs.length > 0 && (
+          {kitsWithArgs.length > 0 && (
             <div className="fgroup">
               <div className="fgroup-hdr">Kit arguments</div>
               {kitsWithArgs.map((k) => (
@@ -929,9 +926,6 @@ export function NewSandboxModal() {
                 (sbx v0.37+) — add or remove them later from the Network panel.
               </div>
             </div>
-            {/* Environment variables (sbx v0.39). Hidden on an older runtime,
-                where -e isn't accepted by create. */}
-            {caps.hasEnvFiles && (
             <div className="fg">
               <label className="flabel">
                 Environment variables <span className="flabel-hint">one KEY=value per line</span>
@@ -951,12 +945,11 @@ export function NewSandboxModal() {
                 </div>
               )}
               <div className="fhint">
-                Passed as <code>-e</code> (sbx v0.39+). <strong>Not for secrets</strong> — a value here
+                Passed as <code>-e</code>. <strong>Not for secrets</strong> — a value here
                 goes on the command line, where any process on this Mac can read it. Use{' '}
                 <strong>Settings → Secrets</strong>, which injects through the proxy instead.
               </div>
             </div>
-            )}
           </div>
 
           <div className="fgroup">

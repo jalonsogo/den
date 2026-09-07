@@ -972,7 +972,7 @@ function extractPortArray(data: unknown, name: string): RawPort[] {
   return []
 }
 
-function normalizeSandbox(raw: SbxSandbox) {
+function normalizeSandbox(raw: SbxSandbox, location: 'local' | 'cloud' = 'local') {
   // Remembered for API-failure traces: which agent produced the error matters,
   // since each one words its failures (and retries) differently.
   sandboxAgents.set(raw.name, raw.agent ?? 'claude')
@@ -996,7 +996,8 @@ function normalizeSandbox(raw: SbxSandbox) {
     workspace: raw.workspaces?.[0] ?? '~',
     uptimeSeconds,
     ports: normalizePorts(raw.ports),
-    logs: [] as unknown[]
+    logs: [] as unknown[],
+    location
   }
 }
 
@@ -1040,7 +1041,7 @@ async function listSandboxes() {
     catch { await new Promise((r) => setTimeout(r, 500)); out = await attempt() }
     const parsed = JSON.parse(out)
     const sandboxes: SbxSandbox[] = parsed.sandboxes ?? parsed
-    const list = sandboxes.map(normalizeSandbox)
+    const list = sandboxes.map((s) => normalizeSandbox(s))
     updatePowerBlocker(list.filter((s) => s.status === 'running').length)
     lastGoodSandboxes = list
     return list
@@ -2556,32 +2557,16 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
 // sbx version for the menu bar. Cached because the tray menu is rebuilt
 // synchronously (and often); refreshed in the background on each rebuild so a
 // runtime update shows up without restarting den.
-// den speaks the v0.38 CLI dialect only: `daemon restart`, `secret set
-// --sandbox`, `--static-mcp`, `--deny-network` and kit spec v2 all arrived
-// there, and the pre-0.38 spellings it replaced are deprecated. Rather than
-// carry two code paths, den states the floor and shows a banner below it —
-// otherwise an old runtime fails as a stream of opaque "unknown flag" errors.
-export const MIN_SBX_VERSION = '0.38.0'
-
-
-// ── sbx v0.39 capabilities ───────────────────────────────────────────────────
-// v0.39 is purely additive for den: nothing it deprecated is anything den calls
-// (`SANDBOX_VM_ID`, the `ollama/` model prefix), it doesn't parse `kit inspect`,
-// and the credential blocks den writes already carry the `proxyManaged`
-// sentinels `kit validate` started requiring. So the floor stays at 0.38 and the
-// new surface is gated instead — forcing an upgrade buys a 0.38 user nothing.
-export const SBX_ENV_VERSION = '0.39.0'
-
-// ── sbx v0.42 capabilities ───────────────────────────────────────────────────
-// Same "additive, gate don't require" treatment as v0.39: cloud sandboxes, kit
-// `args:`/`--kit-arg`, and workspace-optional `create` all landed together in
-// this release, so one floor covers the whole wave.
-export const SBX_CLOUD_VERSION = '0.42.0'
-
-/** True when the installed runtime is at least `want`. False while unknown. */
-export function sbxAtLeast(want: string): boolean {
-  return !!cachedSbxVersion && !semverLt(cachedSbxVersion, want)
-}
+// den 0.11.0 speaks the v0.42 CLI dialect only: cloud sandboxes, kit
+// `args:`/`--kit-arg`, and workspace-optional `create` all require it, and
+// den no longer gates that surface behind a runtime check — every user is on
+// 0.42+ or blocked by the outdated-runtime banner below. (0.38 through 0.41
+// were previously supported with the new-in-each-release surface hidden
+// rather than required; that gate-don't-require machinery — sbxAtLeast(),
+// SBX_ENV_VERSION, SBX_CLOUD_VERSION, and the hasEnvFiles/hasCloud/
+// hasKitArgs/hasNoWorkspaceCreate capability flags — was removed with the
+// floor raise, since every one of those checks is now unconditionally true.)
+export const MIN_SBX_VERSION = '0.42.0'
 
 // Flags are the part of a CLI that moves most, and den is written against
 // release notes that name commands without always spelling their flags. Rather
@@ -3294,9 +3279,9 @@ function setupIPC(): void {
 
   ipcMain.handle('den:create-sandbox', async (_, config: {
     agent: string
-    // Optional from sbx v0.42 (`hasNoWorkspaceCreate`): a sandbox can be
-    // created with no workspace bind mount at all. Omitted, not empty-string —
-    // the modal requires a name instead when there's no workspace to derive one from.
+    // A sandbox can be created with no workspace bind mount at all (sbx
+    // v0.42+). Omitted, not empty-string — the modal requires a name instead
+    // when there's no workspace to derive one from.
     workspace?: string
     memory?: string
     branch?: boolean
@@ -3503,16 +3488,7 @@ function setupIPC(): void {
       version,
       min: MIN_SBX_VERSION,
       known: !!version,
-      outdated: !!version && semverLt(version, MIN_SBX_VERSION),
-      // Additive v0.39 surface (prune, env files, dynamic secrets, kit signing,
-      // per-sandbox env vars). Gated rather than required: a 0.38 runtime keeps
-      // working, it just doesn't show what it can't do.
-      hasEnvFiles: sbxAtLeast(SBX_ENV_VERSION),
-      // Additive v0.42 surface (cloud sandboxes, kit args, workspace-optional
-      // create) — same gate-don't-require treatment.
-      hasCloud: sbxAtLeast(SBX_CLOUD_VERSION),
-      hasKitArgs: sbxAtLeast(SBX_CLOUD_VERSION),
-      hasNoWorkspaceCreate: sbxAtLeast(SBX_CLOUD_VERSION)
+      outdated: !!version && semverLt(version, MIN_SBX_VERSION)
     }
   })
 
@@ -3765,7 +3741,6 @@ function setupIPC(): void {
   // about. Cheap (one stat per candidate) and it means the page has content
   // without anyone hunting for a file.
   ipcMain.handle('den:env-discover', async () => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) return { supported: false as const, files: [] }
     const seen = new Set<string>()
     const files: Array<{ path: string; dir: string; project: string }> = []
     let roots: string[] = []
@@ -3781,7 +3756,7 @@ function setupIPC(): void {
         files.push({ path, dir, project: dir.split('/').filter(Boolean).pop() || dir })
       }
     }
-    return { supported: true as const, files }
+    return { files }
   })
 
   /** file path -> the sandbox it provisioned, for anything still present. */
@@ -3832,9 +3807,6 @@ function setupIPC(): void {
   // ordered: a shared base plus a local override, with the last winning — so
   // den passes them in the order the UI lists them and never reorders.
   ipcMain.handle('den:env-create', async (event, paths: string[], name?: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Sandbox environments need sbx ${SBX_ENV_VERSION} or newer.` }
-    }
     if (!paths.length) return { ok: false as const, error: 'No environment file selected.' }
     const fileFlag = await sbxFlag(['env', 'create'], ['-f', '--file', '--env-file'])
     if (!fileFlag && paths.length > 1) {
@@ -3876,9 +3848,6 @@ function setupIPC(): void {
   // it as an environment, and removing it as a plain sandbox can leave the
   // environment's own bookkeeping behind.
   ipcMain.handle('den:env-rm', async (_, name: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Sandbox environments need sbx ${SBX_ENV_VERSION} or newer.` }
-    }
     try {
       const force = await sbxFlag(['env', 'rm'], ['--force', '-f', '--yes', '-y'])
       if (!force) {
@@ -4487,9 +4456,6 @@ function setupIPC(): void {
   // keyless-by-default in Sigstore, which means a browser flow on the host — so
   // it streams like `mcp auth` rather than returning a single result.
   ipcMain.handle('den:kit-sign', async (event, ref: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Kit signing needs sbx ${SBX_ENV_VERSION} or newer.` }
-    }
     try {
       const send = (chunk: string) => event.sender.send('den:kit-sign-output', chunk)
       // 5 minutes: a keyless signature waits on an interactive OIDC login.
@@ -4507,9 +4473,6 @@ function setupIPC(): void {
   // isn't a problem, the second means the artifact doesn't match its publisher
   // and is. Collapsing them into one red state would make signing useless.
   ipcMain.handle('den:kit-verify', async (_, ref: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, state: 'unsupported' as const, detail: '' }
-    }
     try {
       const output = await sbx(['kit', 'verify', ref], { timeout: 60000 })
       return { ok: true as const, state: 'verified' as const, detail: output.trim() }
@@ -5162,9 +5125,6 @@ function setupIPC(): void {
     refresh?: string
     custom?: boolean
   }) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Dynamic secrets need sbx ${SBX_ENV_VERSION} or newer.` }
-    }
     // `secret set-custom` is the non-catalog form; both take the same options.
     const verb = opts.custom ? 'set-custom' : 'set'
     const kindFlag = await sbxFlag(['secret', verb],

@@ -196,8 +196,8 @@ const api = {
     ipcRenderer.on('den:runtime-progress', handler)
     return () => ipcRenderer.removeListener('den:runtime-progress', handler)
   },
-  // sbx v0.39, all additive — den still runs on 0.38, these just aren't offered
-  // there. See MIN_SBX_VERSION in main for why the floor didn't move.
+  // Arrived in sbx v0.39; den 0.11.0 requires v0.42+ outright (MIN_SBX_VERSION
+  // in main), which covers it unconditionally.
   pruneSandboxes: (olderThan?: string) => ipcRenderer.invoke('den:prune-sandboxes', olderThan),
   setSecretDynamic: (opts: unknown)    => ipcRenderer.invoke('den:set-secret-dynamic', opts),
   kitSign:   (ref: string)             => ipcRenderer.invoke('den:kit-sign', ref),

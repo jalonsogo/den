@@ -1,56 +1,18 @@
 import { useEffect, useState } from 'react'
 
-// What the installed runtime can do. den's floor is sbx 0.38; everything v0.39
-// added is additive, so it's gated here rather than required — a 0.38 user keeps
-// a working app and simply isn't shown what their runtime can't honour.
-//
-// Deliberately optimistic-free: `false` until the probe answers. The version
-// read needs the daemon, and a runtime that's merely still starting shouldn't
-// have its features hidden *and* shouldn't have them offered — so callers get
-// `known` and can wait rather than flashing an affordance in or out.
+// The installed runtime's version, read from the main process. den 0.11.0
+// requires sbx 0.42+ outright (MIN_SBX_VERSION in src/main/index.ts) — there's
+// no gated/additive surface left to report here, just whether the version has
+// been read yet and what it is. The outdated-runtime banner (driven by the
+// same `sbxVersionCheck` result's `outdated` field) is what actually blocks a
+// too-old runtime; this hook is for anything that just wants to show the
+// version or wait for it to be known.
 export interface SbxCaps {
   known: boolean
   version: string
-  /** sbx >= 0.39: prune, .sbxenv.yaml, dynamic secrets, kit signing. */
-  hasEnvFiles: boolean
-  /** sbx >= 0.42: cloud sandboxes (`sbx --cloud ...`). */
-  hasCloud: boolean
-  /** sbx >= 0.42: kit `args:` block + `--kit-arg name=value`. */
-  hasKitArgs: boolean
-  /** sbx >= 0.42: `sbx create` without a workspace bind mount. */
-  hasNoWorkspaceCreate: boolean
 }
 
-const EMPTY: SbxCaps = {
-  known: false,
-  version: '',
-  hasEnvFiles: false,
-  hasCloud: false,
-  hasKitArgs: false,
-  hasNoWorkspaceCreate: false
-}
-
-// What a runtime older than 0.39 doesn't get, and where it would otherwise be.
-//
-// Kept next to the gate rather than in the panel that renders it: these
-// affordances are hidden when unsupported, and a hidden feature nobody explains
-// is indistinguishable from one den never had. This list is the disclosure, so
-// it has to live beside the flag it describes or the two drift apart.
-export const V039_FEATURES: Array<{ name: string; where: string }> = [
-  { name: 'Sandbox environments', where: 'Library → Environments' },
-  { name: 'Prune stopped sandboxes', where: 'Sandboxes' },
-  { name: 'Dynamic secrets', where: 'Settings → Secrets' },
-  { name: 'Kit signing and verification', where: 'Library → Kits' },
-  { name: 'Environment variables at creation', where: 'New Sandbox' },
-  { name: 'Claude remote control, registry mirror', where: 'Settings → Runtime' }
-]
-
-// Same disclosure list, for the v0.42 wave.
-export const V042_FEATURES: Array<{ name: string; where: string }> = [
-  { name: 'Cloud sandboxes', where: 'Sandboxes' },
-  { name: 'Kit arguments', where: 'New Sandbox, Library → Kits' },
-  { name: 'Sandboxes without a workspace', where: 'New Sandbox' }
-]
+const EMPTY: SbxCaps = { known: false, version: '' }
 
 export function useSbxCaps(): SbxCaps {
   const [caps, setCaps] = useState<SbxCaps>(EMPTY)
@@ -60,21 +22,14 @@ export function useSbxCaps(): SbxCaps {
       void window.den?.sbxVersionCheck?.()
         .then((r) => {
           if (cancelled || !r?.known) return
-          setCaps({
-            known: true,
-            version: r.version,
-            hasEnvFiles: !!r.hasEnvFiles,
-            hasCloud: !!r.hasCloud,
-            hasKitArgs: !!r.hasKitArgs,
-            hasNoWorkspaceCreate: !!r.hasNoWorkspaceCreate
-          })
+          setCaps({ known: true, version: r.version })
         })
         .catch(() => {})
     }
     check()
     // Same cadence as the outdated-runtime banner: the first probe can land
-    // before the daemon answers, and an sbx updated from Settings should light
-    // these up without relaunching den.
+    // before the daemon answers, and an sbx updated from Settings should
+    // reflect the new version without relaunching den.
     const t = setInterval(check, 15_000)
     return () => { cancelled = true; clearInterval(t) }
   }, [])

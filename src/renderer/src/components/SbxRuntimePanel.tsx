@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
-import { useSbxCaps, V039_FEATURES } from '../lib/useSbx'
 import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { AccordionSection } from './AccordionSection'
@@ -257,7 +256,6 @@ export function SbxRuntimePanel({
   // Runtime settings (`sbx settings set`) + reset (`sbx reset`).
   const [imagePaste, setImagePaste] = useState(false)
   const [settingBusy, setSettingBusy] = useState(false)
-  const caps = useSbxCaps()
   type RtStatus = Awaited<ReturnType<NonNullable<typeof window.den>['runtimeStatus']>>
   const [rt, setRt] = useState<RtStatus | null>(null)
   const [rtBusy, setRtBusy] = useState(false)
@@ -787,27 +785,6 @@ export function SbxRuntimePanel({
           </div>
         )}
 
-        {/* Say what this runtime can't do. den hides those affordances, which
-            keeps the UI honest but leaves someone who read about a feature
-            hunting for it — so disclose it once, here, instead of putting a nag
-            on five screens. */}
-        {caps.known && !caps.hasEnvFiles && (
-          <div className="ss-row">
-            <div>
-              <div className="ss-lbl">Not available on this runtime</div>
-              <div className="ss-sub">
-                You’re on <code>{caps.version}</code>. These need <strong>sbx 0.39</strong> and are
-                hidden until then — everything else works as normal.
-                <ul className="rt-gated">
-                  {V039_FEATURES.map((f) => (
-                    <li key={f.name}>{f.name} <span className="rt-gated-where">· {f.where}</span></li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Everything below belongs to a user-managed install: a binary path to
             point at, and the package manager's own update flow. With the managed
             runtime selected none of it applies, and showing both was the mess. */}
@@ -956,7 +933,6 @@ export function SbxRuntimePanel({
             disabled={settingBusy}
           />
         </div>
-        {caps.hasEnvFiles && (
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Claude remote control</div>
@@ -973,8 +949,6 @@ export function SbxRuntimePanel({
             disabled={remoteBusy}
           />
         </div>
-        )}
-        {caps.hasEnvFiles && (
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Registry mirror</div>
@@ -998,7 +972,6 @@ export function SbxRuntimePanel({
             </button>
           </div>
         </div>
-        )}
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Filesystem cache (virtiofs)</div>
