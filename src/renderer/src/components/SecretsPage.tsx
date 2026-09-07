@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, DownloadCloud } from 'lucide-react'
+import { Plus, DownloadCloud, Cloud } from 'lucide-react'
 import { useStore } from '../store'
 import { SecretIcon } from './SecretIcon'
 import {
@@ -11,11 +11,13 @@ import {
   type SecretService
 } from '../types'
 
-// A single row on the Secrets table: one scope of one service. `stored` is
-// undefined for a not-yet-configured placeholder (always the global slot).
+// A single row on the Secrets table: one (scope, store) of one service.
+// `stored` is undefined for a not-yet-configured placeholder (always the
+// global, local slot — cloud rows only ever appear once something's stored).
 interface SecretRow {
   service: string
   scope: string
+  location: 'local' | 'cloud'
   stored?: StoredSecret
 }
 
@@ -29,7 +31,7 @@ export function SecretsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await window.minipit?.listSecrets()
+      const result = await window.den?.listSecrets()
       setSecrets(result ?? [])
     } catch {
       setSecrets([])
@@ -44,8 +46,13 @@ export function SecretsPage() {
   }, [modal, load])
 
   // Only service secrets belong on this page (registry pull-creds are managed
-  // elsewhere). Build one row per (service, scope): a global slot for every
-  // common provider, plus a row for each actually-stored secret in any scope.
+  // elsewhere). Build one row per (service, scope, store): a local-global slot
+  // for every common provider, plus a row for each actually-stored secret in
+  // any scope or store. Local and cloud are wholly separate stores, so a
+  // service can have both a local and a cloud row at the same scope — no
+  // cloud placeholder, though: those only appear once something's stored, so
+  // a den install that's never touched cloud secrets shows exactly what it
+  // showed before this existed.
   const serviceSecrets = secrets.filter((s) => s.type === 'service')
   const entriesFor = (id: string) => serviceSecrets.filter((s) => s.name === id)
   const otherIds = [...new Set(serviceSecrets.map((s) => s.name))].filter(
@@ -54,16 +61,18 @@ export function SecretsPage() {
   const rows: SecretRow[] = []
   for (const id of [...COMMON_SECRET_SERVICES, ...otherIds]) {
     const entries = entriesFor(id)
-    const global = entries.find((e) => isGlobalScope(e.scope))
-    if (global) rows.push({ service: id, scope: global.scope, stored: global })
-    else if (COMMON_SECRET_SERVICES.includes(id as SecretService)) rows.push({ service: id, scope: GLOBAL_SCOPE })
+    const globalLocal = entries.find((e) => isGlobalScope(e.scope) && e.location === 'local')
+    const globalCloud = entries.find((e) => isGlobalScope(e.scope) && e.location === 'cloud')
+    if (globalLocal) rows.push({ service: id, scope: globalLocal.scope, location: 'local', stored: globalLocal })
+    else if (COMMON_SECRET_SERVICES.includes(id as SecretService)) rows.push({ service: id, scope: GLOBAL_SCOPE, location: 'local' })
+    if (globalCloud) rows.push({ service: id, scope: globalCloud.scope, location: 'cloud', stored: globalCloud })
     for (const e of entries.filter((e) => !isGlobalScope(e.scope))) {
-      rows.push({ service: id, scope: e.scope, stored: e })
+      rows.push({ service: id, scope: e.scope, location: e.location, stored: e })
     }
   }
 
-  const openModal = (service: string, scope: string) => {
-    setSecretTarget(service as SecretService, scope)
+  const openModal = (service: string, scope: string, location: 'local' | 'cloud') => {
+    setSecretTarget(service as SecretService, scope, location === 'cloud')
     setModal('new-secret')
   }
 
@@ -74,17 +83,17 @@ export function SecretsPage() {
     if (importing) return
     setImporting(true)
     setImportMsg(null)
-    const r = await window.minipit?.secretImport().catch((e) => ({ ok: false, error: String(e) }))
+    const r = await window.den?.secretImport().catch((e) => ({ ok: false, error: String(e) }))
     setImporting(false)
     const out = r && 'output' in r ? r.output : undefined
     setImportMsg(r?.ok ? (out?.trim() || 'Imported credentials from environment.') : `Import failed: ${(r && 'error' in r && r.error) || 'unknown error'}`)
     load()
   }
 
-  const handleRemove = async (service: string, scope: string) => {
-    const where = isGlobalScope(scope) ? 'global' : `sandbox "${scope}"`
+  const handleRemove = async (service: string, scope: string, location: 'local' | 'cloud') => {
+    const where = (isGlobalScope(scope) ? 'global' : `sandbox "${scope}"`) + (location === 'cloud' ? ', cloud' : '')
     if (!confirm(`Remove the stored ${service} secret (${where})?`)) return
-    await window.minipit?.removeSecret(service, scope).catch(() => {})
+    await window.den?.removeSecret(service, scope, location === 'cloud').catch(() => {})
     load()
   }
 
@@ -131,12 +140,19 @@ export function SecretsPage() {
           {rows.map((row) => {
             const configured = !!row.stored
             return (
-              <div className="sec-row" key={`${row.service}:${row.scope}`}>
+              <div className="sec-row" key={`${row.service}:${row.scope}:${row.location}`}>
                 <div className="sec-svc">
                   <div className="sec-ico"><SecretIcon service={row.service} size={16} /></div>
                   <div className="sec-name">{serviceLabel(row.service)}</div>
                 </div>
-                <div className="sec-scope">{isGlobalScope(row.scope) ? 'Global' : row.scope}</div>
+                <div className="sec-scope">
+                  {isGlobalScope(row.scope) ? 'Global' : row.scope}
+                  {row.location === 'cloud' && (
+                    <span className="sec-badge" title="Stored in the cloud secrets store, separate from local">
+                      <Cloud size={11} style={{ verticalAlign: -1, marginRight: 3 }} />cloud
+                    </span>
+                  )}
+                </div>
                 <div className={`sec-st ${configured ? (row.stored?.envOnly ? 'warn' : 'ok') : 'no'}`}>
                   <div className="sec-sd" />
                   <span className="sec-mask">{configured ? (row.stored?.masked || 'Configured') : 'Not set'}</span>
@@ -152,14 +168,14 @@ export function SecretsPage() {
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => openModal(row.service, row.scope)}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => openModal(row.service, row.scope, row.location)}>
                     {configured ? 'Edit' : 'Set'}
                   </button>
                   {configured && (
                     <button
                       className="btn btn-ghost btn-sm"
                       style={{ color: 'var(--destruct)' }}
-                      onClick={() => handleRemove(row.service, row.scope)}
+                      onClick={() => handleRemove(row.service, row.scope, row.location)}
                     >
                       Remove
                     </button>

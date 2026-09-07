@@ -5,8 +5,8 @@ A running record of the architectural decisions behind **den**, the desktop GUI 
 "why", not the "what" — pair it with the code and [`README.md`](../README.md).
 
 > Naming: the product is the lowercase wordmark **den** ("Developer Ephemeral Node").
-> The internal IPC namespace and preload bridge are still `minipit` for historical
-> reasons (see *Deferred* in [`todo.md`](todo.md)); treat `minipit` and `den` as the
+> The internal IPC namespace and preload bridge are still `den` for historical
+> reasons (see *Deferred* in [`todo.md`](todo.md)); treat `den` and `den` as the
 > same thing in code.
 
 ---
@@ -35,12 +35,12 @@ are the verification bar** (see §9).
 ## 2. IPC & the preload bridge
 
 **One namespaced channel surface.** The renderer never touches Node/Electron directly;
-it calls `window.minipit.*`, which the preload maps to `ipcRenderer.invoke('minipit:*')`
-against `ipcMain.handle('minipit:*')`. Event streams (PTY output, sandbox updates,
-policy blocks, agent activity) use `ipcRenderer.on('minipit:*')` with unsubscribe
+it calls `window.den.*`, which the preload maps to `ipcRenderer.invoke('den:*')`
+against `ipcMain.handle('den:*')`. Event streams (PTY output, sandbox updates,
+policy blocks, agent activity) use `ipcRenderer.on('den:*')` with unsubscribe
 functions returned to React effects.
 
-**All channel names are static string literals.** No `'minipit:' + dynamic` construction
+**All channel names are static string literals.** No `'den:' + dynamic` construction
 in handlers — this keeps the surface greppable and makes a future rename mechanical.
 
 **Security hardening in main** (from the Electron threat model):
@@ -61,8 +61,8 @@ losing data because the electron-vite **dev server origin/port changes**, so
 `localStorage` (scoped to origin) silently reset between runs. Fix:
 
 - **localStorage = instant-paint cache.** Read synchronously on mount so the UI never
-  flashes defaults. Keys are prefixed `minipit:*` (e.g. `minipit:sandboxOrder`,
-  `minipit:sandboxColors`, `minipit:showGroups`, `minipit:themePref`).
+  flashes defaults. Keys are prefixed `den:*` (e.g. `den:sandboxOrder`,
+  `den:sandboxColors`, `den:showGroups`, `den:themePref`).
 - **electron-store = source of truth.** Durable across origins/ports/upgrades. Synced via
   a config-sync IPC pair (`*-config-sync` / `*-config-set`) over a `CFG_KEYS` allowlist
   (currently `sandboxIcons`, `sandboxColors`, `sandboxGroups`). Group definitions live
@@ -232,7 +232,7 @@ The development environment has **no Docker and no GUI**. That means:
 ```
 src/
   main/      # Electron main: sbx/git/op wrappers, PTYs, IPC handlers, tray, windows, power
-  preload/   # contextBridge — the window.minipit.* API surface
+  preload/   # contextBridge — the window.den.* API surface
   renderer/  # React app
     src/
       components/   # UI (Sidebar, SandboxDetail, KitsPage, KitCaps, modals, …)

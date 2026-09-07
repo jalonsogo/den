@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePorcelain, semverLt } from './parse'
+import { parsePorcelain, semverLt, parseMcpTable } from './parse'
 
 describe('parsePorcelain', () => {
   // The bug this file exists for: porcelain writes two status columns, and a
@@ -94,5 +94,48 @@ describe('semverLt', () => {
     // Callers gate features on this, so the safe direction is "older".
     expect(semverLt('', '0.39.0')).toBe(true)
     expect(semverLt('unknown', '0.1.0')).toBe(true)
+  })
+})
+
+describe('parseMcpTable', () => {
+  it('reads a normal table', () => {
+    const raw = [
+      'NAME        URL                              TRANSPORT  AUTH',
+      'notion      https://mcp.notion.com/mcp       http       yes',
+      'playwright  npx @playwright/mcp@latest       stdio'
+    ].join('\n')
+    expect(parseMcpTable(raw).map((m) => m.name)).toEqual(['notion', 'playwright'])
+    expect(parseMcpTable(raw)[0]).toMatchObject({
+      url: 'https://mcp.notion.com/mcp', transport: 'http', auth: 'yes'
+    })
+    expect(parseMcpTable(raw)[1].command).toBe('npx @playwright/mcp@latest')
+  })
+
+  // The two phantoms this guard exists for. Both came out of an EMPTY registry:
+  // the sentence sbx prints where the table would be, and the aligned help
+  // under it — which splits into columns exactly like a real row and reached
+  // the UI as a server named "add one", complete with a pill you could select
+  // and pass to `--static-mcp`.
+  it('invents no server from the empty-registry output', () => {
+    const raw = [
+      'No MCP servers registered.',
+      '',
+      'Get started:',
+      '  add one    sbx mcp add <name> --url <url>',
+      '  list all   sbx mcp ls'
+    ].join('\n')
+    expect(parseMcpTable(raw)).toEqual([])
+  })
+
+  it('drops any name that is a phrase rather than an identifier', () => {
+    // Whatever the wording turns out to be on a given build, the rule is the
+    // same: a server is called notion or vercel, never "add one".
+    expect(parseMcpTable('Run  sbx mcp add <name>  to add one.')).toEqual([])
+    expect(parseMcpTable('Nothing here yet   try `sbx mcp add`')).toEqual([])
+    expect(parseMcpTable('INFO: registered "notion"')).toEqual([])
+  })
+
+  it('keeps a real row that carries no columns beyond its name', () => {
+    expect(parseMcpTable('NAME\nnotion').map((m) => m.name)).toEqual(['notion'])
   })
 })

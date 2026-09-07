@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
-import { useSbxCaps, V039_FEATURES } from '../lib/useSbx'
 import { ExternalLink, Copy, UploadCloud, Stethoscope, RotateCw, Bug, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { AccordionSection } from './AccordionSection'
@@ -241,10 +240,10 @@ export function SbxRuntimePanel({
   const [traces, setTraces] = useState<{ path: string; count: number } | null>(null)
   const [traceErr, setTraceErr] = useState<string | null>(null)
   useEffect(() => {
-    const load = () => { void window.minipit?.apiTraces?.().then(setTraces).catch(() => {}) }
+    const load = () => { void window.den?.apiTraces?.().then(setTraces).catch(() => {}) }
     load()
     // Refresh live: a failure can land while this panel is open.
-    return window.minipit?.onApiError?.(load)
+    return window.den?.onApiError?.(load)
   }, [])
 
   // Daemon health + log level (`sbx daemon status` / `log-level`).
@@ -257,8 +256,7 @@ export function SbxRuntimePanel({
   // Runtime settings (`sbx settings set`) + reset (`sbx reset`).
   const [imagePaste, setImagePaste] = useState(false)
   const [settingBusy, setSettingBusy] = useState(false)
-  const caps = useSbxCaps()
-  type RtStatus = Awaited<ReturnType<NonNullable<typeof window.minipit>['runtimeStatus']>>
+  type RtStatus = Awaited<ReturnType<NonNullable<typeof window.den>['runtimeStatus']>>
   const [rt, setRt] = useState<RtStatus | null>(null)
   const [rtBusy, setRtBusy] = useState(false)
   const [rtMsg, setRtMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -294,7 +292,7 @@ export function SbxRuntimePanel({
   const canReset = resetConfirm.trim().toLowerCase() === 'reset'
 
   const loadAccount = () =>
-    window.minipit?.dockerAccount()
+    window.den?.dockerAccount()
       .then((a) => setAccount(a ?? { loggedIn: false }))
       .catch(() => setAccount({ loggedIn: false }))
 
@@ -305,7 +303,7 @@ export function SbxRuntimePanel({
     setSigningIn(true)
     setLoginOut('')
     setAuthNetErr(null)
-    const r = await window.minipit?.dockerLogin().catch((e) => ({ ok: false, error: String(e) }))
+    const r = await window.den?.dockerLogin().catch((e) => ({ ok: false, error: String(e) }))
     setSigningIn(false)
     if (r?.ok) {
       // The runtime login can authenticate a different account than the Docker
@@ -320,7 +318,7 @@ export function SbxRuntimePanel({
       if (username) {
         setAccount({ loggedIn: true, username })
       } else {
-        const a = await window.minipit?.dockerAccount().catch(() => null)
+        const a = await window.den?.dockerAccount().catch(() => null)
         setAccount(a?.loggedIn ? a : { loggedIn: true })
       }
       // Refresh the shared account (toolbar menu, push-namespace prefills).
@@ -338,7 +336,7 @@ export function SbxRuntimePanel({
     setSigningOut(true)
     setLoginOut('')
     setAuthNetErr(null)
-    const r = await window.minipit?.dockerLogout().catch((e) => ({ ok: false, error: String(e) }))
+    const r = await window.den?.dockerLogout().catch((e) => ({ ok: false, error: String(e) }))
     setSigningOut(false)
     if (r?.ok) {
       setAccount({ loggedIn: false })
@@ -350,7 +348,7 @@ export function SbxRuntimePanel({
   }
 
   const loadVersion = () => {
-    window.minipit?.sbxVersion(sbxPath).then((r) => {
+    window.den?.sbxVersion(sbxPath).then((r) => {
       if (r?.ok) { setVersion(r.version ?? r.raw ?? null); setVersionErr(null) }
       else setVersionErr(r?.error ?? 'sbx not found')
     }).catch(() => setVersionErr('sbx not found'))
@@ -358,7 +356,7 @@ export function SbxRuntimePanel({
 
   const handleVerify = async () => {
     setVerify('checking')
-    const res = await window.minipit?.sbxVersion(sbxPath).catch(() => null)
+    const res = await window.den?.sbxVersion(sbxPath).catch(() => null)
     setVerify(res?.ok ? 'ok' : 'fail')
     if (res?.ok) { setVersion(res.version ?? res.raw ?? null); setVersionErr(null) }
     setTimeout(() => setVerify('idle'), 2500)
@@ -369,7 +367,7 @@ export function SbxRuntimePanel({
   // and a checked-at stamp, a working button is indistinguishable from a dead one.
   const loadDaemonStatus = () => {
     setDaemonChecking(true)
-    return window.minipit?.daemonStatus()
+    return window.den?.daemonStatus()
       .then((s) => setDaemonStatus(s?.ok ? { running: s.running, raw: s.raw } : { running: false, raw: s?.error }))
       .catch(() => setDaemonStatus(null))
       .finally(() => { setDaemonChecking(false); setDaemonCheckedAt(Date.now()) })
@@ -379,21 +377,21 @@ export function SbxRuntimePanel({
     loadVersion()
     loadAccount()
     loadDaemonStatus()
-    window.minipit?.sbxInstallInfo().then((i) => setInstall(i ?? null)).catch(() => {})
-    window.minipit?.sbxReleases().then((r) => setReleases(r ?? [])).catch(() => {}).finally(() => setLoading(false))
-    window.minipit?.getSettings().then((s) => {
+    window.den?.sbxInstallInfo().then((i) => setInstall(i ?? null)).catch(() => {})
+    window.den?.sbxReleases().then((r) => setReleases(r ?? [])).catch(() => {}).finally(() => setLoading(false))
+    window.den?.getSettings().then((s) => {
       setImagePaste(!!s?.imagePaste)
       setRuntimeProxy(s?.runtimeProxy ?? '')
       setRuntimeNoProxy(s?.runtimeNoProxy ?? '')
       setVirtiofsCache(s?.runtimeVirtiofsCache ?? true)
     }).catch(() => {})
-    window.minipit?.daemonLogLevel().then((r) => { if (r?.ok && r.level) setLogLevel(r.level) }).catch(() => {})
+    window.den?.daemonLogLevel().then((r) => { if (r?.ok && r.level) setLogLevel(r.level) }).catch(() => {})
     // Read the two v0.39 settings back from sbx rather than trusting what den
     // last wrote — they can be changed from the terminal.
-    void window.minipit?.sbxSettingGet?.('claude.remoteControl')
+    void window.den?.sbxSettingGet?.('claude.remoteControl')
       .then((r) => { if (r?.ok) { setRemoteControl(/^(true|1|yes|on)$/i.test(r.value)); setRemoteKnown(true) } })
       .catch(() => {})
-    void window.minipit?.sbxSettingGet?.('platform.images.registryMirror')
+    void window.den?.sbxSettingGet?.('platform.images.registryMirror')
       // Don't clobber something already being typed if the read lands late.
       .then((r) => { if (r?.ok) { setMirrorKnown(true); setMirror((cur) => (cur ? cur : r.value)) } })
       .catch(() => {})
@@ -407,8 +405,8 @@ export function SbxRuntimePanel({
     const next = !imagePaste
     setSettingBusy(true)
     setImagePaste(next)
-    const res = await window.minipit?.sbxSettingSet('clipboard.imagePaste', String(next)).catch(() => null)
-    if (res?.ok) window.minipit?.saveSettings({ imagePaste: next }).catch(() => {})
+    const res = await window.den?.sbxSettingSet('clipboard.imagePaste', String(next)).catch(() => null)
+    if (res?.ok) window.den?.saveSettings({ imagePaste: next }).catch(() => {})
     else setImagePaste(!next) // revert on failure
     setSettingBusy(false)
   }
@@ -421,7 +419,7 @@ export function SbxRuntimePanel({
     const next = !remoteControl
     setRemoteBusy(true)
     setRemoteControl(next)
-    const res = await window.minipit?.sbxSettingSet('claude.remoteControl', String(next)).catch(() => null)
+    const res = await window.den?.sbxSettingSet('claude.remoteControl', String(next)).catch(() => null)
     // A successful write is itself knowledge of the current value, so the
     // "couldn't read it" caveat should stop contradicting a value den just set.
     if (res?.ok) setRemoteKnown(true)
@@ -441,7 +439,7 @@ export function SbxRuntimePanel({
       'Saving an empty value clears any mirror your organisation has configured. Continue?'
     )) return
     setMirrorBusy(true)
-    const res = await window.minipit?.sbxSettingSet('platform.images.registryMirror', mirror.trim())
+    const res = await window.den?.sbxSettingSet('platform.images.registryMirror', mirror.trim())
       .catch(() => null)
     setMirrorSaved(res?.ok ? 'ok' : 'fail')
     setMirrorBusy(false)
@@ -449,11 +447,11 @@ export function SbxRuntimePanel({
   }
 
   const loadRuntime = () => {
-    void window.minipit?.runtimeStatus?.().then(setRt).catch(() => {})
+    void window.den?.runtimeStatus?.().then(setRt).catch(() => {})
   }
   useEffect(loadRuntime, [])
   useEffect(() => {
-    const off = window.minipit?.onRuntimeProgress?.((p) => setRtProg(p))
+    const off = window.den?.onRuntimeProgress?.((p) => setRtProg(p))
     return () => { off?.() }
   }, [])
 
@@ -462,7 +460,7 @@ export function SbxRuntimePanel({
   const installManaged = async () => {
     if (rtBusy) return
     setRtBusy(true); setRtMsg(null); setRtProg(null); setRtPending('managed')
-    const r = await window.minipit?.runtimeInstall()
+    const r = await window.den?.runtimeInstall()
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setRtBusy(false); setRtPending(null); setRtProg(null)
     setRtMsg(r?.ok
@@ -475,8 +473,8 @@ export function SbxRuntimePanel({
     if (rtBusy || rt?.source === source) return
     setRtBusy(true); setRtMsg(null); setRtPending(source)
     const r = source === 'system'
-      ? await window.minipit?.runtimeRevert().catch(() => null)
-      : await window.minipit?.runtimeSetSource('managed').catch(() => null)
+      ? await window.den?.runtimeRevert().catch(() => null)
+      : await window.den?.runtimeSetSource('managed').catch(() => null)
     setRtBusy(false)
     if (source === 'managed' && r && 'needsInstall' in r && r.needsInstall) { void installManaged(); return }
     setRtPending(null)
@@ -491,7 +489,7 @@ export function SbxRuntimePanel({
     setLogLevelBusy(true)
     const prev = logLevel
     setLogLevel(level)
-    const r = await window.minipit?.daemonLogLevel(level).catch(() => null)
+    const r = await window.den?.daemonLogLevel(level).catch(() => null)
     if (!r?.ok) setLogLevel(prev) // revert on failure
     else if (r.level) setLogLevel(r.level)
     setLogLevelBusy(false)
@@ -500,8 +498,8 @@ export function SbxRuntimePanel({
   // Persist a den-managed runtime env override. Marks the section dirty so we
   // can prompt for the daemon restart that actually applies it.
   const saveRuntimeEnv = async (key: 'runtimeProxy' | 'runtimeNoProxy' | 'runtimeVirtiofsCache', value: string | boolean) => {
-    await window.minipit?.setRuntimeEnv(key, value === '' ? null : value).catch(() => {})
-    window.minipit?.saveSettings({ [key]: value }).catch(() => {})
+    await window.den?.setRuntimeEnv(key, value === '' ? null : value).catch(() => {})
+    window.den?.saveSettings({ [key]: value }).catch(() => {})
     setRuntimeEnvDirty(true)
   }
 
@@ -515,7 +513,7 @@ export function SbxRuntimePanel({
     if (resetBusy || !canReset) return
     setResetBusy(true)
     setResetMsg(null)
-    const res = await window.minipit?.sbxReset(preserveSecrets).catch((e) => ({ ok: false, error: String(e) }))
+    const res = await window.den?.sbxReset(preserveSecrets).catch((e) => ({ ok: false, error: String(e) }))
     setResetBusy(false)
     setResetConfirm('')
     if (res?.ok) setResetMsg({ ok: true, text: 'Reset complete. All sandbox data was removed.' })
@@ -526,9 +524,9 @@ export function SbxRuntimePanel({
   // into its own box under the Authentication row so the sign-in confirmation
   // shows next to that control rather than at the bottom of the card.
   useEffect(() => {
-    const unsubRt = window.minipit?.onRuntimeOutput((chunk) =>
+    const unsubRt = window.den?.onRuntimeOutput((chunk) =>
       setOutput((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next }))
-    const unsubLogin = window.minipit?.onLoginOutput((chunk) =>
+    const unsubLogin = window.den?.onLoginOutput((chunk) =>
       setLoginOut((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next }))
     return () => { unsubRt?.(); unsubLogin?.() }
   }, [])
@@ -543,7 +541,7 @@ export function SbxRuntimePanel({
 
   // Stream `sbx diagnose` output into its own box.
   useEffect(() => {
-    const unsub = window.minipit?.onDiagnoseOutput((chunk) =>
+    const unsub = window.den?.onDiagnoseOutput((chunk) =>
       setDiagOut((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next })
     )
     return () => unsub?.()
@@ -554,7 +552,7 @@ export function SbxRuntimePanel({
   }, [diagOut])
 
   // Read the SSH-config state once on mount (cheap, and read-only).
-  const loadSsh = () => window.minipit?.sshStatus().then((s) => setSsh(s ?? null)).catch(() => setSsh(null))
+  const loadSsh = () => window.den?.sshStatus().then((s) => setSsh(s ?? null)).catch(() => setSsh(null))
   useEffect(() => { void loadSsh() }, [])
 
   const runSshSetup = async () => {
@@ -566,7 +564,7 @@ export function SbxRuntimePanel({
     // file for what is usually an IPC problem — most often a stale main process
     // in dev, where the renderer hot-reloads but the handler doesn't exist yet.
     const r = await Promise.resolve()
-      .then(() => window.minipit?.sshSetup())
+      .then(() => window.den?.sshSetup())
       // bridgeError separates a stale preload/main bundle (needs an app relaunch,
       // and would otherwise surface as a bare JS error) from a real sbx failure.
       .catch((e) => ({ ok: false, error: bridgeError(e, 'Running sbx setup ssh') }))
@@ -581,7 +579,7 @@ export function SbxRuntimePanel({
 
   // Stream `sbx daemon` (restart) output into its own box.
   useEffect(() => {
-    const unsub = window.minipit?.onDaemonOutput((chunk) =>
+    const unsub = window.den?.onDaemonOutput((chunk) =>
       setDaemonOut((t) => { const next = t + chunk; return next.length > CAP ? next.slice(-CAP) : next })
     )
     return () => unsub?.()
@@ -597,7 +595,7 @@ export function SbxRuntimePanel({
     if (diagBusy || daemonBusy) return
     setDiagBusy(mode)
     setDiagOut('')
-    const res = await window.minipit?.diagnose(mode).catch((e) => ({ ok: false, output: undefined, error: String(e) }))
+    const res = await window.den?.diagnose(mode).catch((e) => ({ ok: false, output: undefined, error: String(e) }))
     setDiagBusy(null)
     if (res?.ok) setDiagRan(true)
   }
@@ -608,7 +606,7 @@ export function SbxRuntimePanel({
   const copyDiag = async (mode: 'json' | 'github-issue') => {
     if (diagBusy || daemonBusy) return
     setDiagBusy(mode)
-    const res = await window.minipit?.diagnose(mode).catch(() => null)
+    const res = await window.den?.diagnose(mode).catch(() => null)
     setDiagBusy(null)
     if (res?.ok && res.output) {
       try {
@@ -625,7 +623,7 @@ export function SbxRuntimePanel({
     if (daemonBusy || diagBusy) return
     setDaemonBusy(true)
     setDaemonOut('')
-    await window.minipit?.daemonRestart().catch(() => null)
+    await window.den?.daemonRestart().catch(() => null)
     setDaemonBusy(false)
     setRuntimeEnvDirty(false) // a restart applies any pending runtime env changes
     loadDaemonStatus()
@@ -634,7 +632,7 @@ export function SbxRuntimePanel({
   const run = async (action: 'update' | 'redownload') => {
     setBusy(action)
     setOutput('')
-    const res = await window.minipit?.sbxUpdate(action).catch(() => null)
+    const res = await window.den?.sbxUpdate(action).catch(() => null)
     setBusy(null)
     if (res?.ok) loadVersion()
   }
@@ -787,27 +785,6 @@ export function SbxRuntimePanel({
           </div>
         )}
 
-        {/* Say what this runtime can't do. den hides those affordances, which
-            keeps the UI honest but leaves someone who read about a feature
-            hunting for it — so disclose it once, here, instead of putting a nag
-            on five screens. */}
-        {caps.known && !caps.hasEnvFiles && (
-          <div className="ss-row">
-            <div>
-              <div className="ss-lbl">Not available on this runtime</div>
-              <div className="ss-sub">
-                You’re on <code>{caps.version}</code>. These need <strong>sbx 0.39</strong> and are
-                hidden until then — everything else works as normal.
-                <ul className="rt-gated">
-                  {V039_FEATURES.map((f) => (
-                    <li key={f.name}>{f.name} <span className="rt-gated-where">· {f.where}</span></li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Everything below belongs to a user-managed install: a binary path to
             point at, and the package manager's own update flow. With the managed
             runtime selected none of it applies, and showing both was the mess. */}
@@ -846,15 +823,15 @@ export function SbxRuntimePanel({
                   {/* The version name is the link to its notes — one affordance,
                       instead of a collapsible changelog that cost a whole row of
                       vertical space while nobody opened it. */}
-                  <a className="rt-relink" onClick={() => releases[0] && window.minipit?.openPath(releases[0].url)}>{latest}</a>
+                  <a className="rt-relink" onClick={() => releases[0] && window.den?.openPath(releases[0].url)}>{latest}</a>
                   {' · '}{fmtDate(releases[0]?.date)}
-                  {updateAvailable && <> · <a className="rt-relink" onClick={() => releases[0] && window.minipit?.openPath(releases[0].url)}>What’s new</a></>}
+                  {updateAvailable && <> · <a className="rt-relink" onClick={() => releases[0] && window.den?.openPath(releases[0].url)}>What’s new</a></>}
                 </>
               ) : 'Unavailable'}
             </div>
           </div>
           {install && !install.canAutoUpdate ? (
-            <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(install.releasesUrl)}>
+            <button className="btn btn-default btn-sm" onClick={() => window.den?.openPath(install.releasesUrl)}>
               <ExternalLink size={13} /> Download
             </button>
           ) : (
@@ -956,7 +933,6 @@ export function SbxRuntimePanel({
             disabled={settingBusy}
           />
         </div>
-        {caps.hasEnvFiles && (
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Claude remote control</div>
@@ -973,8 +949,6 @@ export function SbxRuntimePanel({
             disabled={remoteBusy}
           />
         </div>
-        )}
-        {caps.hasEnvFiles && (
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Registry mirror</div>
@@ -998,7 +972,6 @@ export function SbxRuntimePanel({
             </button>
           </div>
         </div>
-        )}
         <div className="ss-row">
           <div>
             <div className="ss-lbl">Filesystem cache (virtiofs)</div>
@@ -1189,7 +1162,7 @@ export function SbxRuntimePanel({
           <button
             className="btn btn-default btn-sm"
             onClick={async () => {
-              const r = await window.minipit?.revealApiTraces?.().catch(() => null)
+              const r = await window.den?.revealApiTraces?.().catch(() => null)
               // Don't fail silently: if the folder can't be opened, say why.
               setTraceErr(r && !r.ok ? (r.error || 'Could not open the traces folder.') : null)
             }}

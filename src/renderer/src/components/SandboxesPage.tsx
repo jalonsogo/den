@@ -3,7 +3,6 @@ import { Plus, Trash2 } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
-import { useSbxCaps } from '../lib/useSbx'
 
 const projectName = (ws: string): string => ws.split('/').pop() || ws
 
@@ -14,7 +13,6 @@ export function SandboxesPage() {
   const policyBlocks = useStore((s) => s.policyBlocks)
   const blocksSeenAt = useStore((s) => s.blocksSeenAt)
   const agentActivity = useStore((s) => s.agentActivity)
-  const caps = useSbxCaps()
   const [pruning, setPruning] = useState(false)
   const [pruneMsg, setPruneMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -32,7 +30,7 @@ export function SandboxesPage() {
     )
     if (!ok) return
     setPruning(true); setPruneMsg(null)
-    const r = await window.minipit?.pruneSandboxes()
+    const r = await window.den?.pruneSandboxes()
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setPruning(false)
     if (!r?.ok) { setPruneMsg({ ok: false, text: r?.error || 'Could not prune.' }); return }
@@ -55,7 +53,7 @@ export function SandboxesPage() {
     <div className="page">
       <div className="page-hdr">
         <span className="page-title">Sandboxes</span>
-        {caps.hasEnvFiles && stopped.length > 0 && (
+        {stopped.length > 0 && (
           <button
             className="btn btn-ghost btn-sm"
             style={{ marginLeft: 'auto' }}
@@ -68,7 +66,7 @@ export function SandboxesPage() {
         )}
         <button
           className="btn btn-primary btn-sm"
-          style={caps.hasEnvFiles && stopped.length > 0 ? undefined : { marginLeft: 'auto' }}
+          style={stopped.length > 0 ? undefined : { marginLeft: 'auto' }}
           onClick={() => setModal('new-sandbox')}
         >
           <Plus size={13} /> New Sandbox

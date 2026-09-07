@@ -117,7 +117,7 @@ export function SettingsPage() {
   const savedSnapshot = useRef('')
 
   useEffect(() => {
-    window.minipit?.getSettings()
+    window.den?.getSettings()
       .then((s) => {
         const v = s ?? DEFAULT_SETTINGS
         savedSnapshot.current = JSON.stringify(v)
@@ -131,7 +131,7 @@ export function SettingsPage() {
     const cur = JSON.stringify(settings)
     if (!savedSnapshot.current || cur === savedSnapshot.current) return
     const t = setTimeout(() => {
-      window.minipit?.saveSettings(settings).catch(() => {})
+      window.den?.saveSettings(settings).catch(() => {})
       savedSnapshot.current = cur
       setSaved(true)
       setTimeout(() => setSaved(false), 1200)

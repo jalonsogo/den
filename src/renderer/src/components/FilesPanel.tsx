@@ -19,7 +19,7 @@ async function fetchDir(name: string, path: string): Promise<FileEntry[]> {
   // Throw (rather than cache an empty listing) if the bridge is missing or the
   // listing fails — main now rejects on a real exec failure, so a caught error
   // here means "couldn't read", not "empty dir". Only a resolved array is cached.
-  const api = window.minipit
+  const api = window.den
   if (!api) throw new Error('bridge unavailable')
   const res = await api.listFiles(name, path)
   dirCache.set(cacheKey(name, path), res)
@@ -209,7 +209,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
     // container. Retry briefly instead of listing the unresolved host path,
     // which fails by construction for any workspace mounted elsewhere.
     const resolve = (attempt: number) => {
-      window.minipit?.workspaceRoot(sandbox.name, sandbox.workspace)
+      window.den?.workspaceRoot(sandbox.name, sandbox.workspace)
         .then((root) => {
           if (cancelled) return
           if (root) { setCwd(root); setRootReady(true) }
@@ -283,11 +283,11 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
   const fileOpenMode = useStore((s) => s.fileOpenMode)
   const openFile = (path: string, name: string) => {
     const inWorkspace = path === sandbox.workspace || path.startsWith(sandbox.workspace + '/')
-    if (fileOpenMode === 'system' && inWorkspace) window.minipit?.openPath(path)
-    else window.minipit?.openFileWindow(sandbox.name, path, name)
+    if (fileOpenMode === 'system' && inWorkspace) window.den?.openPath(path)
+    else window.den?.openFileWindow(sandbox.name, path, name)
   }
   // Always open the in-app previewer, regardless of the setting (context menu).
-  const openInPreview = (path: string, name: string) => window.minipit?.openFileWindow(sandbox.name, path, name)
+  const openInPreview = (path: string, name: string) => window.den?.openFileWindow(sandbox.name, path, name)
 
   // Map a file's absolute path to its git change status (paths are repo-relative).
   const changeBadge = (absPath: string): string | undefined => {
@@ -310,7 +310,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
   }
 
   const fetchChanges = useCallback(() => {
-    window.minipit?.gitStatus(sandbox.name, sandbox.workspace).then((r) => {
+    window.den?.gitStatus(sandbox.name, sandbox.workspace).then((r) => {
       if (mounted.current && r) setChanges(r.changes)
     }).catch(() => {})
   }, [sandbox.name, sandbox.workspace])
@@ -377,7 +377,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
     }
     fetchChanges()
     const id = setInterval(fetchChanges, 15000)
-    const unsub = window.minipit?.onFilesChanged?.((name) => { if (name === sandbox.name) debounced() })
+    const unsub = window.den?.onFilesChanged?.((name) => { if (name === sandbox.name) debounced() })
     return () => { if (timer) clearTimeout(timer); clearInterval(id); unsub?.() }
   }, [sandbox.name, sandbox.workspace, sandbox.status, load, fetchChanges])
 
@@ -429,7 +429,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
   const handleDelete = async (m: FileMenu) => {
     setMenu(null)
     if (!confirm(`Delete ${m.isDir ? 'folder' : 'file'} "${m.name}"?`)) return
-    await window.minipit?.deletePath(sandbox.name, m.path).catch((e) => console.error(e))
+    await window.den?.deletePath(sandbox.name, m.path).catch((e) => console.error(e))
     hardRefresh()
   }
 
@@ -448,7 +448,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
   }
   const addToGitignore = async (patterns: string[]) => {
     setMenu(null)
-    const r = await window.minipit?.gitIgnoreAdd(sandbox.name, sandbox.workspace, patterns).catch(() => null)
+    const r = await window.den?.gitIgnoreAdd(sandbox.name, sandbox.workspace, patterns).catch(() => null)
     if (r && !r.ok) { alert(`Couldn't update .gitignore: ${r.error ?? 'unknown error'}`); return }
     // Ignored files drop out of git status → refresh the tree badges and the
     // Changes review surface.
@@ -476,7 +476,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
     const files = await Promise.all(
       picked.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }))
     )
-    const results = await window.minipit?.copyInto(sandbox.name, cwd, files).catch(() => null)
+    const results = await window.den?.copyInto(sandbox.name, cwd, files).catch(() => null)
     const failed = (results ?? []).filter((r) => !r.ok)
     if (!results) {
       alert('Copy failed — the sandbox may not be running.')
@@ -674,7 +674,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
       <button
         className="ds-folder-btn files-local"
         title={`Reveal in Finder — ${sandbox.workspace}`}
-        onClick={() => window.minipit?.openInFinder(sandbox.workspace)}
+        onClick={() => window.den?.openInFinder(sandbox.workspace)}
       >
         <Folder size={13} className="ds-folder-ico ds-folder-ico-closed" />
         <FolderOpen size={13} className="ds-folder-ico ds-folder-ico-open" />
@@ -702,8 +702,8 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
               elsewhere in the sandbox filesystem aren't on the host. */}
           {(menu.path === sandbox.workspace || menu.path.startsWith(sandbox.workspace + '/')) && (
             <>
-              <div className="ctx-item" onClick={() => { window.minipit?.openPath(menu.path); setMenu(null) }}>Open in default app</div>
-              <div className="ctx-item" onClick={() => { window.minipit?.openInFinder(menu.path); setMenu(null) }}>Reveal in Finder</div>
+              <div className="ctx-item" onClick={() => { window.den?.openPath(menu.path); setMenu(null) }}>Open in default app</div>
+              <div className="ctx-item" onClick={() => { window.den?.openInFinder(menu.path); setMenu(null) }}>Reveal in Finder</div>
             </>
           )}
           {/* Download copies the file out to the host via `sbx cp`, so it works
@@ -713,7 +713,7 @@ export function FilesPanel({ sandbox, tab: tabProp, onTabChange }: {
             <div className="ctx-item" onClick={() => {
               const path = menu.path, nm = menu.name
               setMenu(null)
-              window.minipit?.downloadFrom(sandbox.name, path).then((r) => {
+              window.den?.downloadFrom(sandbox.name, path).then((r) => {
                 if (r && !r.ok && !r.canceled) alert(`Couldn't download "${nm}": ${r.error ?? 'unknown error'}`)
               }).catch(() => {})
             }}>Download…</div>

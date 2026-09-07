@@ -42,7 +42,7 @@ export function Toolbar() {
   const handleSignOut = async () => {
     setAcctOpen(false)
     if (!confirm('Sign out of Docker? This stops all running sandboxes.')) return
-    const r = await window.minipit?.signOut().catch((e) => ({ ok: false, error: String(e), netError: false }))
+    const r = await window.den?.signOut().catch((e) => ({ ok: false, error: String(e), netError: false }))
     if (r && !r.ok) {
       alert(r.netError
         ? 'Couldn’t reach Docker Hub to sign out — check your network/DNS and try again.'
@@ -52,7 +52,7 @@ export function Toolbar() {
     // Reflect the signed-out state immediately: refresh the account (now logged
     // out) and the sandbox list (logout stopped them all).
     loadDockerAccount()
-    window.minipit?.listSandboxes().then((s) => setSandboxes(s as Sandbox[])).catch(() => {})
+    window.den?.listSandboxes().then((s) => setSandboxes(s as Sandbox[])).catch(() => {})
   }
 
   const getTitle = () => {

@@ -22,7 +22,7 @@ export function SkillsPanel() {
   const loadPreview = useCallback(async () => {
     setBusy('preview')
     setResult(null)
-    const r = await window.minipit?.skillsImport({ dryRun: true }).catch(() => null)
+    const r = await window.den?.skillsImport({ dryRun: true }).catch(() => null)
     setPreview(r ?? null)
     setBusy(null)
   }, [])
@@ -32,11 +32,11 @@ export function SkillsPanel() {
   const runImport = async () => {
     if (busy) return
     setBusy('import')
-    const r = await window.minipit?.skillsImport().catch(() => null)
+    const r = await window.den?.skillsImport().catch(() => null)
     setResult(r ?? null)
     setBusy(null)
     // Re-preview so the store list reflects what just landed.
-    const fresh = await window.minipit?.skillsImport({ dryRun: true }).catch(() => null)
+    const fresh = await window.den?.skillsImport({ dryRun: true }).catch(() => null)
     if (fresh) setPreview(fresh)
   }
 
@@ -76,7 +76,7 @@ export function SkillsPanel() {
             <code style={{ flex: 1, overflowWrap: 'anywhere' }}>{preview.storePath}</code>
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => window.minipit?.openPath(preview.storePath!)}
+              onClick={() => window.den?.openPath(preview.storePath!)}
               title="Reveal the store folder"
             >
               <FolderOpen size={13} />

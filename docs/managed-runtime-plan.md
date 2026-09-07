@@ -162,19 +162,19 @@ Also harden as `sbx-onboarding-plan.md` notes under SEC-2: a stored `sbxPath` mu
 regular file before it's used, else fall through to discovery.
 
 **New handlers:**
-- `minipit:runtime-source` (get/set) — `'managed' | 'system'`, persisted in `store`. Setting it
+- `den:runtime-source` (get/set) — `'managed' | 'system'`, persisted in `store`. Setting it
   returns whether a daemon restart is needed.
-- `minipit:runtime-install` — download the pinned tarball, verify SHA-256 **before** extracting,
+- `den:runtime-install` — download the pinned tarball, verify SHA-256 **before** extracting,
   extract to `app.getPath('userData')/runtime/sbx-<version>/`, `chmod +x`,
   `xattr -dr com.apple.quarantine`, smoke-test `sbx version`, adopt on success. Streams progress on
-  the existing `minipit:runtime-output` channel. Cleans up the temp file on every exit path.
-- `minipit:runtime-status` — `{ source, pinned, installed?, running?, patchAvailable? }` for the
+  the existing `den:runtime-output` channel. Cleans up the temp file on every exit path.
+- `den:runtime-status` — `{ source, pinned, installed?, running?, patchAvailable? }` for the
   Settings panel.
-- `minipit:runtime-revert` — repoint at the previous verified install.
+- `den:runtime-revert` — repoint at the previous verified install.
 
 **Reuse, don't reinvent:** `SBX_RELEASES_URL` (`:638`), the GitHub fetch pattern in
-`minipit:sbx-releases` (`:4918`), `detectInstallManager()` (`:643`) and `pkgCommand()` (`:663`) for
-the `system` path, and `minipit:sbx-update` (`:4953`) — whose `manual` branch should route to
+`den:sbx-releases` (`:4918`), `detectInstallManager()` (`:643`) and `pkgCommand()` (`:663`) for
+the `system` path, and `den:sbx-update` (`:4953`) — whose `manual` branch should route to
 `runtime-install` when the current binary is den-managed.
 
 ### 2. Preload — `src/preload/index.ts`

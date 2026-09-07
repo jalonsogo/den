@@ -4,7 +4,7 @@
 // and pastel: low-saturation surfaces that stay comfortable to read for hours.
 //
 // Ids match the historical accent ids ('blue', 'graphite', …) so the persisted
-// 'minipit:accent' preference keeps working across the change.
+// 'den:accent' preference keeps working across the change.
 
 export interface Theme {
   id: string

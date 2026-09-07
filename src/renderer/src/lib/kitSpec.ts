@@ -31,6 +31,17 @@ export interface KitCredential {
   envVars: string[]
 }
 
+// A kit-declared argument (sbx >= 0.42): a named, string-valued parameter the
+// kit's author exposes, filled in per sandbox at creation time and passed as
+// `--kit-arg name=value` (or `--kit-arg kit.name=value` when more than one
+// selected kit declares an arg by that name).
+export interface KitArgDef {
+  name: string
+  description?: string
+  default?: string
+  required?: boolean
+}
+
 export interface ParsedKit {
   kind: string
   name: string
@@ -49,6 +60,7 @@ export interface ParsedKit {
   credentials: KitCredential[]
   agentContext: string
   mcps: string[]           // ids inferred from `claude mcp add <id> …` commands
+  args: KitArgDef[]
 }
 
 // ── Minimal YAML reader ───────────────────────────────────────────────────
@@ -351,6 +363,19 @@ export function parseKitSpec(text: string): ParsedKit {
     proxyManaged,
     credentials,
     agentContext: (v2 ? asStr(agentInstructions.content) : asStr(root.agentContext)).trim(),
-    mcps
+    mcps,
+    // Root-level regardless of schemaVersion — new in sbx 0.42, not part of the
+    // v1/v2 split above. Parsed unconditionally so a kit authored by a newer
+    // tool still round-trips its args through an older den, even where the
+    // args UI itself is hidden below the capability floor.
+    args: asList(root.args).map((a) => {
+      const m = asMap(a)
+      return {
+        name: asStr(m.name),
+        description: asStr(m.description) || undefined,
+        default: asStr(m.default) || undefined,
+        required: asStr(m.required) === 'true' || undefined
+      }
+    }).filter((a) => a.name)
   }
 }

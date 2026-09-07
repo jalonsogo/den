@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useSbxCaps } from '../lib/useSbx'
 import { Plus, Play, Layers, Package, PackagePlus, FolderOpen, Trash2, MoreVertical, UploadCloud, DownloadCloud, Star, Globe, RefreshCw, Check, BadgeCheck, Github, FileArchive, Box, ChevronDown, SquarePen, Zap, PenLine, ShieldCheck } from 'lucide-react'
 import { useStore } from '../store'
 import { parseKitSpec } from '../lib/kitSpec'
@@ -105,7 +104,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     setAddFor(dir)
     // Refresh which sandboxes already have each kit so the picker can disable them.
     const entries = await Promise.all(
-      sandboxes.map(async (s) => [s.name, (await window.minipit?.appliedKits(s.name)) ?? []] as const)
+      sandboxes.map(async (s) => [s.name, (await window.den?.appliedKits(s.name)) ?? []] as const)
     )
     setAppliedMap(Object.fromEntries(entries))
   }
@@ -130,7 +129,8 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   // A kit panel opens in read-only view mode; editing the code / saving is gated
   // behind an explicit "Edit" toggle.
   const [editing, setEditing] = useState(false)
-  // Row "⋮" menu (Open in Finder / Upload to Hub / Delete).
+  // Row "⋮" menu, in three groups: where the kit goes (Finder / Export /
+  // Upload), whether it's sound (Validate / Sign / Verify), then Delete.
   const [moreFor, setMoreFor] = useState<string | null>(null)
   const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
   // "Upload to Hub" — push the kit as an OCI artifact to a registry.
@@ -175,7 +175,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     setHubErr(null)
     // Surface the real rejection reason (e.g. "No handler registered …" when the
     // main process is stale) instead of masking it behind a generic message.
-    const res = await window.minipit?.listHubKits()
+    const res = await window.den?.listHubKits()
       .catch((e) => ({ ok: false as const, kits: undefined, error: e instanceof Error ? e.message : String(e) }))
     setHubLoading(false)
     if (res?.ok && res.kits) {
@@ -192,7 +192,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const importHubKit = async (kit: HubKit) => {
     setImportingRef(kit.ref)
     setMsg(null)
-    const res = await window.minipit?.kitImport(kit.ref).catch(() => null)
+    const res = await window.den?.kitImport(kit.ref).catch(() => null)
     setImportingRef(null)
     if (res?.ok) {
       await load()
@@ -213,6 +213,18 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     /\.git(?:#|$)/.test(ref) ||
     /^https?:\/\/(?:[^/]*\.)?(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|git\.sr\.ht|dev\.azure\.com)\//.test(ref)
 
+  // An import can succeed and still produce no .zip — the kit works for
+  // "Add to sandbox" but can't be pushed, and shows as "unpacked". That's a
+  // partial failure, so it gets the warning banner rather than a green
+  // "Imported", and it names the reason sbx gave. (Read off the wider result
+  // shape, as with `choices` below: only the local importers pack.)
+  const importedMsg = (res: { name?: string } | null | undefined) => {
+    const packError = (res as { packError?: string } | null | undefined)?.packError
+    return packError
+      ? { ok: false, text: `Imported "${res?.name}", but it didn't pack: ${packError} — it'll show as unpacked and can't be pushed until that's fixed.` }
+      : { ok: true, text: `Imported "${res?.name}" into your library.` }
+  }
+
   // OCI reference / Git URL — both take a text ref via the inline form.
   const doImport = async (ref = importRef.trim(), pickDir?: string) => {
     if (!ref || importing) return
@@ -220,15 +232,15 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     setImporting(true)
     setMsg(null)
     const res = viaGit
-      ? await window.minipit?.kitImportGit(ref, pickDir).catch(() => null)
-      : await window.minipit?.kitImport(ref).catch(() => null)
+      ? await window.den?.kitImportGit(ref, pickDir).catch(() => null)
+      : await window.den?.kitImport(ref).catch(() => null)
     setImporting(false)
     if (res?.ok) {
       setImportForm(null)
       setImportRef('')
       setRepoPick(null)
       load()
-      setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
+      setMsg(importedMsg(res))
       return
     }
     // Several kits in one repo — ask which, keeping the typed reference so the
@@ -263,13 +275,13 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     // process is stale) instead of a generic failure.
     const fail = (e: unknown) => ({ ok: false as const, canceled: false, name: undefined, error: e instanceof Error ? e.message : String(e) })
     const res = kind === 'zip'
-      ? await window.minipit?.kitImportZip().catch(fail)
-      : await window.minipit?.kitImportFolder().catch(fail)
+      ? await window.den?.kitImportZip().catch(fail)
+      : await window.den?.kitImportFolder().catch(fail)
     setImporting(false)
     if (res?.canceled) return
     if (res?.ok) {
       load()
-      setMsg({ ok: true, text: `Imported "${res.name}" into your library.` })
+      setMsg(importedMsg(res))
     } else {
       setMsg({ ok: false, text: res?.error || 'Import failed.' })
     }
@@ -313,7 +325,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     if (!ref || pushing) return
     setPushing(true)
     setMsg(null)
-    const res = await window.minipit?.kitPush(k.dir, ref).catch(() => null)
+    const res = await window.den?.kitPush(k.dir, ref).catch(() => null)
     setPushing(false)
     if (res?.ok) {
       setPushFor(null)
@@ -322,14 +334,13 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
       setMsg({ ok: false, text: res?.error || 'Push failed — make sure you are logged in (docker login) and the reference is valid.' })
     }
   }
-  const caps = useSbxCaps()
   const openPrompt = useStore((st) => st.openPrompt)
 
 
   const doValidate = async (k: Kit) => {
     setMoreFor(null)
     setMsg(null)
-    const res = await window.minipit?.kitValidate(k.dir).catch(() => null)
+    const res = await window.den?.kitValidate(k.dir).catch(() => null)
     if (res?.ok) setMsg({ ok: true, text: `"${k.name}" is valid.` })
     else setMsg({ ok: false, text: res?.error || `"${k.name}" failed validation.` })
   }
@@ -355,11 +366,11 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
         setMsg({ ok: true, text: `Signing ${ref} — complete the browser login if one opens…` })
         // Keyless signing prints an authorization URL and then waits, so show
         // the last thing it said rather than a silent "Working…" for minutes.
-        const off = window.minipit?.onKitSignOutput?.((chunk) => {
+        const off = window.den?.onKitSignOutput?.((chunk) => {
           const line = chunk.split('\n').map((l) => l.trim()).filter(Boolean).pop()
           if (line) setMsg({ ok: true, text: `Signing ${ref} — ${line}` })
         })
-        const res = await window.minipit?.kitSign(ref).catch(() => null).finally(() => off?.())
+        const res = await window.den?.kitSign(ref).catch(() => null).finally(() => off?.())
         // Throwing keeps the modal open with the message, which is what the
         // caller wants for a signature that didn't take.
         if (!res?.ok) throw new Error(res?.error || `Could not sign ${ref}.`)
@@ -385,8 +396,8 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     // rebuilt, main not restarted, so the handler doesn't exist and invoke
     // rejects. Reporting that as a bad signature is a false alarm on exactly
     // the question signing exists to answer.
-    let res: Awaited<ReturnType<NonNullable<typeof window.minipit>['kitVerify']>> | null = null
-    try { res = (await window.minipit?.kitVerify(ref)) ?? null }
+    let res: Awaited<ReturnType<NonNullable<typeof window.den>['kitVerify']>> | null = null
+    try { res = (await window.den?.kitVerify(ref)) ?? null }
     catch (e) {
       throw new Error(
         `Couldn't check ${ref} — den could not reach the signing command` +
@@ -399,7 +410,6 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     // red would train people to ignore the one state that does matter.
     if (res?.state === 'verified') setMsg({ ok: true, text: `${ref} — signature verified.` })
     else if (res?.state === 'unsigned') setMsg({ ok: true, text: `${ref} carries no signature.` })
-    else if (res?.state === 'unsupported') setMsg({ ok: false, text: 'Kit signing needs sbx 0.39 or newer.' })
     // A signature that doesn't check out is the one state worth interrupting
     // for, so it throws and holds the dialog open rather than closing quietly.
     else throw new Error(res?.detail || `${ref} — signature did NOT verify.`)
@@ -408,21 +418,21 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const doExport = async (k: Kit) => {
     setMoreFor(null)
     setMsg(null)
-    const res = await window.minipit?.kitPack(k.dir, k.name).catch(() => null)
+    const res = await window.den?.kitPack(k.dir, k.name).catch(() => null)
     if (res?.canceled) return
     if (res?.ok) setMsg({ ok: true, text: `Exported "${k.name}" to ${res.path}.` })
     else setMsg({ ok: false, text: res?.error || 'Export failed.' })
   }
 
   const load = useCallback(async () => {
-    const list = (await window.minipit?.listKits()) ?? []
+    const list = (await window.den?.listKits()) ?? []
     setKits(list)
     // Gates the empty state: `kits` starts out empty, so without this the
     // welcome hero flashes on every mount before the real list lands.
     setLoaded(true)
     // Read + parse each kit's spec so the table can summarize its capabilities.
     const entries = await Promise.all(
-      list.map(async (k) => [k.dir, parseKitSpec((await window.minipit?.readKit(k.dir)) ?? '')] as const)
+      list.map(async (k) => [k.dir, parseKitSpec((await window.den?.readKit(k.dir)) ?? '')] as const)
     )
     setSpecs(Object.fromEntries(entries))
   }, [])
@@ -441,14 +451,14 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
 
   const remove = async (k: Kit) => {
     if (!confirm(`Delete kit "${k.name}"?`)) return
-    await window.minipit?.removeKit(k.dir).catch(() => {})
+    await window.den?.removeKit(k.dir).catch(() => {})
     load()
   }
 
   const addToSandbox = async (kit: Kit, sandboxName: string) => {
     setBusy(true)
     setMsg(null)
-    const res = await window.minipit?.kitAdd(sandboxName, kit.dir).catch(() => null)
+    const res = await window.den?.kitAdd(sandboxName, kit.dir).catch(() => null)
     setBusy(false)
     setAddFor(null)
     // sbx v0.35 applies the kit by recreating the sandbox container (state is
@@ -462,8 +472,8 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
   const restartSandbox = async (name: string) => {
     setBusy(true)
     try {
-      await window.minipit?.stopSandbox(name)
-      await window.minipit?.runSandbox(name)
+      await window.den?.stopSandbox(name)
+      await window.den?.runSandbox(name)
       setMsg({ ok: true, text: `Restarted ${name} — kit applied.` })
     } catch {
       setMsg({ ok: false, text: `Couldn't restart ${name} — stop and run it manually.` })
@@ -475,20 +485,20 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
     setAddFor(null)
     setEditing(false)          // open read-only; user opts into editing
     setSpecView('summary')
-    setSpec((await window.minipit?.readKit(k.dir)) ?? '')
+    setSpec((await window.den?.readKit(k.dir)) ?? '')
     setEditFor(k.dir)
   }
 
   // Leave edit mode without saving — reload the spec from disk so the code panel
   // shows the last-saved content again.
   const cancelEdit = async (k: Kit) => {
-    setSpec((await window.minipit?.readKit(k.dir)) ?? '')
+    setSpec((await window.den?.readKit(k.dir)) ?? '')
     setEditing(false)
   }
 
   const saveSpec = async (k: Kit) => {
     setSavingSpec(true)
-    const res = await window.minipit?.updateKit(k.dir, spec).catch(() => null)
+    const res = await window.den?.updateKit(k.dir, spec).catch(() => null)
     setSavingSpec(false)
     if (res?.ok) { setEditing(false); setSpecView('summary'); load(); setMsg({ ok: true, text: `Saved & re-packed "${k.name}".` }) }
     else setMsg({ ok: false, text: res?.error || 'Failed to save spec.' })
@@ -559,7 +569,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
           <p style={{ fontSize: 12.5, color: 'var(--t3)', marginBottom: 14 }}>
             {tab === 'library'
               ? <>{blurb} Managed by den and packed with <code>sbx kit pack</code>.</>
-              : <>{variant === 'mixin' ? 'Mixin' : 'Sandbox'} kits published to <a className="kit-repo-link" onClick={() => window.minipit?.openPath('https://hub.docker.com/search?type=sbx_kit')}>Docker Hub</a>. Import one to add it to your library.</>}
+              : <>{variant === 'mixin' ? 'Mixin' : 'Sandbox'} kits published to <a className="kit-repo-link" onClick={() => window.den?.openPath('https://hub.docker.com/search?type=sbx_kit')}>Docker Hub</a>. Import one to add it to your library.</>}
           </p>
         )}
 
@@ -639,7 +649,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                 {copied ? 'Copied!' : 'Copy install command'}
               </button>
               {hubRepoUrl(msg.share) && (
-                <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(hubRepoUrl(msg.share!)!)}>
+                <button className="btn btn-default btn-sm" onClick={() => window.den?.openPath(hubRepoUrl(msg.share!)!)}>
                   Open on Docker Hub
                 </button>
               )}
@@ -719,7 +729,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                   <div className="lib-primary">
                     {variant === 'mixin' ? <Layers size={14} /> : <Package size={14} />}
                     <span>{k.name}</span>
-                    {!k.hasZip && <span className="kit-unpacked" title="Not packed yet">unpacked</span>}
+                    {!k.hasZip && <span className="kit-unpacked" title="No packed artifact — this kit failed to pack, so it can't be pushed. Edit ▸ Save re-packs it and reports why.">unpacked</span>}
                   </div>
                   <KitCaps p={specs[k.dir]} />
                   <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
@@ -800,11 +810,10 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                     </button>
                     {moreFor === k.dir && morePos && (
                       <div className="kit-more-menu" style={{ top: morePos.top, right: morePos.right }}>
-                        <button className="kit-more-item" onClick={() => { setMoreFor(null); window.minipit?.openInFinder(k.dir) }}>
+                        {/* Where the kit goes: reveal it, hand it to someone,
+                            publish it. */}
+                        <button className="kit-more-item" onClick={() => { setMoreFor(null); window.den?.openInFinder(k.dir) }}>
                           <FolderOpen size={14} /> Open in Finder
-                        </button>
-                        <button className="kit-more-item" onClick={() => doValidate(k)}>
-                          <Check size={14} /> Validate spec
                         </button>
                         <button className="kit-more-item" onClick={() => doExport(k)}>
                           <DownloadCloud size={14} /> Export as zip…
@@ -812,14 +821,20 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                         <button className="kit-more-item" onClick={() => openPush(k)}>
                           <UploadCloud size={14} /> Upload to Hub…
                         </button>
-                        {caps.hasEnvFiles && <>
-                          <button className="kit-more-item" onClick={() => doSign(k)}>
-                            <PenLine size={14} /> Sign kit…
-                          </button>
-                          <button className="kit-more-item" onClick={() => doVerify(k)}>
-                            <ShieldCheck size={14} /> Verify signature…
-                          </button>
-                        </>}
+                        <div className="kit-more-sep" />
+                        {/* Whether the kit is sound: does the spec hold up, and
+                            is it the one it claims to be. Split from the moving
+                            actions above — "Validate spec" sat between Finder and
+                            Export, reading as another way to ship it. */}
+                        <button className="kit-more-item" onClick={() => doValidate(k)}>
+                          <Check size={14} /> Validate spec
+                        </button>
+                        <button className="kit-more-item" onClick={() => doSign(k)}>
+                          <PenLine size={14} /> Sign kit…
+                        </button>
+                        <button className="kit-more-item" onClick={() => doVerify(k)}>
+                          <ShieldCheck size={14} /> Verify signature…
+                        </button>
                         <div className="kit-more-sep" />
                         <button className="kit-more-item danger" onClick={() => { setMoreFor(null); remove(k) }}>
                           <Trash2 size={14} /> Delete kit
@@ -944,7 +959,7 @@ export function KitsPage({ variant }: { variant: 'mixin' | 'sandbox' }) {
                       )}
                       {parsed && <KitCaps p={parsed} compact />}
                       <div className="kit-card-actions">
-                        <a className="kit-card-link" onClick={() => window.minipit?.openPath(`https://hub.docker.com/r/${k.slug}`)}>
+                        <a className="kit-card-link" onClick={() => window.den?.openPath(`https://hub.docker.com/r/${k.slug}`)}>
                           <Globe size={12} /> View on Hub
                         </a>
                         <button

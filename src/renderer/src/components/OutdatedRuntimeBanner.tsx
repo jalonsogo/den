@@ -5,10 +5,11 @@ import { useStore } from '../store'
 // Stamped into every bundle at build time by electron.vite.config.ts.
 declare const __BUILD_ID__: string
 
-// den speaks the sbx v0.38 CLI dialect only — `daemon restart`, `secret set
-// --sandbox`, `--static-mcp`, `--deny-network`, kit spec v2. On an older
-// runtime those surface one at a time as opaque "unknown flag" failures spread
-// across unrelated features, so say it once, up front, and point at the fix.
+// den 0.11.0 speaks the sbx v0.42 CLI dialect only — cloud sandboxes, kit
+// `args:`/`--kit-arg`, workspace-optional `create`, on top of everything v0.38
+// through v0.41 already required. On an older runtime those surface one at a
+// time as opaque "unknown flag" failures spread across unrelated features, so
+// say it once, up front, and point at the fix.
 //
 // Deliberately silent until the version is actually known: the probe needs the
 // daemon, and a runtime that's merely still starting shouldn't be accused of
@@ -25,7 +26,7 @@ export function OutdatedRuntimeBanner() {
   const [staleMain, setStaleMain] = useState(false)
   useEffect(() => {
     let cancelled = false
-    void window.minipit?.mainBuildId?.()
+    void window.den?.mainBuildId?.()
       .then((id) => { if (!cancelled && id && id !== __BUILD_ID__) setStaleMain(true) })
       .catch(() => {})
     return () => { cancelled = true }
@@ -34,7 +35,7 @@ export function OutdatedRuntimeBanner() {
   useEffect(() => {
     let cancelled = false
     const check = () => {
-      void window.minipit?.sbxVersionCheck?.()
+      void window.den?.sbxVersionCheck?.()
         .then((r) => { if (!cancelled && r?.known) setInfo(r) })
         .catch(() => {})
     }

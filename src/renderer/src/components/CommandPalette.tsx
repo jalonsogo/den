@@ -46,10 +46,10 @@ function score(query: string, text: string): number {
 function sandboxActions(id: string, name: string, running: boolean) {
   const s = useStore.getState()
   return {
-    start: () => { s.updateSandbox(id, { status: 'starting' }); window.minipit?.runSandbox(name).then(() => s.updateSandbox(id, { status: 'running' })).catch(() => s.updateSandbox(id, { status: 'stopped' })) },
-    stop: () => { s.updateSandbox(id, { status: 'stopping' }); window.minipit?.stopSandbox(name).then(() => s.updateSandbox(id, { status: 'stopped', uptimeSeconds: undefined })).catch(() => s.updateSandbox(id, { status: 'running' })) },
-    restart: async () => { s.updateSandbox(id, { status: 'stopping' }); try { await window.minipit?.stopSandbox(name); await window.minipit?.runSandbox(name); s.updateSandbox(id, { status: 'running' }) } catch { s.updateSandbox(id, { status: 'running' }) } },
-    del: () => { if (confirm(`Delete sandbox "${name}"? This can't be undone.`)) { s.updateSandbox(id, { status: 'deleting' }); window.minipit?.deleteSandbox(name).catch(() => {}) } },
+    start: () => { s.updateSandbox(id, { status: 'starting' }); window.den?.runSandbox(name).then(() => s.updateSandbox(id, { status: 'running' })).catch(() => s.updateSandbox(id, { status: 'stopped' })) },
+    stop: () => { s.updateSandbox(id, { status: 'stopping' }); window.den?.stopSandbox(name).then(() => s.updateSandbox(id, { status: 'stopped', uptimeSeconds: undefined })).catch(() => s.updateSandbox(id, { status: 'running' })) },
+    restart: async () => { s.updateSandbox(id, { status: 'stopping' }); try { await window.den?.stopSandbox(name); await window.den?.runSandbox(name); s.updateSandbox(id, { status: 'running' }) } catch { s.updateSandbox(id, { status: 'running' }) } },
+    del: () => { if (confirm(`Delete sandbox "${name}"? This can't be undone.`)) { s.updateSandbox(id, { status: 'deleting' }); window.den?.deleteSandbox(name).catch(() => {}) } },
     logs: () => { s.setLogsSandbox(name); s.setLogsReturn(id); s.setActivePage('logs') },
     running
   }
@@ -71,7 +71,7 @@ export function CommandPalette() {
     if (!paletteOpen) return
     setQuery('')
     setSelected(0)
-    window.minipit?.listKits().then((k) => setKits(k ?? [])).catch(() => setKits([]))
+    window.den?.listKits().then((k) => setKits(k ?? [])).catch(() => setKits([]))
     // Focus after paint so the input is ready to receive keystrokes.
     const t = setTimeout(() => inputRef.current?.focus(), 0)
     return () => clearTimeout(t)

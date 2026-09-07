@@ -125,7 +125,7 @@ export function LogsPanel() {
 
   // Discover available host log files.
   useEffect(() => {
-    window.minipit?.listLogs().then((l) => {
+    window.den?.listLogs().then((l) => {
       setLogs(l ?? [])
       if (l && l.length) {
         const preferred = l.find((x) => x.name === 'daemon.log') ?? l[0]
@@ -138,16 +138,16 @@ export function LogsPanel() {
   useEffect(() => {
     if (!source || inSandbox) return
     setText('')
-    const unsub = window.minipit?.onLogTail((chunk) => {
+    const unsub = window.den?.onLogTail((chunk) => {
       setText((t) => {
         const next = t + chunk
         return next.length > CAP ? next.slice(-CAP) : next
       })
     })
-    window.minipit?.startLogTail(source)
+    window.den?.startLogTail(source)
     return () => {
       unsub?.()
-      window.minipit?.stopLogTail()
+      window.den?.stopLogTail()
     }
   }, [source, inSandbox])
 
@@ -161,7 +161,7 @@ export function LogsPanel() {
     const label = isKit ? 'kit startup' : 'sandbox'
     let alive = true
     const fetchOnce = () => {
-      const p = window.minipit?.sandboxLog?.(sbxTarget, kind)
+      const p = window.den?.sandboxLog?.(sbxTarget, kind)
       if (!p) { if (alive) setLoadError('The log reader isn’t available yet — fully restart the app to load the latest update, then retry.'); return }
       p.then((r) => {
         if (!alive) return
@@ -252,7 +252,7 @@ export function LogsPanel() {
         <div style={{ flex: 1 }} />
         <button className="btn btn-ghost btn-sm" onClick={() => setText('')}>Clear</button>
         {!inSandbox && (
-          <button className="btn btn-ghost btn-sm" onClick={() => source && window.minipit?.openInFinder(source)}>Reveal</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => source && window.den?.openInFinder(source)}>Reveal</button>
         )}
       </div>
       <div className="logs-body" ref={bodyRef} onWheel={() => setFollow(false)} style={{ background: bg }}>

@@ -38,7 +38,7 @@ export function TemplatesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setTemplates((await window.minipit?.listTemplates()) ?? [])
+      setTemplates((await window.den?.listTemplates()) ?? [])
     } catch {
       setTemplates([])
     } finally {
@@ -89,7 +89,7 @@ export function TemplatesPage() {
       placeholder: 'docker.io/user/name:tag',
       confirmText: 'Push',
       onSubmit: async (ref) => {
-        const res = await window.minipit?.templatePush(ref)
+        const res = await window.den?.templatePush(ref)
         if (!res?.ok) throw new Error(res?.error ?? 'Push failed')
       },
     })
@@ -98,7 +98,7 @@ export function TemplatesPage() {
   const remove = async (t: Template) => {
     setMoreFor(null)
     if (!confirm(`Delete template ${t.tag} (${t.id})?`)) return
-    await window.minipit?.removeTemplate(t.id).catch((e) => console.error(e))
+    await window.den?.removeTemplate(t.id).catch((e) => console.error(e))
     load()
   }
 

@@ -3,7 +3,7 @@
 // Three distinct failures used to be hard to tell apart, and the two that need a
 // restart are exactly the two that look like a bug in the feature:
 //
-//   • the preload bundle predates the API — `window.minipit.foo` is undefined, so
+//   • the preload bundle predates the API — `window.den.foo` is undefined, so
 //     calling it throws "…foo is not a function". Preload is only evaluated when
 //     the window is created, so reloading the renderer does NOT pick up a new one;
 //     only relaunching the app does. (This is the one you hit after an update or a

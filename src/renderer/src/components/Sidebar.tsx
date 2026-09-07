@@ -4,7 +4,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   Plus, ListFilter, X, MoreVertical, ChevronRight, ChevronDown, FolderPlus,
   FolderGit2, LayoutGrid, Layers, Package, Settings, Search, GitBranch,
-  ArrowUp, ArrowDown, Plug, FileCode2 } from 'lucide-react'
+  ArrowUp, ArrowDown, Plug, FileCode2, CircleDot, Cloud } from 'lucide-react'
 import { useStore, unackedBlockCount } from '../store'
 import { SandboxAvatar } from './SandboxAvatar'
 import { formatUptime } from '../lib/utils'
@@ -105,6 +105,7 @@ function SandboxItem({ sandbox, active, collapsed, onReorder, nextName, groupKey
         >
           <div className="sb-item-pop-hd">
             <span className="sb-item-pop-name">{sandbox.name}</span>
+            {sandbox.location === 'cloud' && <span title="Cloud sandbox"><Cloud size={12} /></span>}
             <span className="sb-item-pop-status" data-on={isRunning}>{statusLabel}</span>
           </div>
           <div className="sb-item-pop-sep" />
@@ -124,7 +125,12 @@ function SandboxItem({ sandbox, active, collapsed, onReorder, nextName, groupKey
       {!collapsed && (
         <>
           <div className="sb-item-body">
-            <div className="sb-item-name">{sandbox.name}</div>
+            <div className="sb-item-name">
+              {sandbox.name}
+              {sandbox.location === 'cloud' && (
+                <span className="sb-item-cloud" title="Cloud sandbox"><Cloud size={11} /></span>
+              )}
+            </div>
             {showSub && (
               <div className={`sb-item-sub${isRunning && activity === 'working' ? ' is-working' : ''}`}>
                 {isCreating
@@ -178,7 +184,7 @@ export function Sidebar() {
   // Drag-to-resize the sidebar width (expanded only), persisted.
   const asideRef = useRef<HTMLElement>(null)
   const [sbWidth, setSbWidth] = useState(() => {
-    const v = Number(localStorage.getItem('minipit:sidebarWidth'))
+    const v = Number(localStorage.getItem('den:sidebarWidth'))
     return v >= 180 && v <= 480 ? v : 216
   })
   const startResize = (e: React.MouseEvent) => {
@@ -194,7 +200,7 @@ export function Sidebar() {
     const onUp = () => {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      localStorage.setItem('minipit:sidebarWidth', String(Math.round(latest)))
+      localStorage.setItem('den:sidebarWidth', String(Math.round(latest)))
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -204,50 +210,57 @@ export function Sidebar() {
   const [filter, setFilter] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   // Whether to show group sections (vs one flat list). Default on.
-  const [showGroups, setShowGroups] = useState<boolean>(() => localStorage.getItem('minipit:showGroups') !== '0')
+  const [showGroups, setShowGroups] = useState<boolean>(() => localStorage.getItem('den:showGroups') !== '0')
   const toggleShowGroups = () =>
-    setShowGroups((v) => { const n = !v; localStorage.setItem('minipit:showGroups', n ? '1' : '0'); return n })
+    setShowGroups((v) => { const n = !v; localStorage.setItem('den:showGroups', n ? '1' : '0'); return n })
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'stopped'>(
-    () => (localStorage.getItem('minipit:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
+    () => (localStorage.getItem('den:sbxStatus') as 'all' | 'active' | 'stopped') ?? 'all'
+  )
+  const [locationFilter, setLocationFilter] = useState<'all' | 'local' | 'cloud'>(
+    () => (localStorage.getItem('den:sbxLocation') as 'all' | 'local' | 'cloud') ?? 'all'
   )
   // Selected agents to filter by; empty = all agents.
   const [agentFilter, setAgentFilter] = useState<AgentType[]>(() => {
-    try { return JSON.parse(localStorage.getItem('minipit:sbxAgents') ?? '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem('den:sbxAgents') ?? '[]') } catch { return [] }
   })
   // Sort order for the sandbox list. 'manual' uses the user's drag arrangement.
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'manual'>(() => {
-    const v = localStorage.getItem('minipit:sbxSortBy')
+    const v = localStorage.getItem('den:sbxSortBy')
     return v === 'name' || v === 'status' ? v : 'manual'
   })
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
-    () => (localStorage.getItem('minipit:sbxSortDir') as 'asc' | 'desc') ?? 'asc'
+    () => (localStorage.getItem('den:sbxSortDir') as 'asc' | 'desc') ?? 'asc'
   )
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   // Fixed-position coords for the dropdown so it escapes the sidebar's overflow.
   const [filterPos, setFilterPos] = useState<{ top: number; left: number } | null>(null)
   const filterRef = useRef<HTMLDivElement>(null)
-  const [libOpen, setLibOpen] = useState(() => localStorage.getItem('minipit:libraryOpen') === '1')
-  const [sbxOpen, setSbxOpen] = useState(() => localStorage.getItem('minipit:sandboxesOpen') !== '0')
+  const [libOpen, setLibOpen] = useState(() => localStorage.getItem('den:libraryOpen') === '1')
+  const [sbxOpen, setSbxOpen] = useState(() => localStorage.getItem('den:sandboxesOpen') !== '0')
   const toggleLib = () =>
-    setLibOpen((o) => { const n = !o; localStorage.setItem('minipit:libraryOpen', n ? '1' : '0'); return n })
+    setLibOpen((o) => { const n = !o; localStorage.setItem('den:libraryOpen', n ? '1' : '0'); return n })
   const toggleSbx = () =>
-    setSbxOpen((o) => { const n = !o; localStorage.setItem('minipit:sandboxesOpen', n ? '1' : '0'); return n })
+    setSbxOpen((o) => { const n = !o; localStorage.setItem('den:sandboxesOpen', n ? '1' : '0'); return n })
 
   const setAgents = (a: AgentType[]) => {
     setAgentFilter(a)
-    localStorage.setItem('minipit:sbxAgents', JSON.stringify(a))
+    localStorage.setItem('den:sbxAgents', JSON.stringify(a))
   }
   const toggleAgent = (id: AgentType) =>
     setAgents(agentFilter.includes(id) ? agentFilter.filter((x) => x !== id) : [...agentFilter, id])
   const setStatus = (s: 'all' | 'active' | 'stopped') => {
     setStatusFilter(s)
-    localStorage.setItem('minipit:sbxStatus', s)
+    localStorage.setItem('den:sbxStatus', s)
+  }
+  const setLocation = (l: 'all' | 'local' | 'cloud') => {
+    setLocationFilter(l)
+    localStorage.setItem('den:sbxLocation', l)
   }
   // Order-by: clicking Manual selects it; clicking Name/Status cycles asc → desc
   // → back to Manual (the default arrangement).
   const applySort = (by: 'name' | 'status' | 'manual', dir: 'asc' | 'desc') => {
-    setSortBy(by); localStorage.setItem('minipit:sbxSortBy', by)
-    setSortDir(dir); localStorage.setItem('minipit:sbxSortDir', dir)
+    setSortBy(by); localStorage.setItem('den:sbxSortBy', by)
+    setSortDir(dir); localStorage.setItem('den:sbxSortDir', dir)
   }
   const setSort = (field: 'name' | 'status' | 'manual') => {
     if (field === 'manual') return applySort('manual', 'asc')
@@ -255,11 +268,14 @@ export function Sidebar() {
     applySort(field, 'asc')
   }
   const clearFilters = () => {
-    setFilter(''); setAgents([]); setStatus('all'); setAgentMenuOpen(false)
+    setFilter(''); setAgents([]); setStatus('all'); setLocation('all'); setAgentMenuOpen(false)
     if (!showGroups) toggleShowGroups()
     applySort('manual', 'asc')
   }
-  const hasFilter = !!filter || !showGroups || agentFilter.length > 0 || statusFilter !== 'all' || sortBy !== 'manual'
+  const hasFilter = !!filter || !showGroups || agentFilter.length > 0 || statusFilter !== 'all' ||
+    locationFilter !== 'all' || sortBy !== 'manual'
+  const runningCount = sandboxes.filter((s) => s.status === 'running').length
+  const hasCloudSandboxes = sandboxes.some((s) => s.location === 'cloud')
 
   // Agents that actually appear in the current sandboxes — the only ones worth
   // offering as a filter.
@@ -274,6 +290,7 @@ export function Sidebar() {
   const q = filter.trim().toLowerCase()
   const filtered = sandboxes.filter((s) =>
     (statusFilter === 'all' || (statusFilter === 'active' ? s.status === 'running' : s.status !== 'running')) &&
+    (locationFilter === 'all' || s.location === locationFilter) &&
     (agentFilter.length === 0 || agentFilter.includes(s.agent)) &&
     (!q ||
       s.name.toLowerCase().includes(q) ||
@@ -404,6 +421,22 @@ export function Sidebar() {
               >
                 Sandboxes
               </button>
+              {/* Active-only toggle. Flipping this pair was three interactions
+                  through the filter popover (open, pick, dismiss) and it's the
+                  switch used most, so it gets a button of its own. It drives the
+                  same statusFilter the popover writes, so the two never
+                  disagree — and 'stopped' resolves to 'active', since that's
+                  what someone reaching for this button is asking for. */}
+              <button
+                className={`sb-add sb-only-active${statusFilter === 'active' ? ' on' : ''}`}
+                aria-pressed={statusFilter === 'active'}
+                onClick={() => setStatus(statusFilter === 'active' ? 'all' : 'active')}
+                title={statusFilter === 'active'
+                  ? `Showing ${runningCount} active — click to show all ${sandboxes.length}`
+                  : `Show only active (${runningCount} of ${sandboxes.length})`}
+              >
+                <CircleDot size={14} />
+              </button>
               <div className="sb-filter-wrap" ref={filterRef}>
                 <button
                   className={`sb-add${hasFilter ? ' has-filter' : ''}`}
@@ -450,6 +483,23 @@ export function Sidebar() {
                         ))}
                       </div>
                     </div>
+
+                    {hasCloudSandboxes && (
+                      <div className="sb-filter-grp">
+                        <span className="sb-filter-lbl">Location</span>
+                        <div className="sb-filter-seg">
+                          {(['all', 'local', 'cloud'] as const).map((l) => (
+                            <button
+                              key={l}
+                              className={`sb-filter-seg-btn${locationFilter === l ? ' active' : ''}`}
+                              onClick={() => setLocation(l)}
+                            >
+                              {l === 'all' ? 'All' : l === 'local' ? 'Local' : 'Cloud'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="sb-filter-grp">
                       <span className="sb-filter-lbl">Groups</span>

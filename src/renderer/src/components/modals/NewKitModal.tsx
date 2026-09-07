@@ -16,7 +16,8 @@ const CAPS: { key: Cap; label: string }[] = [
   { key: 'env',     label: 'Environment' },
   { key: 'cred',    label: 'Credential' },
   { key: 'network', label: 'Requirements' },
-  { key: 'memory',  label: 'Agent instructions' }
+  { key: 'memory',  label: 'Agent instructions' },
+  { key: 'args',    label: 'Arguments' }
 ]
 
 // Base for a sandbox kit — start from a default agent (image + entrypoint are
@@ -27,6 +28,7 @@ const AGENT_BASES: Record<string, { image: string; entrypoint: string }> = {
   codex:            { image: 'docker/sandbox-templates:codex-docker', entrypoint: 'codex' },
   copilot:          { image: 'docker/sandbox-templates:copilot-docker', entrypoint: 'copilot' },
   cursor:           { image: 'docker/sandbox-templates:cursor-docker', entrypoint: 'cursor-agent' },
+  devin:            { image: 'docker/sandbox-templates:devin-docker', entrypoint: 'devin' },
   'docker-agent':   { image: 'docker/sandbox-templates:docker-agent', entrypoint: 'docker-agent' },
   droid:            { image: 'docker/sandbox-templates:droid-docker', entrypoint: 'droid' },
   gemini:           { image: 'docker/sandbox-templates:gemini-docker', entrypoint: 'gemini' },
@@ -133,8 +135,8 @@ export function NewKitModal() {
     if (!editKit) return
     let cancelled = false
     Promise.all([
-      window.minipit?.readKit(editKit.dir) ?? Promise.resolve(''),
-      window.minipit?.listKitFiles(editKit.dir).catch(() => []) ?? Promise.resolve([])
+      window.den?.readKit(editKit.dir) ?? Promise.resolve(''),
+      window.den?.listKitFiles(editKit.dir).catch(() => []) ?? Promise.resolve([])
     ]).then(([raw, packed]) => {
       if (cancelled || !raw) return
       const { form, caps: c } = specToForm(raw)
@@ -172,6 +174,7 @@ export function NewKitModal() {
     if (key === 'cred') set('creds', [])
     if (key === 'network') setF((p) => ({ ...p, allowedDomains: [], deniedDomains: [] }))
     if (key === 'memory') setF((p) => ({ ...p, agentContext: '', aiFilename: '' }))
+    if (key === 'args') set('args', [])
   }
   const toggleMcp = (id: string) =>
     setF((p) => ({ ...p, mcps: p.mcps.includes(id) ? p.mcps.filter((m) => m !== id) : [...p.mcps, id] }))
@@ -188,7 +191,7 @@ export function NewKitModal() {
   const removeCred = (i: number) => setF((p) => ({ ...p, creds: p.creds.filter((_, j) => j !== i) }))
 
   const attach = async () => {
-    const picked = await window.minipit?.pickFiles().catch(() => [])
+    const picked = await window.den?.pickFiles().catch(() => [])
     if (!picked?.length) return
     setF((p) => ({
       ...p,
@@ -209,7 +212,7 @@ export function NewKitModal() {
   const removeFile = async (i: number) => {
     const row = f.files[i]
     if (row.packed && editKit) {
-      const res = await window.minipit?.removeKitFile(editKit.dir, row.target, row.dest)
+      const res = await window.den?.removeKitFile(editKit.dir, row.target, row.dest)
       if (res && !res.ok) { setError(res.error || 'Failed to remove the file'); return }
     }
     setF((p) => ({ ...p, files: p.files.filter((_, j) => j !== i) }))
@@ -223,7 +226,7 @@ export function NewKitModal() {
     if (!f.name.trim()) { setError('Name is required'); return }
     setSaving(true); setError(''); setDone('')
     try {
-      const res = await window.minipit?.createKit(f.name.trim(), buildSpec(f), newFiles())
+      const res = await window.den?.createKit(f.name.trim(), buildSpec(f), newFiles())
       setDone(res?.zip ? `Packed → ${res.zip}` : 'Kit created')
       setTimeout(() => close(), 1200)
     } catch (e) {
@@ -236,7 +239,7 @@ export function NewKitModal() {
   const handleSave = async () => {
     if (!editKit) return
     setSaving(true); setError(''); setDone('')
-    const res = await window.minipit?.updateKit(editKit.dir, buildSpec(f), newFiles())
+    const res = await window.den?.updateKit(editKit.dir, buildSpec(f), newFiles())
       .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
     if (res?.ok) {
       setDone('Saved & re-packed')
@@ -577,6 +580,58 @@ export function NewKitModal() {
                   {f.kind === 'mixin' && (
                     <div className="fhint">Mixin kits land in <code>kits-agent-context/{f.name || 'my-kit'}.md</code> next to the agent's profile.</div>
                   )}
+                </>
+              )}
+
+              {key === 'args' && (
+                <>
+                  <div className="cap-note">
+                    Named values filled in per sandbox in New Sandbox, passed as <code>--kit-arg name=value</code>. Needs sbx 0.42+ — hidden on an older runtime.
+                  </div>
+                  {f.args.map((a, i) => (
+                    <div className="kit-cred" key={i}>
+                      <div className="kit-cred-hd">
+                        <input
+                          className="finput kit-cred-name"
+                          value={a.name}
+                          placeholder="MODEL"
+                          onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                        />
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--t2)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!a.required}
+                            onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))}
+                          />
+                          Required
+                        </label>
+                        <button className="cap-rm" onClick={() => set('args', f.args.filter((_, j) => j !== i))} title="Remove"><X size={13} /></button>
+                      </div>
+                      <div className="frow-2" style={{ marginTop: 8 }}>
+                        <div className="fg" style={{ flex: 1 }}>
+                          <label className="flabel">Description</label>
+                          <input
+                            className="finput"
+                            value={a.description ?? ''}
+                            placeholder="Which model to run"
+                            onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))}
+                          />
+                        </div>
+                        <div className="fg" style={{ flex: 1 }}>
+                          <label className="flabel">Default</label>
+                          <input
+                            className="finput"
+                            value={a.default ?? ''}
+                            placeholder="sonnet"
+                            onChange={(e) => set('args', f.args.map((x, j) => (j === i ? { ...x, default: e.target.value } : x)))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button className="kit-add-line" onClick={() => set('args', [...f.args, { name: '' }])}>
+                    <Plus size={12} /> Add argument
+                  </button>
                 </>
               )}
             </div>

@@ -4,10 +4,10 @@
 //
 // Kept out of the modal so both directions can be exercised without React.
 import { MCP_CATALOG, mcpHost } from './mcpCatalog'
-import { parseKitSpec, type KitInitFile } from './kitSpec'
+import { parseKitSpec, type KitInitFile, type KitArgDef } from './kitSpec'
 
 // One block per kit-spec capability, in the order they render.
-export type Cap = 'mcp' | 'setup' | 'files' | 'env' | 'cred' | 'network' | 'memory'
+export type Cap = 'mcp' | 'setup' | 'files' | 'env' | 'cred' | 'network' | 'memory' | 'args'
 
 // A command plus the two spec fields that decide how it runs: `user: "1000"`
 // (the agent, uid 1000) vs root, and `background: true` for daemons.
@@ -53,6 +53,9 @@ export interface KitForm {
   // setup.files — files written at startup with runtime values. Authored in
   // the spec, not in the editor; carried so saving doesn't drop them.
   initFiles: KitInitFile[]
+  // sbx >= 0.42: named arguments a sandbox creator fills in, passed as
+  // `--kit-arg name=value`. Authored here like envVars/allowedDomains.
+  args: KitArgDef[]
 }
 
 export const EMPTY_KIT: KitForm = {
@@ -60,7 +63,7 @@ export const EMPTY_KIT: KitForm = {
   image: '', entrypoint: '', aiFilename: '',
   mcps: [], customMcps: [], installCmds: [], startupCmds: [],
   allowedDomains: [], deniedDomains: [], envVars: [], creds: [],
-  agentContext: '', files: [], initFiles: []
+  agentContext: '', files: [], initFiles: [], args: []
 }
 
 // `claude mcp add` must run at STARTUP (after the sandbox seeds the agent's
@@ -217,6 +220,19 @@ export function buildSpec(f: KitForm): string {
       f.agentContext.trim().split('\n').forEach((l) => lines.push(`    ${l}`))
     }
   }
+
+  // Root-level regardless of schemaVersion (sbx v0.42+) — a value someone fills
+  // in per sandbox at creation time, not a fixed kit-authored envVar.
+  const args = f.args.map((a) => ({ ...a, name: a.name.trim() })).filter((a) => a.name)
+  if (args.length) {
+    lines.push('args:')
+    args.forEach((a) => {
+      lines.push(`  - name: ${a.name}`)
+      if (a.description?.trim()) lines.push(`    description: ${q(a.description.trim())}`)
+      if (a.default?.trim()) lines.push(`    default: ${q(a.default.trim())}`)
+      if (a.required) lines.push('    required: true')
+    })
+  }
   return lines.join('\n') + '\n'
 }
 
@@ -251,7 +267,8 @@ export function specToForm(raw: string): { form: KitForm; caps: Cap[] } {
     mcps, customMcps, installCmds, startupCmds,
     allowedDomains: [], deniedDomains: p.deniedDomains,
     envVars: p.envVars.map((e) => { const i = e.indexOf('='); return { key: e.slice(0, i), value: e.slice(i + 1) } }),
-    creds, agentContext: p.agentContext, files: [], initFiles: p.initFiles
+    creds, agentContext: p.agentContext, files: [], initFiles: p.initFiles,
+    args: p.args
   }
   // Hand-typed allow rules are the ones buildSpec wouldn't have derived from the
   // MCPs and credentials — otherwise they'd double up as manual entries.
@@ -265,5 +282,6 @@ export function specToForm(raw: string): { form: KitForm; caps: Cap[] } {
   if (creds.length) caps.push('cred')
   if (form.allowedDomains.length || p.deniedDomains.length) caps.push('network')
   if (form.agentContext.trim() || form.aiFilename.trim()) caps.push('memory')
+  if (form.args.length) caps.push('args')
   return { form, caps }
 }

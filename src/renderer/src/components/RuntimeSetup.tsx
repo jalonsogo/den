@@ -11,7 +11,7 @@ import { Download, FolderOpen, HardDrive, ShieldCheck, Zap, AlertTriangle } from
 // Shown only when there is no explicit choice AND no managed runtime installed.
 // Once either option is taken the answer is persisted and this never returns.
 
-type Setup = Awaited<ReturnType<NonNullable<typeof window.minipit>['runtimeSetupState']>>
+type Setup = Awaited<ReturnType<NonNullable<typeof window.den>['runtimeSetupState']>>
 
 export function RuntimeSetup({ onDone }: { onDone: () => void }) {
   const [setup, setSetup] = useState<Setup | null>(null)
@@ -20,14 +20,14 @@ export function RuntimeSetup({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    void window.minipit?.runtimeSetupState?.().then(setSetup).catch(() => {})
-    const off = window.minipit?.onRuntimeProgress?.(setProg)
+    void window.den?.runtimeSetupState?.().then(setSetup).catch(() => {})
+    const off = window.den?.onRuntimeProgress?.(setProg)
     return () => { off?.() }
   }, [])
 
   const useManaged = async () => {
     setBusy('managed'); setError(''); setProg(null)
-    const r = await window.minipit?.runtimeInstall()
+    const r = await window.den?.runtimeInstall()
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setBusy(null); setProg(null)
     if (r?.ok) onDone()
@@ -40,14 +40,14 @@ export function RuntimeSetup({ onDone }: { onDone: () => void }) {
     // picker verifies the file answers `sbx version` before storing it, so a
     // wrong choice fails here instead of as ENOENTs all over the app.
     if (!setup?.systemPath) {
-      const picked = await window.minipit?.pickSbxBinary?.().catch(() => null)
+      const picked = await window.den?.pickSbxBinary?.().catch(() => null)
       if (!picked?.ok) {
         setBusy(null)
         if (picked?.error) setError(picked.error)
         return
       }
     }
-    const r = await window.minipit?.runtimeSetSource('system').catch(() => null)
+    const r = await window.den?.runtimeSetSource('system').catch(() => null)
     setBusy(null)
     if (r?.ok) onDone()
     else setError('Could not switch to your own install.')

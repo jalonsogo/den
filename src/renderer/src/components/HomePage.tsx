@@ -52,12 +52,12 @@ export function HomePage() {
   // ── Always-visible filter bar (mirrors the sidebar's filter popover) ──
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'stopped'>(
-    () => (localStorage.getItem('minipit:homeStatus') as 'all' | 'active' | 'stopped') ?? 'all')
+    () => (localStorage.getItem('den:homeStatus') as 'all' | 'active' | 'stopped') ?? 'all')
   const [sortBy, setSortBy] = useState<'status' | 'name'>(
-    () => (localStorage.getItem('minipit:homeSort') as 'status' | 'name') ?? 'status')
-  const [showGroups, setShowGroups] = useState<boolean>(() => localStorage.getItem('minipit:homeGroups') !== '0')
+    () => (localStorage.getItem('den:homeSort') as 'status' | 'name') ?? 'status')
+  const [showGroups, setShowGroups] = useState<boolean>(() => localStorage.getItem('den:homeGroups') !== '0')
   const [agentFilter, setAgentFilter] = useState<AgentType[]>(() => {
-    try { return JSON.parse(localStorage.getItem('minipit:homeAgents') || '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem('den:homeAgents') || '[]') } catch { return [] }
   })
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const agentMenuRef = useRef<HTMLDivElement>(null)
@@ -68,15 +68,15 @@ export function HomePage() {
     return () => document.removeEventListener('mousedown', onDown)
   }, [agentMenuOpen])
 
-  const setStatus = (s: 'all' | 'active' | 'stopped') => { setStatusFilter(s); localStorage.setItem('minipit:homeStatus', s) }
-  const setSort = (s: 'status' | 'name') => { setSortBy(s); localStorage.setItem('minipit:homeSort', s) }
-  const setGroups = (v: boolean) => { setShowGroups(v); localStorage.setItem('minipit:homeGroups', v ? '1' : '0') }
+  const setStatus = (s: 'all' | 'active' | 'stopped') => { setStatusFilter(s); localStorage.setItem('den:homeStatus', s) }
+  const setSort = (s: 'status' | 'name') => { setSortBy(s); localStorage.setItem('den:homeSort', s) }
+  const setGroups = (v: boolean) => { setShowGroups(v); localStorage.setItem('den:homeGroups', v ? '1' : '0') }
   const toggleAgent = (id: AgentType) => setAgentFilter((prev) => {
     const n = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    localStorage.setItem('minipit:homeAgents', JSON.stringify(n))
+    localStorage.setItem('den:homeAgents', JSON.stringify(n))
     return n
   })
-  const clearFilters = () => { setQuery(''); setStatus('all'); setSort('status'); setGroups(true); setAgentFilter([]); localStorage.setItem('minipit:homeAgents', '[]') }
+  const clearFilters = () => { setQuery(''); setStatus('all'); setSort('status'); setGroups(true); setAgentFilter([]); localStorage.setItem('den:homeAgents', '[]') }
   const hasFilter = !!query || statusFilter !== 'all' || sortBy !== 'status' || !showGroups || agentFilter.length > 0
 
   // Agents that actually exist across the sandboxes → the only ones worth offering.
@@ -127,13 +127,20 @@ export function HomePage() {
   const [release, setRelease] = useState<SbxRelease | null>(null)
   const [storage, setStorage] = useState<StorageUsage | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(
-    () => localStorage.getItem('minipit:updateDismissed')
+    () => localStorage.getItem('den:updateDismissed')
   )
+  // Below MIN_SBX_VERSION already gets the app-wide OutdatedRuntimeBanner
+  // ("needs sbx X or newer... will misbehave until updated") — a stronger,
+  // accurate message. Showing this page's own soft "update available" bar
+  // too would say the same thing twice in two different registers (one
+  // optional-sounding, one urgent) for the exact same runtime.
+  const [outdated, setOutdated] = useState(false)
 
   useEffect(() => {
-    window.minipit?.sbxVersion().then((r) => setVersion(r?.ok ? (r.version ?? null) : null)).catch(() => {})
-    window.minipit?.sbxReleases().then((r) => setRelease(r?.find((rel) => !rel.prerelease) ?? r?.[0] ?? null)).catch(() => {})
-    window.minipit?.storageUsage().then((r) => setStorage(r ?? null)).catch(() => {})
+    window.den?.sbxVersion().then((r) => setVersion(r?.ok ? (r.version ?? null) : null)).catch(() => {})
+    window.den?.sbxReleases().then((r) => setRelease(r?.find((rel) => !rel.prerelease) ?? r?.[0] ?? null)).catch(() => {})
+    window.den?.storageUsage().then((r) => setStorage(r ?? null)).catch(() => {})
+    window.den?.sbxVersionCheck?.().then((r) => setOutdated(!!r?.outdated)).catch(() => {})
   }, [])
 
   // Total disk across sandboxes + templates; null when this sbx build reports no sizes.
@@ -151,11 +158,11 @@ export function HomePage() {
 
   const latest = release?.version ?? null
   const updateAvailable = isOlder(baseSemver(version), baseSemver(latest))
-  const showUpdateBar = updateAvailable && dismissed !== latest
+  const showUpdateBar = updateAvailable && dismissed !== latest && !outdated
 
   const dismissUpdate = () => {
     if (!latest) return
-    localStorage.setItem('minipit:updateDismissed', latest)
+    localStorage.setItem('den:updateDismissed', latest)
     setDismissed(latest)
   }
 

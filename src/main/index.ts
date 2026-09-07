@@ -24,7 +24,7 @@ import {
   traceFile, traceDir, traceCount, type ApiErrorTrace
 } from './apiTrace'
 import Store from 'electron-store'
-import { parsePorcelain, semverLt, type FileChange } from './parse'
+import { parsePorcelain, semverLt, type FileChange, parseMcpTable, type McpServerEntry } from './parse'
 // node-pty 1.x compiles to CJS with `__esModule: true` but no `default` export,
 // so a default import resolves to `undefined` under esbuild's interop (crashing
 // `pty.spawn`). Import the namespace instead.
@@ -52,6 +52,18 @@ const uptimeMap = new Map<string, number>()
 // Sandbox name → agent id, refreshed from every `sbx ls`. Read by API-failure
 // traces, which run off the PTY and have no sandbox record to hand.
 const sandboxAgents = new Map<string, string>()
+// Sandbox name → which listing reported it, refreshed from every `sbx ls`
+// (local + `sbx --cloud ls`, merged in listSandboxes()). Lets IPC handlers
+// that only take a name (stop/rm/ports/exec/...) dispatch to the right sbx
+// API without every renderer call site having to plumb location through —
+// same shape as sandboxAgents above, and for the same reason: sbx itself
+// gives no "what is this sandbox" query, so den remembers the answer to the
+// question it already has to ask (`sbx ls`) and never asked the caller.
+const sandboxLocations = new Map<string, 'local' | 'cloud'>()
+/** `['--cloud']` for a sandbox last seen on the cloud listing, else `[]`. */
+function cloudArgsFor(name?: string): string[] {
+  return name && sandboxLocations.get(name) === 'cloud' ? ['--cloud'] : []
+}
 // Sandboxes created in this app instance that have not yet had an agent session
 // started. A brand-new sandbox has no conversation to resume, so its first
 // `agent-ensure` must start fresh rather than pass `--continue` (which would
@@ -202,7 +214,7 @@ async function hubGet<T>(path: string, bearer: string): Promise<T | null> {
   } catch { return null }
 }
 
-// Cached result of `minipit:docker-account`. Every keychain read via
+// Cached result of `den:docker-account`. Every keychain read via
 // `security` can pop a macOS password prompt (one per entry, and again
 // whenever sbx rewrites the entries on token refresh), and several components
 // ask for the account — so resolve it once, share concurrent callers on one
@@ -373,6 +385,26 @@ async function fetchKitArtifact(slug: string): Promise<{ annotations: Record<str
   return { annotations, spec }
 }
 
+// Best-effort recovery for `den:kit-import`: some v2 kits keep spec.yaml only
+// in the manifest's config blob, never inside a layer — either because the
+// layer is an empty placeholder (spec-only kits) or because it holds nothing
+// but bundled overlay files (image-based kits, e.g. openclaw/kiro/copilot).
+// Either way `sbx kit pull`'s zip/tar export can't produce spec.yaml, so read
+// it straight off the registry instead, via the same anonymous-pull path the
+// Hub browse tab already uses to preview these kits. Writes spec.yaml into
+// `dir` (creating it if needed) without touching any files already extracted
+// there, and reports whether it found one.
+async function tryFetchSpecFallback(ref: string, dir: string): Promise<boolean> {
+  if (!ref.startsWith('docker.io/')) return false
+  const slug = ref.split('@')[0].replace(/^docker\.io\//, '').split(':')[0]
+  const { spec } = await fetchKitArtifact(slug)
+  if (!spec) return false
+  const fs = require('fs')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(join(dir, 'spec.yaml'), spec)
+  return true
+}
+
 // Normalise a kit's kind to the two pages we render. sbx spells sandbox kits
 // "agent" on disk; the annotation uses "sandbox". Fall back to spec shape.
 function normalizeKitKind(rawKind: string, spec: string): 'sandbox' | 'mixin' {
@@ -474,16 +506,28 @@ function kitNameFrom(raw: string): string {
 // Validate an imported kit dir has a spec.yaml, pack it to a sibling .zip (so it
 // reads like any locally-authored kit), and refresh the app menu. Cleans up on
 // failure. Shared exit path for the folder/zip/git importers.
-async function finalizeImportedKit(name: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+async function finalizeImportedKit(name: string): Promise<{ ok: boolean; name?: string; error?: string; packError?: string }> {
   const fs = require('fs')
   const dir = join(kitsRoot(), name)
   if (!fs.existsSync(join(dir, 'spec.yaml'))) {
     fs.rmSync(dir, { recursive: true, force: true })
     return { ok: false, error: 'No spec.yaml found — not a valid kit.' }
   }
-  try { await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 }) } catch { /* leave unpacked; still usable */ }
+  // A failed pack doesn't fail the import: the kit still works for `kit add`,
+  // which takes a directory. But it can't be pushed, and it reports itself as
+  // "unpacked" in the library — so the reason travels back with the result
+  // instead of being dropped here. It used to be swallowed outright, which left
+  // that badge as the only evidence anything had gone wrong, with no way to
+  // find out what (the other two pack call sites, create-kit and update-kit,
+  // both surface theirs).
+  let packError: string | undefined
+  try {
+    await sbx(['kit', 'pack', dir, '-o', `${dir}.zip`], { timeout: 30000 })
+  } catch (e) {
+    packError = (e instanceof Error ? e.message : String(e)).trim()
+  }
   setAppMenu().catch(() => {})
-  return { ok: true, name }
+  return { ok: true, name, packError }
 }
 
 // Extract a kit archive (.zip or .tar.gz) into <kits>/<name>, flattening a
@@ -554,6 +598,8 @@ function openExternalSafe(url: string): void {
 
 // Kit artifacts live in the app's own data folder (not the user's home). On
 // first use we migrate any kits authored under the legacy ~/minipit-kits path.
+// That name is NOT a leftover from the den rename: it's a directory that exists
+// on users' disks, so it has to keep the old spelling to be found at all.
 let kitsRootCache = ''
 function kitsRoot(): string {
   if (kitsRootCache) return kitsRootCache
@@ -770,27 +816,6 @@ function parsePolicyLs(out: string) {
   return { governance, sync, rules }
 }
 
-// `raw` keeps stdout exactly as produced. The default trim is right for the
-// value-style callers (a version, a JSON blob), but it silently corrupts any
-// format where leading whitespace on the first line is significant — see
-// gitStatus, where a trimmed " M path" loses a character off the filename.
-// A registered MCP server as den shows it. Fields are best-effort: which of
-// url/command/transport/auth a given sbx build reports isn't pinned.
-interface McpServerEntry {
-  name: string
-  url: string
-  command: string
-  transport: string
-  auth: string
-}
-
-// Fallback for `sbx mcp ls` without --json: a column-aligned table. Take the
-// first field as the name and classify the rest by shape rather than by column
-// position, which has moved before in other sbx tables.
-// `sbx mcp ls` doesn't report whether a server is authorized — `sbx mcp auth
-// status` does. Ask it per server so an authorized server actually reads as
-// one; the list is short, and a server whose status can't be read keeps
-// whatever `ls` said rather than being mislabelled.
 // Pull an authorization state out of `sbx mcp inspect` output. Only a value
 // that actually names a state counts: v0.38 prints `OAuth: required`, which
 // says the server *needs* OAuth, not that you haven't done it — reading that as
@@ -813,6 +838,10 @@ function authFromInspect(raw: string): string {
   return ''
 }
 
+// `sbx mcp ls` doesn't report whether a server is authorized — `sbx mcp auth
+// status` does. Ask it per server so an authorized server actually reads as
+// one; the list is short, and a server whose status can't be read keeps
+// whatever `ls` said rather than being mislabelled.
 // sbx reports authorization differently across builds: `mcp ls` may carry a
 // column, `mcp auth status` may or may not exist, and `mcp inspect` always has
 // something. Try them in cost order and only give up at the end — reporting
@@ -849,35 +878,10 @@ async function withAuthState(servers: McpServerEntry[]): Promise<McpServerEntry[
   return Promise.all(servers.map(async (m) => (m.auth ? m : { ...m, auth: await probeAuth(m.name) })))
 }
 
-function parseMcpTable(out: string): McpServerEntry[] {
-  const rows: McpServerEntry[] = []
-  for (const line of out.split('\n')) {
-    const t = line.trim()
-    if (!t) continue
-    const cols = t.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
-    if (cols.length < 1) continue
-    // Skip the header row, whatever it's called.
-    if (/^(name|server)\b/i.test(cols[0])) continue
-    // Skip prose. With nothing registered sbx prints a sentence ("No MCP
-    // servers registered"), and add/auth emit INFO/ERROR lines; taking the
-    // first field of those produced a phantom server complete with action
-    // buttons. A real row is either multi-column or a bare identifier.
-    if (/^(no|none|error|info|warn|warning|usage|failed)\b/i.test(cols[0])) continue
-    if (cols.length === 1 && /\s/.test(cols[0])) continue
-    const rest = cols.slice(1)
-    rows.push({
-      name: cols[0],
-      url: rest.find((c) => /^https?:\/\//i.test(c)) ?? '',
-      command: rest.find((c) => !/^https?:\/\//i.test(c) && /\s|\//.test(c)) ?? '',
-      transport: rest.find((c) => /^(http|sse|stdio|local|remote)$/i.test(c)) ?? '',
-      // Widened past the obvious words: a column can just as well read "yes",
-      // "valid" or "active", and missing it shows an authorized server as blank.
-      auth: rest.find((c) => /^(yes|no|ok|valid|active|none|never)$/i.test(c) || /auth|token|expired|pending/i.test(c)) ?? ''
-    })
-  }
-  return rows
-}
-
+// `raw` keeps stdout exactly as produced. The default trim is right for the
+// value-style callers (a version, a JSON blob), but it silently corrupts any
+// format where leading whitespace on the first line is significant — see
+// gitStatus, where a trimmed " M path" loses a character off the filename.
 function sbx(args: string[], opts?: { timeout?: number; raw?: boolean }): Promise<string> {
   const timeout = opts?.timeout ?? 10000
   return new Promise((resolve, reject) => {
@@ -933,19 +937,40 @@ function pickField(p: RawPort, keys: string[]): unknown {
   return undefined
 }
 
-function normalizePorts(ports?: RawPort[]) {
+function normalizePorts(ports?: RawPort[], location: 'local' | 'cloud' = 'local') {
+  // Cloud ports have no host-side mapping — just a sandbox port and a public
+  // URL the control plane assigned it (per `ports --help`'s "cloud mode...
+  // only the sandbox port number is accepted... assigns a publicly reachable
+  // URL"). Field names for the URL aren't pinned down (no live cloud sandbox
+  // was available to confirm the exact JSON shape), so try several candidates
+  // the same tolerant way every other field here already does.
+  if (location === 'cloud') {
+    return (ports ?? [])
+      .map((p) => ({
+        container: toPortNum(pickField(p, ['sandbox_port', 'sandbox', 'container_port', 'container', 'target_port', 'port'])),
+        protocol: String(pickField(p, ['protocol', 'proto']) ?? 'tcp').toUpperCase(),
+        active: true,
+        location: 'cloud' as const,
+        url: String(pickField(p, ['url', 'public_url', 'publicurl', 'endpoint', 'address']) ?? '') || undefined
+      }))
+      .filter((p) => !Number.isNaN(p.container))
+  }
   const mapped = (ports ?? [])
     .map((p) => ({
       host: toPortNum(pickField(p, ['host_port', 'host', 'hostport', 'published_port', 'public_port'])),
       container: toPortNum(pickField(p, ['sandbox_port', 'sandbox', 'container_port', 'container', 'target_port', 'port'])),
       protocol: String(pickField(p, ['protocol', 'proto']) ?? 'tcp').toUpperCase(),
       hostIp: String(pickField(p, ['host_ip', 'hostip', 'ip', 'address']) ?? ''),
-      active: true
+      active: true,
+      location: 'local' as const
     }))
     .filter((p) => !Number.isNaN(p.host) && !Number.isNaN(p.container))
-  // A single published port is reported once per host binding address (IPv4
-  // 127.0.0.1 and IPv6 ::1), which we don't surface — collapse to one row per
-  // host:container/protocol so the panel doesn't show every port twice.
+  // Below sbx v0.42, a single published port was reported once per host
+  // binding address (IPv4 127.0.0.1 and IPv6 ::1), which we don't surface —
+  // collapse to one row per host:container/protocol so the panel doesn't show
+  // every port twice. sbx 0.42+ defaults to tcp4-only, so a current runtime
+  // only ever reports one row per mapping and this is a no-op — kept for
+  // sandboxes still running an older sbx.
   const seen = new Set<string>()
   return mapped.filter((p) => {
     const key = `${p.host}:${p.container}/${p.protocol}`
@@ -977,10 +1002,11 @@ function extractPortArray(data: unknown, name: string): RawPort[] {
   return []
 }
 
-function normalizeSandbox(raw: SbxSandbox) {
+function normalizeSandbox(raw: SbxSandbox, location: 'local' | 'cloud' = 'local') {
   // Remembered for API-failure traces: which agent produced the error matters,
   // since each one words its failures (and retries) differently.
   sandboxAgents.set(raw.name, raw.agent ?? 'claude')
+  sandboxLocations.set(raw.name, location)
   const startTime = uptimeMap.get(raw.name)
   const uptimeSeconds =
     raw.status === 'running' && startTime ? Math.floor((Date.now() - startTime) / 1000) : undefined
@@ -1000,8 +1026,9 @@ function normalizeSandbox(raw: SbxSandbox) {
     agent: raw.agent ?? 'claude',
     workspace: raw.workspaces?.[0] ?? '~',
     uptimeSeconds,
-    ports: normalizePorts(raw.ports),
-    logs: [] as unknown[]
+    ports: normalizePorts(raw.ports, location),
+    logs: [] as unknown[],
+    location
   }
 }
 
@@ -1033,6 +1060,22 @@ function updatePowerBlocker(runningCount: number): void {
 // (nothing yet fetched) still reports empty rather than fabricating entries.
 let lastGoodSandboxes: ReturnType<typeof normalizeSandbox>[] | null = null
 
+// Cloud sandboxes (sbx v0.42) live under `sbx --cloud ls`, a separate listing
+// from the local one. Best-effort and silent on failure: a `--cloud` verb
+// placement that turns out wrong, an account with no Docker Agentic Platform
+// plan, or an older/misconfigured daemon should all just mean "no cloud
+// sandboxes", not an error — this is read-only and additive to the local
+// list, never the only source of truth for what's running.
+async function listCloudSandboxes(): Promise<SbxSandbox[]> {
+  try {
+    const out = await sbx(['--cloud', 'ls', '--json'], { timeout: 20000 })
+    const parsed = JSON.parse(out)
+    return parsed.sandboxes ?? parsed
+  } catch {
+    return []
+  }
+}
+
 async function listSandboxes() {
   // One retry after a brief pause: `sbx ls` occasionally fails transiently when
   // the daemon is briefly busy (e.g. mid start/stop). A generous timeout avoids
@@ -1045,7 +1088,11 @@ async function listSandboxes() {
     catch { await new Promise((r) => setTimeout(r, 500)); out = await attempt() }
     const parsed = JSON.parse(out)
     const sandboxes: SbxSandbox[] = parsed.sandboxes ?? parsed
-    const list = sandboxes.map(normalizeSandbox)
+    const cloud = await listCloudSandboxes()
+    const list = [
+      ...sandboxes.map((s) => normalizeSandbox(s)),
+      ...cloud.map((s) => normalizeSandbox(s, 'cloud'))
+    ]
     updatePowerBlocker(list.filter((s) => s.status === 'running').length)
     lastGoodSandboxes = list
     return list
@@ -1057,9 +1104,10 @@ async function listSandboxes() {
 
 async function getPortsForSandbox(name: string) {
   try {
-    const out = await sbx(['ports', name, '--json'])
+    const location = sandboxLocations.get(name) === 'cloud' ? 'cloud' as const : 'local' as const
+    const out = await sbx([...cloudArgsFor(name), 'ports', name, '--json'])
     const trimmed = out.trim()
-    const ports = normalizePorts(extractPortArray(JSON.parse(trimmed), name))
+    const ports = normalizePorts(extractPortArray(JSON.parse(trimmed), name), location)
     // If sbx returned data but we parsed nothing, the shape/field names have
     // drifted again — log the raw output so it's diagnosable.
     if (ports.length === 0 && trimmed && trimmed !== '[]' && trimmed !== '{}') {
@@ -1117,6 +1165,10 @@ interface StoredSecret {
   type: string
   name: string
   masked: string
+  // Which secrets store reported this row: local (sandboxd's own) or cloud
+  // (a wholly separate store — a cloud-stored secret, per `secret set --oauth
+  // --help`, is "never" mirrored into the local one).
+  location: 'local' | 'cloud'
 }
 
 // ── Anthropic OAuth ──────────────────────────────────────────────────────────
@@ -1219,9 +1271,10 @@ function secretScopeArgs(scope?: string): string[] {
 // versions, so parse defensively: take the first three fields as scope/type/
 // name, treat the rest as the masked-preview-plus-flags tail, and detect the
 // annotations by keyword anywhere in the row.
-async function listSecrets(): Promise<StoredSecret[]> {
+async function listSecretsFor(location: 'local' | 'cloud'): Promise<StoredSecret[]> {
   try {
-    const out = await sbx(['secret', 'ls'])
+    const args = location === 'cloud' ? ['--cloud', 'secret', 'ls'] : ['secret', 'ls']
+    const out = await sbx(args)
     const lines = out.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim())
     if (!lines.length || /no secrets/i.test(lines[0])) return []
     return lines
@@ -1239,12 +1292,22 @@ async function listSecrets(): Promise<StoredSecret[]> {
         // annotation we keep verbatim for display.
         const masked = tail[0] ?? ''
         const note = tail.slice(1).join(' ').trim() || undefined
-        return { scope, type, name, masked, envOnly, oauthShadowed, note }
+        return { scope, type, name, masked, envOnly, oauthShadowed, note, location }
       })
       .filter((r) => r.name)
   } catch {
     return []
   }
+}
+
+// Local + cloud are wholly separate stores (see `location` on StoredSecret) —
+// merge both listings rather than picking one. A cloud listing failure
+// (no entitlement, older runtime, wrong flag placement) is swallowed the same
+// way listCloudSandboxes() does it: silently empty, never surfaced as an error
+// for what is otherwise a healthy local-only setup.
+async function listSecrets(): Promise<StoredSecret[]> {
+  const [local, cloud] = await Promise.all([listSecretsFor('local'), listSecretsFor('cloud')])
+  return [...local, ...cloud]
 }
 
 async function listTemplates() {
@@ -1410,7 +1473,7 @@ function emitBlock(b: PolicyBlock): void {
   if (emittedBlocks.has(k)) return
   emittedBlocks.add(k)
   if (emittedBlocks.size > 500) emittedBlocks.delete(emittedBlocks.values().next().value as string)
-  mainWindow?.webContents.send('minipit:policy-block', b)
+  mainWindow?.webContents.send('den:policy-block', b)
 }
 
 // Best-effort parse of `sbx policy log --json`. The exact schema isn't pinned
@@ -1761,7 +1824,7 @@ function parsePolicyLogJson(raw: string, fallbackSandbox?: string): PolicyBlock[
 // fetch returned nothing even once the payload was parsed correctly. Ask for the
 // full log and narrow by the row's own sandbox name instead.
 function fetchPolicyLog(name?: string): Promise<PolicyBlock[]> {
-  return sbx(['policy', 'log', '--json'], { timeout: 12000 })
+  return sbx([...cloudArgsFor(name), 'policy', 'log', '--json'], { timeout: 12000 })
     .then((out) => {
       const blocks = parsePolicyLogJson(out, name)
       return name ? blocks.filter((b) => !b.sandbox || b.sandbox === name) : blocks
@@ -1810,7 +1873,7 @@ function scanOutputForApiFailures(name: string, stripped: string): void {
       .then((probe) => {
         const entry: ApiErrorTrace = { ...trace, probe: { ...probe, ms: Date.now() - started } }
         writeApiErrorTrace(entry)
-        mainWindow?.webContents.send('minipit:api-error', entry)
+        mainWindow?.webContents.send('den:api-error', entry)
       })
   }
 }
@@ -1847,7 +1910,7 @@ function scanOutputForStartError(name: string, buf: string, final = false): void
   if (startErrSeen.get(name) === message) return
   startErrSeen.set(name, message)
   const gone = WORKSPACE_GONE_RE.exec(message)
-  mainWindow?.webContents.send('minipit:sandbox-error', {
+  mainWindow?.webContents.send('den:sandbox-error', {
     sandbox: name,
     message,
     kind: gone ? 'workspace-missing' : 'start-failed',
@@ -1896,6 +1959,23 @@ const eventTails = new Map<string, ReturnType<typeof spawn>>()
 const APPEND_EVENT =
   `awk -v t="$(date -u +%FT%T.%3NZ)" 'NR==1{sub(/^\\{/, "{\\"den_ts\\":\\"" t "\\",")} 1' 2>/dev/null >> ~/.den/events.jsonl || true`
 
+// Claude Code's `statusLine` command receives the same kind of JSON (model,
+// context window, cost, rate limits, …) on stdin, but unlike a hook its stdout
+// IS what gets drawn — so unlike APPEND_EVENT, this can't just pipe stdin
+// straight into the append; it has to read stdin once into a variable, reuse
+// it for the append, then print something back for Claude's own statusline
+// row. `jq` isn't guaranteed to be in the sandbox (injectClaudeHooks itself
+// only uses it when present), so the tiny bit of stdout we produce is done
+// with grep/cut instead — den's own bar (built from the full JSON captured
+// below) is the real data source, this is only cosmetic parity with Claude's
+// in-TUI row.
+const STATUS_LINE_CMD =
+  'input=$(cat); ' +
+  `printf '%s' "$input" | awk -v t="$(date -u +%FT%T.%3NZ)" 'NR==1{sub(/^\\{/, "{\\"den_ts\\":\\"" t "\\",")} 1' 2>/dev/null >> ~/.den/events.jsonl || true; ` +
+  `model=$(printf '%s' "$input" | grep -o '"display_name":"[^"]*"' | head -1 | cut -d'"' -f4); ` +
+  `pct=$(printf '%s' "$input" | grep -o '"used_percentage":[0-9.]*' | head -1 | cut -d: -f2 | cut -d. -f1); ` +
+  '[ -n "$model" ] && printf \'%s · %s%% context\\n\' "$model" "${pct:-0}" || true'
+
 const DEN_HOOKS = {
   hooks: {
     UserPromptSubmit: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
@@ -1907,9 +1987,75 @@ const DEN_HOOKS = {
     Notification: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
     Stop: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }],
     SessionStart: [{ hooks: [{ type: 'command', command: APPEND_EVENT }] }]
-  }
+  },
+  statusLine: { type: 'command', command: STATUS_LINE_CMD }
 }
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+// Trimmed-down view of a Claude Code statusline payload (see
+// https://code.claude.com/docs/en/statusline) — only the fields den's UI
+// actually shows. Everything is optional: most fields are null/absent early in
+// a session or on models that don't support them.
+interface AgentStatusLine {
+  model?: string
+  effort?: string
+  contextUsedPct?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+  costUsd?: number
+  durationMs?: number
+  rateLimitFiveHourPct?: number
+  rateLimitSevenDayPct?: number
+  transcriptPath?: string
+  updatedAt: number
+}
+
+// Raw shape of the JSON a statusLine command receives on stdin — only the
+// parts we read. Everything nested is optional/absent-tolerant.
+interface RawStatusLine {
+  hook_event_name?: string
+  model?: { display_name?: string }
+  effort?: { level?: string }
+  transcript_path?: string
+  context_window?: {
+    used_percentage?: number | null
+    current_usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    } | null
+  }
+  cost?: { total_cost_usd?: number; total_duration_ms?: number }
+  rate_limits?: {
+    five_hour?: { used_percentage?: number }
+    seven_day?: { used_percentage?: number }
+  }
+}
+
+const agentStatus = new Map<string, AgentStatusLine>()
+
+function handleStatusLine(name: string, raw: RawStatusLine): void {
+  const status: AgentStatusLine = {
+    model: raw.model?.display_name,
+    effort: raw.effort?.level,
+    contextUsedPct: raw.context_window?.used_percentage ?? undefined,
+    inputTokens: raw.context_window?.current_usage?.input_tokens,
+    outputTokens: raw.context_window?.current_usage?.output_tokens,
+    cacheCreationInputTokens: raw.context_window?.current_usage?.cache_creation_input_tokens,
+    cacheReadInputTokens: raw.context_window?.current_usage?.cache_read_input_tokens,
+    costUsd: raw.cost?.total_cost_usd,
+    durationMs: raw.cost?.total_duration_ms,
+    rateLimitFiveHourPct: raw.rate_limits?.five_hour?.used_percentage,
+    rateLimitSevenDayPct: raw.rate_limits?.seven_day?.used_percentage,
+    transcriptPath: raw.transcript_path,
+    updatedAt: Date.now()
+  }
+  agentStatus.set(name, status)
+  mainWindow?.webContents.send('den:agent-status', name, status)
+}
 
 function setAgentState(name: string, state: AgentState): void {
   if (agentState.get(name) === state) return
@@ -1918,7 +2064,7 @@ function setAgentState(name: string, state: AgentState): void {
   // `streamMs`, i.e. how long the request had been running when it died.
   if (state === 'working') noteTurnStart(name)
   hookLog(`${name} state → ${state}`)
-  mainWindow?.webContents.send('minipit:agent-activity', name, state)
+  mainWindow?.webContents.send('den:agent-activity', name, state)
   // The menus colour and order sandboxes by this, so rebuild. Cheap enough:
   // the early return above means this only fires on a real transition, not on
   // every hook event.
@@ -1976,7 +2122,7 @@ function injectClaudeHooks(name: string, attempt = 0): Promise<void> {
     '  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json && echo merged; ' +
     'else cp "$den_tmp" ~/.claude/settings.json && echo wrote; fi'
   return new Promise((resolve) => {
-    execFile(getSbxPath(), ['exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
+    execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', script], { timeout: 8000 }, (err, stdout) => {
       if (err) {
         if (attempt < EXEC_RETRIES) {
           hookLog(`inject retry ${attempt + 1}/${EXEC_RETRIES} for ${name}: ${err.message}`)
@@ -1997,7 +2143,7 @@ function startEventTail(name: string, attempt = 0): void {
   // `mkdir -p ~/.den` first: this tail can start before injectClaudeHooks has
   // created the directory (it retries with a backoff), and without it `touch`
   // and `tail` both fail with "No such file or directory".
-  const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'mkdir -p ~/.den && touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
+  const proc = spawn(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', 'mkdir -p ~/.den && touch ~/.den/events.jsonl; exec tail -n0 -F ~/.den/events.jsonl'])
   eventTails.set(name, proc)
   hookLog(`tailing events for ${name}`)
   let buf = ''
@@ -2007,8 +2153,11 @@ function startEventTail(name: string, attempt = 0): void {
     buf = lines.pop() ?? ''
     for (const line of lines) {
       if (!line.trim()) continue
-      let ev: { hook_event_name?: string; tool_name?: string; source?: string }
+      let ev: RawStatusLine & { tool_name?: string; source?: string }
       try { ev = JSON.parse(line) } catch { hookLog(`${name} unparsable line:`, line.slice(0, 120)); continue }
+      // A statusLine payload carries no hook_event_name — that field only
+      // exists on actual hook events (Stop, PreToolUse, …).
+      if (!ev.hook_event_name) { handleStatusLine(name, ev); continue }
       hookLog(`${name} ▸`, ev.hook_event_name, ev.tool_name ?? '')
       switch (ev.hook_event_name) {
         case 'Notification':
@@ -2016,7 +2165,7 @@ function startEventTail(name: string, attempt = 0): void {
           // Send the attention cue *before* flipping state so the renderer can
           // play the "needs input" sound instead of the finish sound for this
           // transition.
-          mainWindow?.webContents.send('minipit:agent-attention', name)
+          mainWindow?.webContents.send('den:agent-attention', name)
           setAgentState(name, 'waiting')
           break
         case 'Stop':
@@ -2037,7 +2186,7 @@ function startEventTail(name: string, attempt = 0): void {
           setAgentState(name, 'working')
           if (ev.tool_name && FILE_TOOLS.has(ev.tool_name)) {
             hookLog(`${name} → files-changed (${ev.tool_name})`)
-            mainWindow?.webContents.send('minipit:files-changed', name)
+            mainWindow?.webContents.send('den:files-changed', name)
             scheduleAutoSync(name)
           }
           break
@@ -2061,7 +2210,8 @@ function clearAgentActivity(name: string): void {
   eventTails.get(name)?.kill()
   eventTails.delete(name)
   agentState.delete(name)
-  mainWindow?.webContents.send('minipit:agent-activity', name, null)
+  agentStatus.delete(name)
+  mainWindow?.webContents.send('den:agent-activity', name, null)
 }
 
 interface FileEntry {
@@ -2086,7 +2236,7 @@ async function gitStatus(name: string, workspace: string): Promise<{ isRepo: boo
       // produced paths like "EADME.md" that nothing could then open.
       // `core.quotePath=false`: otherwise a non-ASCII name arrives C-quoted
       // ("caf\303\251.md") and is equally unopenable.
-      ['exec', name, 'git', '-C', workspace, '-c', 'core.quotePath=false',
+      [...cloudArgsFor(name), 'exec', name, 'git', '-C', workspace, '-c', 'core.quotePath=false',
         'status', '--porcelain=v1', '--untracked-files=all'],
       { timeout: 10000, raw: true }
     )
@@ -2138,7 +2288,7 @@ function inSandboxFileDiff(name: string, path: string): Promise<string> {
       'd=$(git diff --text HEAD -- "$2" 2>/dev/null); ' +
       '[ -z "$d" ] && d=$(git diff --text --no-index -- /dev/null "$2" 2>/dev/null); ' +
       'printf %s "$d"'
-    execFile(getSbxPath(), ['exec', name, 'sh', '-c', script, 'sh', dir, path],
+    execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', script, 'sh', dir, path],
       { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (_e, stdout) => resolve(stdout ?? ''))
   })
 }
@@ -2203,7 +2353,7 @@ async function runAutoSync(name: string): Promise<void> {
   const res = await fetchSandboxWork(name, repoDir)
   if (res.ok) {
     hookLog(`${name} → auto-synced to ${res.branch}`)
-    mainWindow?.webContents.send('minipit:auto-synced', name, res.branch)
+    mainWindow?.webContents.send('den:auto-synced', name, res.branch)
   } else {
     // Fetch fails silently (e.g. sandbox stopping) — we retry on the next change.
     hookLog(`${name} → auto-sync fetch skipped: ${res.error}`)
@@ -2248,7 +2398,7 @@ async function listFiles(name: string, dir: string): Promise<FileEntry[]> {
 
   let out: string
   try {
-    out = await sbx(['exec', name, 'sh', '-c', cmd, 'sh', dir || '.'])
+    out = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', cmd, 'sh', dir || '.'])
   } catch (err) {
     // Rethrow so the caller can tell a real listing failure (sandbox not ready
     // yet on reconnect, exec transport error, path gone) apart from a genuinely
@@ -2304,6 +2454,11 @@ function cancelPendingSpawn(name: string): void {
 // Attach to a sandbox's agent via `sbx run NAME` in a PTY. Agents like Claude
 // Code are full-screen TUIs that need a real TTY, and their raw ANSI output is
 // streamed straight to the renderer's xterm (no line reformatting).
+// Local: `sbx run --name <existing>`, reattaching a local sandbox's agent
+// session. Cloud is a genuinely different command — `sbx --cloud attach
+// <id-or-name>` for an already-running one, `sbx --cloud run --name <name>
+// <agent>` otherwise — not the same verb with --cloud spliced in (see the
+// branch below for what's confirmed vs. inferred about that).
 async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { continueSession?: boolean }) {
   const existing = sbxProcesses.get(name)
   if (existing) {
@@ -2335,8 +2490,26 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
   // conversation rather than starting fresh. `--continue` is a claude agent
   // flag (gated by the caller), passed through after the `--` separator.
   const useContinue = !!opts?.continueSession
-  const args = ['run', '--name', name]
-  if (useContinue) args.push('--', '--continue')
+  let args: string[]
+  if (sandboxLocations.get(name) === 'cloud') {
+    // Cloud has no equivalent of local's "run --name to reattach": `attach`
+    // only works on an already-running cloud sandbox ("must already exist
+    // and be in a running state" — attach --help). A stopped one instead
+    // needs `run`, which per its --help prompts interactively to pick a
+    // sandbox unless --name narrows it to one match — the exact disambiguation
+    // behavior is unverified live (no cloud account was available this
+    // session to confirm it), so if sbx still prompts, it surfaces in this
+    // same pty rather than failing silently. --continue has no cloud
+    // equivalent either way: attach reconnects to whatever the agent process
+    // already is, and run's reuse-prompt is a different mechanism entirely.
+    const status = lastGoodSandboxes?.find((s) => s.name === name)?.status
+    args = status === 'running'
+      ? ['--cloud', 'attach', name]
+      : ['--cloud', 'run', '--name', name, sandboxAgents.get(name) ?? 'claude']
+  } else {
+    args = ['run', '--name', name]
+    if (useContinue) args.push('--', '--continue')
+  }
 
   const proc = pty.spawn(getSbxPath(), args, {
     name: 'xterm-256color',
@@ -2366,7 +2539,7 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
     if (useContinue && !noConversation && data.includes('No conversation found to continue')) {
       noConversation = true
     }
-    mainWindow?.webContents.send('minipit:agent-output', name, data)
+    mainWindow?.webContents.send('den:agent-output', name, data)
     // Keep a bounded tail of raw output for replay on reattach (see agentOutBuf).
     let b = (agentOutBuf.get(name) ?? '') + data
     if (b.length > AGENT_BUF_MAX) b = b.slice(b.length - AGENT_BUF_MAX)
@@ -2389,11 +2562,11 @@ async function spawnSandboxProcess(name: string, cols = 80, rows = 24, opts?: { 
     uptimeMap.delete(name)
     forgetApiTrace(name)
     clearAgentActivity(name)
-    mainWindow?.webContents.send('minipit:agent-exit', name)
+    mainWindow?.webContents.send('den:agent-exit', name)
     // Trigger a sandbox list refresh
     setTimeout(async () => {
       const sandboxes = await listSandboxes()
-      mainWindow?.webContents.send('minipit:sandboxes-updated', sandboxes)
+      mainWindow?.webContents.send('den:sandboxes-updated', sandboxes)
     }, 500)
   })
 
@@ -2453,7 +2626,7 @@ function showMainWindow(): void {
 // handler and the menu-bar item, so both stream into the same output box.
 async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
   const send = (chunk: string) =>
-    mainWindow?.webContents.send('minipit:daemon-output', chunk)
+    mainWindow?.webContents.send('den:daemon-output', chunk)
   const step = async (args: string[]) => {
     send(`$ sbx ${args.join(' ')}\r\n`)
     const { code } = await ptyRun(args, send, 60000)
@@ -2474,26 +2647,16 @@ async function restartDaemon(): Promise<{ ok: boolean; error?: string }> {
 // sbx version for the menu bar. Cached because the tray menu is rebuilt
 // synchronously (and often); refreshed in the background on each rebuild so a
 // runtime update shows up without restarting den.
-// den speaks the v0.38 CLI dialect only: `daemon restart`, `secret set
-// --sandbox`, `--static-mcp`, `--deny-network` and kit spec v2 all arrived
-// there, and the pre-0.38 spellings it replaced are deprecated. Rather than
-// carry two code paths, den states the floor and shows a banner below it —
-// otherwise an old runtime fails as a stream of opaque "unknown flag" errors.
-export const MIN_SBX_VERSION = '0.38.0'
-
-
-// ── sbx v0.39 capabilities ───────────────────────────────────────────────────
-// v0.39 is purely additive for den: nothing it deprecated is anything den calls
-// (`SANDBOX_VM_ID`, the `ollama/` model prefix), it doesn't parse `kit inspect`,
-// and the credential blocks den writes already carry the `proxyManaged`
-// sentinels `kit validate` started requiring. So the floor stays at 0.38 and the
-// new surface is gated instead — forcing an upgrade buys a 0.38 user nothing.
-export const SBX_ENV_VERSION = '0.39.0'
-
-/** True when the installed runtime is at least `want`. False while unknown. */
-export function sbxAtLeast(want: string): boolean {
-  return !!cachedSbxVersion && !semverLt(cachedSbxVersion, want)
-}
+// den 0.11.0 speaks the v0.42 CLI dialect only: cloud sandboxes, kit
+// `args:`/`--kit-arg`, and workspace-optional `create` all require it, and
+// den no longer gates that surface behind a runtime check — every user is on
+// 0.42+ or blocked by the outdated-runtime banner below. (0.38 through 0.41
+// were previously supported with the new-in-each-release surface hidden
+// rather than required; that gate-don't-require machinery — sbxAtLeast(),
+// SBX_ENV_VERSION, SBX_CLOUD_VERSION, and the hasEnvFiles/hasCloud/
+// hasKitArgs/hasNoWorkspaceCreate capability flags — was removed with the
+// floor raise, since every one of those checks is now unconditionally true.)
+export const MIN_SBX_VERSION = '0.42.0'
 
 // Flags are the part of a CLI that moves most, and den is written against
 // release notes that name commands without always spelling their flags. Rather
@@ -2556,14 +2719,14 @@ export async function sbxHasCommand(args: string[]): Promise<boolean> {
 //   · macOS/arm64 only. The darwin tarball has no x86_64 payload, and Windows
 //     ships an MSI with no portable archive to pin.
 export const PINNED_SBX = {
-  version: '0.39.0',
-  minor: '0.39',
+  version: '0.42.0',
+  minor: '0.42',
   asset: 'DockerSandboxes-darwin.tar.gz',
   // sha256 of the published asset. NOT the digest inside provenance.json —
-  // that attests `sandboxes-v0.39.0.darwin-arm64.tar.gz`, a differently-named
+  // that attests `sandboxes-v0.42.0.darwin-arm64.tar.gz`, a differently-named
   // build artifact whose hash never matches what we download. Recompute by
   // downloading the asset whenever this pin moves.
-  sha256: 'd12fa06aeece298d96dae058101f256537770a00ef46e6584762e0f27b06a5a3'
+  sha256: '1780e195ef7bb3cfaad31773f35933b317c9034fd46ae2fe5442f1117e9cc842'
 }
 
 function runtimeRoot(): string { return join(app.getPath('userData'), 'runtime') }
@@ -2680,10 +2843,10 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
       // Same dot as the Sandboxes menu, so green/yellow means the same thing in
       // both places.
       icon: statusDotFor(s.status, agentState.get(s.name)),
-      click: () => navigateFromTray('minipit:open-sandbox', s.name)
+      click: () => navigateFromTray('den:open-sandbox', s.name)
     })),
     { type: 'separator' },
-    { label: 'New Sandbox…', click: () => navigateFromTray('minipit:open-modal', 'new-sandbox') },
+    { label: 'New Sandbox…', click: () => navigateFromTray('den:open-modal', 'new-sandbox') },
     { type: 'separator' },
     // Runtime, without opening den first: what version is installed, a daemon
     // restart for when sandboxes stop responding, and a jump to the log viewer.
@@ -2698,11 +2861,11 @@ function updateTrayMenu(sandboxes: Array<{ name: string; status: string; workspa
           // in Settings ▸ Runtime, and a silent background restart would look
           // like nothing happened.
           click: () => {
-            navigateFromTray('minipit:navigate', 'settings')
+            navigateFromTray('den:navigate', 'settings')
             void restartDaemon()
           }
         },
-        { label: 'Log viewer', click: () => navigateFromTray('minipit:navigate', 'logs') }
+        { label: 'Log viewer', click: () => navigateFromTray('den:navigate', 'logs') }
       ]
     },
     { type: 'separator' },
@@ -2853,11 +3016,11 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     if (!mainWindow || mainWindow.isDestroyed()) {
       createWindow()
       mainWindow?.webContents.once('did-finish-load', () =>
-        mainWindow?.webContents.send('minipit:sandbox-action', name, action))
+        mainWindow?.webContents.send('den:sandbox-action', name, action))
       return
     }
     showMainWindow()
-    mainWindow.webContents.send('minipit:sandbox-action', name, action)
+    mainWindow.webContents.send('den:sandbox-action', name, action)
   }
   const sandboxSubmenu = (s: { name: string; status: string; workspace: string }): Electron.MenuItemConstructorOptions[] => {
     const current = s.name === activeSandboxName
@@ -2924,7 +3087,7 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
               { type: 'separator' } as Electron.MenuItemConstructorOptions,
               {
                 label: `View All ${ordered.length} Sandboxes…`,
-                click: () => go('minipit:navigate', 'sandboxes')
+                click: () => go('den:navigate', 'sandboxes')
               } as Electron.MenuItemConstructorOptions
             ]
           : [])
@@ -2936,10 +3099,10 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
   const libSubmenu = (
     names: string[], page: string, showLabel: string, noun: string
   ): Electron.MenuItemConstructorOptions[] => [
-    { label: showLabel, click: () => go('minipit:navigate', page) },
+    { label: showLabel, click: () => go('den:navigate', page) },
     { type: 'separator' },
     ...(names.length
-      ? capped(names, (n) => ({ label: n, click: () => go('minipit:navigate', page) }), noun)
+      ? capped(names, (n) => ({ label: n, click: () => go('den:navigate', page) }), noun)
       : [{ label: `No ${noun} yet`, enabled: false }])
   ]
 
@@ -2949,7 +3112,7 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
       submenu: [
         { label: 'About den', role: 'about' },
         { type: 'separator' },
-        { label: 'Settings…', accelerator: 'Cmd+,', click: () => go('minipit:navigate', 'settings') },
+        { label: 'Settings…', accelerator: 'Cmd+,', click: () => go('den:navigate', 'settings') },
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },
@@ -2960,7 +3123,7 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     {
       label: 'File',
       submenu: [
-        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
+        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('den:open-modal', 'new-sandbox') },
         { type: 'separator' },
         { label: 'Close Window', accelerator: 'Cmd+W', role: 'close' }
       ]
@@ -2983,8 +3146,8 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     {
       label: 'View',
       submenu: [
-        { label: 'Terminal', accelerator: 'Cmd+1', click: () => go('minipit:set-tab', 'terminal') },
-        { label: 'Info', accelerator: 'Cmd+2', click: () => go('minipit:set-tab', 'info') },
+        { label: 'Terminal', accelerator: 'Cmd+1', click: () => go('den:set-tab', 'terminal') },
+        { label: 'Info', accelerator: 'Cmd+2', click: () => go('den:set-tab', 'info') },
         { type: 'separator' },
         { label: 'Reload', accelerator: 'Cmd+R', role: 'reload' },
         { label: 'Toggle DevTools', role: 'toggleDevTools' }
@@ -2995,10 +3158,10 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
     {
       label: 'Sandboxes',
       submenu: [
-        { label: 'Show All Sandboxes', accelerator: 'Shift+Cmd+S', click: () => go('minipit:navigate', 'sandboxes') },
-        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('minipit:open-modal', 'new-sandbox') },
+        { label: 'Show All Sandboxes', accelerator: 'Shift+Cmd+S', click: () => go('den:navigate', 'sandboxes') },
+        { label: 'New Sandbox…', accelerator: 'Cmd+N', click: () => go('den:open-modal', 'new-sandbox') },
         { type: 'separator' },
-        { label: 'All Logs', click: () => go('minipit:navigate', 'logs') },
+        { label: 'All Logs', click: () => go('den:navigate', 'logs') },
         { type: 'separator' },
         // Per-sandbox actions live in each sandbox's own submenu below.
         ...sandboxItems
@@ -3069,13 +3232,13 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
           // Diagnostics box there, and a silent background restart looks like
           // nothing happened.
           click: () => {
-            navigateFromTray('minipit:navigate', 'settings')
+            navigateFromTray('den:navigate', 'settings')
             void restartDaemon()
           }
         },
         // No accelerator: View ▸ Logs already owns Cmd+L, and a duplicate binding
         // in the same menu bar is ambiguous.
-        { label: 'Log Viewer', click: () => go('minipit:navigate', 'logs') }
+        { label: 'Log Viewer', click: () => go('den:navigate', 'logs') }
       ]
     },
     {
@@ -3097,16 +3260,16 @@ async function setAppMenu(prefetchedSandboxes?: Awaited<ReturnType<typeof listSa
 }
 
 function setupIPC(): void {
-  ipcMain.handle('minipit:list-sandboxes', () => listSandboxes())
+  ipcMain.handle('den:list-sandboxes', () => listSandboxes())
 
-  ipcMain.handle('minipit:run-sandbox', async (_, name: string) => {
+  ipcMain.handle('den:run-sandbox', async (_, name: string) => {
     // Not awaited: the launch first waits for the Claude config write, and the
     // caller shouldn't sit on that.
     void spawnSandboxProcess(name)
     return null
   })
 
-  ipcMain.handle('minipit:stop-sandbox', async (_, name: string) => {
+  ipcMain.handle('den:stop-sandbox', async (_, name: string) => {
     // A launch may be mid-flight, waiting on its Claude config write — cancel it
     // so it doesn't spawn a session into the sandbox we're about to stop.
     cancelPendingSpawn(name)
@@ -3119,11 +3282,11 @@ function setupIPC(): void {
     // Clear activity now rather than waiting on the PTY's onExit (which can race
     // or never fire if there's no attached process), so "Working…" doesn't stick.
     clearAgentActivity(name)
-    await sbx(['stop', name])
+    await sbx([...cloudArgsFor(name), 'stop', name])
     uptimeMap.delete(name)
   })
 
-  ipcMain.handle('minipit:delete-sandbox', async (_, name: string) => {
+  ipcMain.handle('den:delete-sandbox', async (_, name: string) => {
     cancelPendingSpawn(name)
     const proc = sbxProcesses.get(name)
     if (proc) {
@@ -3131,7 +3294,7 @@ function setupIPC(): void {
       sbxProcesses.delete(name)
     }
     clearAgentActivity(name)
-    await sbx(['rm', '--force', name])
+    await sbx([...cloudArgsFor(name), 'rm', '--force', name])
     uptimeMap.delete(name)
     forgetIsolation(name)
     forgetEnvSandbox(name)
@@ -3148,7 +3311,7 @@ function setupIPC(): void {
   // without naming the flag, and guessing wrong costs an "unknown flag" on a
   // destructive command. When no candidate is documented, den prunes everything
   // stopped and says so, instead of silently dropping the filter.
-  ipcMain.handle('minipit:prune-sandboxes', async (_, olderThan?: string) => {
+  ipcMain.handle('den:prune-sandboxes', async (_, olderThan?: string) => {
     try {
       // Probe rather than assume: a destructive command that prompts, run
       // without a PTY, would hang on the confirmation until the timeout rather
@@ -3204,14 +3367,28 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:create-sandbox', async (_, config: {
+  ipcMain.handle('den:create-sandbox', async (_, config: {
     agent: string
-    workspace: string
+    // A sandbox can be created with no workspace bind mount at all (sbx
+    // v0.42+). Omitted, not empty-string — the modal requires a name instead
+    // when there's no workspace to derive one from.
+    workspace?: string
     memory?: string
     branch?: boolean
     name?: string
     template?: string
+    // Every kit den applied to this sandbox (base agent kit + mixins), for
+    // den's own "kits applied to this sandbox" bookkeeping (recordKits below)
+    // — NOT what becomes `--kit` argv; see mixinArgs.
     kits?: string[]
+    // sbx v0.42: `--kit` is mixin-only ("must be a mixin" per `sbx create
+    // --help") — a sandbox/agent kit is the bare positional instead, so this
+    // excludes it even though it's also present in `kits` above.
+    mixinArgs?: string[]
+    // sbx v0.42: each entry already `name=value` or `kit.name=value` (the
+    // renderer resolves disambiguation, since it's the one place that knows
+    // every selected kit's declared arg names).
+    kitArgs?: string[]
     staticMcps?: string[]
     ports?: string[]
     noShareSkills?: boolean
@@ -3220,8 +3397,10 @@ function setupIPC(): void {
   }) => {
     // Ensure the target workspace folder exists — defaults like ~/den/<name>
     // won't have been created yet (no-op for existing project/clone folders).
-    try { require('fs').mkdirSync(config.workspace, { recursive: true }) }
-    catch (err) { console.error('could not create workspace folder:', err) }
+    if (config.workspace) {
+      try { require('fs').mkdirSync(config.workspace, { recursive: true }) }
+      catch (err) { console.error('could not create workspace folder:', err) }
+    }
     const buildArgs = (agent: string): string[] => {
       const args = ['create']
       if (config.name) args.push('--name', config.name)
@@ -3234,8 +3413,11 @@ function setupIPC(): void {
       // The shared skills store is mounted by default, so only the opt-out is ever
       // passed. Hidden from `sbx create --help` in v0.37.0 but accepted.
       if (config.noShareSkills) args.push('--no-share-skills')
-      // --kit can only be passed at creation; stack one flag per kit directory.
-      for (const dir of config.kits ?? []) args.push('--kit', dir)
+      // --kit can only be passed at creation; stack one flag per mixin
+      // directory. The base agent/sandbox kit (if any) is never included
+      // here — it's the positional agent below, not a --kit argument.
+      for (const dir of config.mixinArgs ?? []) args.push('--kit', dir)
+      for (const kv of config.kitArgs ?? []) args.push('--kit-arg', kv)
       // Static MCP mode: pre-load these registered servers. Passing none leaves the
       // agent in dynamic mode, discovering servers itself via the gateway.
       for (const m of config.staticMcps ?? []) args.push('--static-mcp', m)
@@ -3250,12 +3432,15 @@ function setupIPC(): void {
       // instead of the process table.
       if (config.envFile) args.push('--env-file', config.envFile)
       for (const pair of config.env ?? []) args.push('-e', pair)
-      args.push(agent, config.workspace)
+      // The workspace positional is omitted entirely (sbx v0.42+) rather than
+      // passed empty — a sandbox with no bind mount, not one mounting cwd.
+      args.push(agent)
+      if (config.workspace) args.push(config.workspace)
       return args
     }
     // Stream output so the New Sandbox modal can show live progress (image pull,
     // kit injection, startup) instead of a silent "Creating…" spinner.
-    const send = (chunk: string) => mainWindow?.webContents.send('minipit:create-output', chunk)
+    const send = (chunk: string) => mainWindow?.webContents.send('den:create-output', chunk)
     const run = (args: string[]): Promise<string> => {
       send(`$ sbx ${args.join(' ')}\n`)
       return new Promise<string>((resolve, reject) => {
@@ -3299,7 +3484,8 @@ function setupIPC(): void {
     // so parse the quoted name rather than using the whole message.
     const match = out.match(/sandbox ['"]([^'"]+)['"]/i)
     const sandboxName =
-      config.name ?? match?.[1] ?? `${agent}-${config.workspace.split('/').pop()}`
+      config.name ?? match?.[1] ??
+      (config.workspace ? `${agent}-${config.workspace.split('/').pop()}` : agent)
     recordKits(sandboxName, config.kits ?? [])
     recordIsolation(sandboxName, !!config.branch)
     // Brand-new sandbox: its first agent session must start fresh, never
@@ -3310,33 +3496,39 @@ function setupIPC(): void {
     return sandboxName
   })
 
-  ipcMain.handle('minipit:get-ports', async (_, name: string) => {
+  ipcMain.handle('den:get-ports', async (_, name: string) => {
     return getPortsForSandbox(name)
   })
 
-  // Publish a port from the sandbox to the host. `spec` is the sbx port form
-  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL], e.g. "8080:8080/tcp".
-  // Requires the sandbox to be running; mappings don't persist across stops.
-  ipcMain.handle('minipit:port-publish', async (_, name: string, spec: string) => {
+  // Publish a port from the sandbox to the host. `spec` is the sbx port form —
+  // [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL] locally, or a bare
+  // SANDBOX_PORT for a cloud sandbox (the control plane assigns the public
+  // URL; see `ports --help`'s cloud-mode note). PortsPanel.tsx builds
+  // whichever shape fits the sandbox it's showing, so this handler only adds
+  // --cloud, never reshapes `spec` itself. Requires the sandbox to be
+  // running; mappings don't persist across a local sandbox's stops.
+  ipcMain.handle('den:port-publish', async (_, name: string, spec: string) => {
     try {
-      const output = await sbx(['ports', name, '--publish', spec], { timeout: 15000 })
+      const output = await sbx([...cloudArgsFor(name), 'ports', name, '--publish', spec], { timeout: 15000 })
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
-  // Remove a published port. sbx wants the explicit host:sandbox[/proto] form.
-  ipcMain.handle('minipit:port-unpublish', async (_, name: string, spec: string) => {
+  // Remove a published port. sbx wants the explicit host:sandbox[/proto] form
+  // locally, or the bare SANDBOX_PORT for cloud — same spec PortsPanel.tsx
+  // used to publish it.
+  ipcMain.handle('den:port-unpublish', async (_, name: string, spec: string) => {
     try {
-      const output = await sbx(['ports', name, '--unpublish', spec], { timeout: 15000 })
+      const output = await sbx([...cloudArgsFor(name), 'ports', name, '--unpublish', spec], { timeout: 15000 })
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
-  ipcMain.handle('minipit:list-files', async (_, name: string, relPath: string) => {
+  ipcMain.handle('den:list-files', async (_, name: string, relPath: string) => {
     return listFiles(name, relPath ?? '')
   })
 
@@ -3345,22 +3537,22 @@ function setupIPC(): void {
   // folder, clone/isolated layout, different mount point) — so prefer it only
   // when it exists there, else fall back to the container's working dir, then
   // $HOME, then /. Keeps the panel working instead of erroring on a bad path.
-  ipcMain.handle('minipit:workspace-root', async (_, name: string, hint: string) => {
+  ipcMain.handle('den:workspace-root', async (_, name: string, hint: string) => {
     const script = 'for d in "$1" "$PWD" "$HOME" /; do [ -n "$d" ] && [ -d "$d" ] && { printf %s "$d"; exit 0; }; done; printf /'
     try {
-      const out = await sbx(['exec', name, 'sh', '-c', script, 'sh', hint || ''])
+      const out = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', script, 'sh', hint || ''])
       return (out.trim() || null)
     } catch {
       // Couldn't ask the container — usually it reports "running" a moment
       // before `exec` works. Return null, not the unverified hint: handing back
       // a host path we failed to check is what produced a doomed listing and an
-      // "Error occurred in handler for 'minipit:list-files'" stack per attempt.
+      // "Error occurred in handler for 'den:list-files'" stack per attempt.
       // The caller retries instead.
       return null
     }
   })
 
-  ipcMain.handle('minipit:generate-palette', async (_, hex: string, size = 9) => {
+  ipcMain.handle('den:generate-palette', async (_, hex: string, size = 9) => {
     try {
       // rampa-sdk is ESM-only and uses Node built-ins, so it runs here (main),
       // not in the renderer. Dynamic import works from the CJS main bundle.
@@ -3372,7 +3564,7 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:sign-out', async () => {
+  ipcMain.handle('den:sign-out', async () => {
     // `sbx logout` stops all running sandboxes and signs out of Docker. `-y`
     // skips its interactive confirmation prompt — without it the piped (no-TTY)
     // process hangs at the prompt until timeout and never logs out.
@@ -3392,20 +3584,16 @@ function setupIPC(): void {
   // The build this main process was started from. The renderer compares it with
   // its own: they differ whenever main has been rebuilt but not restarted, which
   // presents as new UI wired to old handlers.
-  ipcMain.handle('minipit:build-id', () => __BUILD_ID__)
+  ipcMain.handle('den:build-id', () => __BUILD_ID__)
 
-  ipcMain.handle('minipit:sbx-version-check', async () => {
+  ipcMain.handle('den:sbx-version-check', async () => {
     if (!cachedSbxVersion) refreshSbxVersion()
     const version = cachedSbxVersion
     return {
       version,
       min: MIN_SBX_VERSION,
       known: !!version,
-      outdated: !!version && semverLt(version, MIN_SBX_VERSION),
-      // Additive v0.39 surface (prune, env files, dynamic secrets, kit signing,
-      // per-sandbox env vars). Gated rather than required: a 0.38 runtime keeps
-      // working, it just doesn't show what it can't do.
-      hasEnvFiles: sbxAtLeast(SBX_ENV_VERSION)
+      outdated: !!version && semverLt(version, MIN_SBX_VERSION)
     }
   })
 
@@ -3464,7 +3652,7 @@ function setupIPC(): void {
   // "default" must not mean a silent 127 MB download replacing something that
   // already works. So den asks once, with their existing install offered right
   // there as the alternative.
-  ipcMain.handle('minipit:runtime-setup-state', async () => {
+  ipcMain.handle('den:runtime-setup-state', async () => {
     const support = managedRuntimeSupport()
     const chosen = (() => {
       const v = store.get('runtimeSource') as string | undefined
@@ -3486,7 +3674,7 @@ function setupIPC(): void {
   // Locate an sbx the user installed somewhere den doesn't look. Verified before
   // it's stored, so a wrong pick fails here rather than as a stream of ENOENTs
   // spread across every feature.
-  ipcMain.handle('minipit:pick-sbx-binary', async () => {
+  ipcMain.handle('den:pick-sbx-binary', async () => {
     const res = await dialog.showOpenDialog(mainWindow!, {
       title: 'Locate the sbx binary',
       properties: ['openFile'],
@@ -3510,7 +3698,7 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:runtime-status', async () => {
+  ipcMain.handle('den:runtime-status', async () => {
     const support = managedRuntimeSupport()
     const source = ((store.get('runtimeSource') as string | undefined) ?? 'system') as 'managed' | 'system'
     const adopted = (store.get('managedVersion') as string | undefined) ?? ''
@@ -3529,7 +3717,7 @@ function setupIPC(): void {
   // Switching source does not restart anything. The sandbox state directory is
   // global, so which binary serves the daemon only changes when the daemon next
   // starts — the UI says so rather than letting it look instant.
-  ipcMain.handle('minipit:runtime-source', async (_, source: 'managed' | 'system') => {
+  ipcMain.handle('den:runtime-source', async (_, source: 'managed' | 'system') => {
     if (source === 'managed') {
       const support = managedRuntimeSupport()
       if (!support.ok) return { ok: false as const, error: support.reason }
@@ -3541,17 +3729,17 @@ function setupIPC(): void {
     return { ok: true as const, restartNeeded: true }
   })
 
-  ipcMain.handle('minipit:runtime-install', async (event) => {
+  ipcMain.handle('den:runtime-install', async (event) => {
     const support = managedRuntimeSupport()
     if (!support.ok) return { ok: false as const, error: support.reason }
 
     const fs = require('fs')
     const { version, asset, sha256 } = PINNED_SBX
-    // Its own channel, deliberately: minipit:runtime-output is the package
+    // Its own channel, deliberately: den:runtime-output is the package
     // manager's log box, and a download belongs in a progress bar, not a
     // terminal dump of percentages.
     const prog = (phase: string, got = 0, total = 0) =>
-      event.sender.send('minipit:runtime-progress', { phase, got, total })
+      event.sender.send('den:runtime-progress', { phase, got, total })
     const dir = runtimeDir(version)
     const tmp = join(runtimeRoot(), `.${asset}.part`)
     const url = `https://github.com/docker/sbx-releases/releases/download/v${version}/${asset}`
@@ -3627,7 +3815,7 @@ function setupIPC(): void {
 
   // Back to the user's own sbx. The managed copy is left on disk — switching
   // back shouldn't cost another 127 MB download.
-  ipcMain.handle('minipit:runtime-revert', async () => {
+  ipcMain.handle('den:runtime-revert', async () => {
     store.set('runtimeSource', 'system')
     return { ok: true as const, path: getSbxPath(), restartNeeded: true }
   })
@@ -3657,8 +3845,7 @@ function setupIPC(): void {
   // Look where the user already works: the workspace of every sandbox den knows
   // about. Cheap (one stat per candidate) and it means the page has content
   // without anyone hunting for a file.
-  ipcMain.handle('minipit:env-discover', async () => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) return { supported: false as const, files: [] }
+  ipcMain.handle('den:env-discover', async () => {
     const seen = new Set<string>()
     const files: Array<{ path: string; dir: string; project: string }> = []
     let roots: string[] = []
@@ -3674,11 +3861,11 @@ function setupIPC(): void {
         files.push({ path, dir, project: dir.split('/').filter(Boolean).pop() || dir })
       }
     }
-    return { supported: true as const, files }
+    return { files }
   })
 
   /** file path -> the sandbox it provisioned, for anything still present. */
-  ipcMain.handle('minipit:env-provisioned', async () => {
+  ipcMain.handle('den:env-provisioned', async () => {
     const map = (store.get('envSandboxes') as Record<string, string>) ?? {}
     let alive: Set<string>
     try { alive = new Set((await listSandboxes()).map((x) => x.name)) }
@@ -3691,7 +3878,7 @@ function setupIPC(): void {
   })
 
   /** Raw text of an environment file, for the renderer's YAML reader. */
-  ipcMain.handle('minipit:env-read', async (_, path: string) => {
+  ipcMain.handle('den:env-read', async (_, path: string) => {
     // The renderer supplies this path, so constrain it the way every other
     // filesystem entry point here is constrained. Without the check this handler
     // reads any file the user can — `~/.ssh/id_rsa` included — on behalf of
@@ -3711,7 +3898,7 @@ function setupIPC(): void {
 
   // Add a file den didn't find on its own — a checkout outside any existing
   // sandbox's workspace, or a second file layered over a shared base.
-  ipcMain.handle('minipit:env-pick', async () => {
+  ipcMain.handle('den:env-pick', async () => {
     const res = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose a sandbox environment file',
       properties: ['openFile'],
@@ -3724,10 +3911,7 @@ function setupIPC(): void {
   // Provision from one or more environment files. Several are meaningful and
   // ordered: a shared base plus a local override, with the last winning — so
   // den passes them in the order the UI lists them and never reorders.
-  ipcMain.handle('minipit:env-create', async (event, paths: string[], name?: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Sandbox environments need sbx ${SBX_ENV_VERSION} or newer.` }
-    }
+  ipcMain.handle('den:env-create', async (event, paths: string[], name?: string) => {
     if (!paths.length) return { ok: false as const, error: 'No environment file selected.' }
     const fileFlag = await sbxFlag(['env', 'create'], ['-f', '--file', '--env-file'])
     if (!fileFlag && paths.length > 1) {
@@ -3744,7 +3928,7 @@ function setupIPC(): void {
     // instead of the one the user clicked, and then recorded against theirs.
     const cwd = fileFlag ? undefined : paths[paths.length - 1].replace(/\/[^/]+$/, '')
     try {
-      const send = (chunk: string) => event.sender.send('minipit:env-output', chunk)
+      const send = (chunk: string) => event.sender.send('den:env-output', chunk)
       send(`$ sbx ${args.join(' ')}\n`)
       // Snapshot first so the new sandbox can be identified by difference. sbx
       // names it from the environment file, and parsing that name out of the
@@ -3768,10 +3952,7 @@ function setupIPC(): void {
   // Tear an environment down. Separate from `delete-sandbox` because sbx tracks
   // it as an environment, and removing it as a plain sandbox can leave the
   // environment's own bookkeeping behind.
-  ipcMain.handle('minipit:env-rm', async (_, name: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Sandbox environments need sbx ${SBX_ENV_VERSION} or newer.` }
-    }
+  ipcMain.handle('den:env-rm', async (_, name: string) => {
     try {
       const force = await sbxFlag(['env', 'rm'], ['--force', '-f', '--yes', '-y'])
       if (!force) {
@@ -3797,7 +3978,7 @@ function setupIPC(): void {
   // The output shape isn't pinned, so prefer `--json` and fall back to parsing
   // the table — the same defensive approach `sbx secret ls` and `policy log`
   // needed. An unrecognised row is skipped, never guessed at.
-  ipcMain.handle('minipit:mcp-list', async () => {
+  ipcMain.handle('den:mcp-list', async () => {
     const fromJson = (raw: string): McpServerEntry[] | null => {
       try {
         const data = JSON.parse(raw) as unknown
@@ -3861,7 +4042,7 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:mcp-add', async (_, cfg: {
+  ipcMain.handle('den:mcp-add', async (_, cfg: {
     name: string; url?: string; command?: string; args?: string; local?: boolean
     scopes?: string; clientId?: string; skipAuth?: boolean
   }) => {
@@ -3890,7 +4071,7 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:mcp-remove', async (_, name: string) => {
+  ipcMain.handle('den:mcp-remove', async (_, name: string) => {
     try {
       const output = await sbx(['mcp', 'rm', name], { timeout: 30000 })
       return { ok: true, output }
@@ -3901,7 +4082,7 @@ function setupIPC(): void {
 
   // Attach a registered server to a sandbox that's already running. Creation-time
   // attachment is a different flag (`--static-mcp`, passed to `sbx run`).
-  ipcMain.handle('minipit:mcp-load', async (_, name: string, sandbox: string) => {
+  ipcMain.handle('den:mcp-load', async (_, name: string, sandbox: string) => {
     try {
       const output = await sbx(['mcp', 'load', name, '--sandbox', sandbox], { timeout: 60000 })
       return { ok: true, output }
@@ -3910,7 +4091,7 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:mcp-inspect', async (_, name: string) => {
+  ipcMain.handle('den:mcp-inspect', async (_, name: string) => {
     try {
       return { ok: true, raw: await sbx(['mcp', 'inspect', name], { timeout: 20000 }) }
     } catch (err) {
@@ -3921,8 +4102,8 @@ function setupIPC(): void {
   // Authorization opens a browser on the HOST and can prompt, so it streams
   // through a PTY like `sbx login` rather than being captured — the user needs
   // to see the URL and any code it prints.
-  ipcMain.handle('minipit:mcp-auth', async (_, name: string) => {
-    const send = (chunk: string) => mainWindow?.webContents.send('minipit:mcp-auth-output', chunk)
+  ipcMain.handle('den:mcp-auth', async (_, name: string) => {
+    const send = (chunk: string) => mainWindow?.webContents.send('den:mcp-auth-output', chunk)
     try {
       // No command echo: the stream feeds a progress line and the authorization
       // link, not a console. Showing "$ sbx mcp auth …" was den narrating its
@@ -3934,17 +4115,17 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:list-templates', () => listTemplates())
+  ipcMain.handle('den:list-templates', () => listTemplates())
 
-  ipcMain.handle('minipit:remove-template', async (_, ref: string) => {
+  ipcMain.handle('den:remove-template', async (_, ref: string) => {
     await sbx(['template', 'rm', ref], { timeout: 30000 })
   })
 
-  ipcMain.handle('minipit:storage-usage', () => storageUsage())
+  ipcMain.handle('den:storage-usage', () => storageUsage())
 
   // ── Kits ───────────────────────────────────────────────────────────────
   // Kit artifacts authored under <userData>/kits/<name>/ (spec.yaml + files/).
-  ipcMain.handle('minipit:create-kit', async (_, name: string, specYaml: string, files?: KitFileArg[]) => {
+  ipcMain.handle('den:create-kit', async (_, name: string, specYaml: string, files?: KitFileArg[]) => {
     const fs = require('fs')
     // The name reaches us from the renderer and becomes a directory — keep it a
     // single folder inside the kits root (`..` would escape it).
@@ -3961,7 +4142,7 @@ function setupIPC(): void {
 
   // Kit files are config, dotfiles and helper scripts as often as documents, so
   // "All files" leads; `showHiddenFiles` makes dotfiles selectable at all.
-  ipcMain.handle('minipit:pick-files', async () => {
+  ipcMain.handle('den:pick-files', async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openFile', 'multiSelections', 'showHiddenFiles'],
       filters: [
@@ -3972,7 +4153,7 @@ function setupIPC(): void {
     return r.canceled ? [] : r.filePaths
   })
 
-  ipcMain.handle('minipit:applied-kits', (_, sandbox: string) => {
+  ipcMain.handle('den:applied-kits', (_, sandbox: string) => {
     const fromStore = ((store.get('appliedKits') as Record<string, string[]>) ?? {})[sandbox] ?? []
     // Also derive from the sandbox's durable-startup dirs (host-side), which sbx
     // names `NNN-startup-<kit>` — so kits show even if applied outside the app.
@@ -3996,14 +4177,14 @@ function setupIPC(): void {
     return Array.from(new Set([...fromStore, ...derived]))
   })
 
-  ipcMain.handle('minipit:read-kit', (_, dir: string) => {
+  ipcMain.handle('den:read-kit', (_, dir: string) => {
     try { return require('fs').readFileSync(join(dir, 'spec.yaml'), 'utf8') as string }
     catch { return '' }
   })
 
   // The static files already packed under <kit>/files/, as {target, dest} pairs
   // the editor can display and remove.
-  ipcMain.handle('minipit:list-kit-files', (_, dir: string) => {
+  ipcMain.handle('den:list-kit-files', (_, dir: string) => {
     const fs = require('fs')
     const path = require('path')
     const out: { target: 'home' | 'workspace'; dest: string }[] = []
@@ -4021,7 +4202,7 @@ function setupIPC(): void {
     return out
   })
 
-  ipcMain.handle('minipit:remove-kit-file', (_, dir: string, target: string, dest: string) => {
+  ipcMain.handle('den:remove-kit-file', (_, dir: string, target: string, dest: string) => {
     try {
       const fs = require('fs')
       const base = join(assertInsideKitsRoot(dir), 'files', target === 'home' ? 'home' : 'workspace')
@@ -4033,7 +4214,7 @@ function setupIPC(): void {
   })
 
   // Rewrite a kit's spec.yaml, bundle any newly-attached files, and re-pack it.
-  ipcMain.handle('minipit:update-kit', async (_, dir: string, spec: string, files?: KitFileArg[]) => {
+  ipcMain.handle('den:update-kit', async (_, dir: string, spec: string, files?: KitFileArg[]) => {
     try {
       const fs = require('fs')
       fs.writeFileSync(join(assertInsideKitsRoot(dir), 'spec.yaml'), spec)
@@ -4047,7 +4228,7 @@ function setupIPC(): void {
   })
 
   // Apply a kit to a RUNNING sandbox (re-runs install commands, re-copies files).
-  ipcMain.handle('minipit:kit-add', async (_, sandbox: string, kitDir: string) => {
+  ipcMain.handle('den:kit-add', async (_, sandbox: string, kitDir: string) => {
     try {
       const output = await sbx(['kit', 'add', sandbox, kitDir], { timeout: 120000 })
       recordKits(sandbox, [kitDir])
@@ -4057,9 +4238,9 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:list-kits', () => listKits())
+  ipcMain.handle('den:list-kits', () => listKits())
 
-  ipcMain.handle('minipit:remove-kit', (_, dir: string) => {
+  ipcMain.handle('den:remove-kit', (_, dir: string) => {
     const fs = require('fs')
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch (err) { console.error(err) }
     setAppMenu().catch(() => {})
@@ -4072,7 +4253,7 @@ function setupIPC(): void {
   // from the Docker Hub API (best-effort) — used to prefill the push namespace
   // and populate the account dropdown. On any API failure the username still
   // returns, so callers degrade to username-only.
-  ipcMain.handle('minipit:docker-account', async () => {
+  ipcMain.handle('den:docker-account', async () => {
     if (dockerAccountCache && Date.now() - dockerAccountCache.at < DOCKER_ACCOUNT_TTL) {
       return dockerAccountCache.value
     }
@@ -4150,8 +4331,8 @@ function setupIPC(): void {
   // Sign in to Docker via `sbx login`. It's an interactive browser/device flow,
   // so stream its output to the renderer and allow a long timeout while the user
   // completes auth in the browser.
-  ipcMain.handle('minipit:docker-login', async () => {
-    const send = (chunk: string) => mainWindow?.webContents.send('minipit:login-output', chunk)
+  ipcMain.handle('den:docker-login', async () => {
+    const send = (chunk: string) => mainWindow?.webContents.send('den:login-output', chunk)
     try {
       const output = await new Promise<string>((resolve, reject) => {
         const proc = spawn(getSbxPath(), ['login'], { env: guiEnv() })
@@ -4180,8 +4361,8 @@ function setupIPC(): void {
   // Sign out of the runtime via `sbx logout`. v0.35 makes logout clear all
   // stored Docker credentials (fixing the "already exists in the keychain"
   // re-login bug), so this fully resets the Authentication state.
-  ipcMain.handle('minipit:docker-logout', async () => {
-    const send = (chunk: string) => mainWindow?.webContents.send('minipit:login-output', chunk)
+  ipcMain.handle('den:docker-logout', async () => {
+    const send = (chunk: string) => mainWindow?.webContents.send('den:login-output', chunk)
     try {
       send('$ sbx logout -y\n')
       // `-y` skips the interactive confirmation; without it the piped (no-TTY)
@@ -4205,10 +4386,10 @@ function setupIPC(): void {
   //   github-issue → `sbx diagnose --output github-issue` (pre-formatted bug)
   //   upload       → `sbx diagnose --upload`        (uploads a bundle, prints id)
   ipcMain.handle(
-    'minipit:diagnose',
+    'den:diagnose',
     async (_, mode: 'text' | 'json' | 'github-issue' | 'upload' = 'text') => {
       const send = (chunk: string) =>
-        mainWindow?.webContents.send('minipit:diagnose-output', chunk)
+        mainWindow?.webContents.send('den:diagnose-output', chunk)
 
       // Human-readable report → run through a pty so sbx emits its full colour
       // checklist (piping strips colour). The renderer resolves the ANSI/cursor
@@ -4251,12 +4432,12 @@ function setupIPC(): void {
   // Restart the sbx daemon (`sbx daemon restart`, v0.38 — supersedes the old
   // stop-then-start pair). Streams to its OWN channel so the output renders
   // under the Restart daemon button, separate from the diagnostics box.
-  ipcMain.handle('minipit:daemon-restart', () => restartDaemon())
+  ipcMain.handle('den:daemon-restart', () => restartDaemon())
 
   // Daemon health for the Diagnostics status indicator: `sbx daemon status`
   // (new in v0.35). Derive a running/stopped flag from the output, keep the raw
   // text for the tooltip.
-  ipcMain.handle('minipit:daemon-status', async () => {
+  ipcMain.handle('den:daemon-status', async () => {
     try {
       const raw = await sbx(['daemon', 'status'], { timeout: 10000 })
       const running = /\brunning|active|up\b|healthy|started/i.test(raw) && !/not running|stopped|inactive|down/i.test(raw)
@@ -4269,7 +4450,7 @@ function setupIPC(): void {
 
   // Get or set the daemon log verbosity: `sbx daemon log-level [level]`. With no
   // argument it reads the current level; with one it sets it.
-  ipcMain.handle('minipit:daemon-log-level', async (_, level?: string) => {
+  ipcMain.handle('den:daemon-log-level', async (_, level?: string) => {
     try {
       const args = ['daemon', 'log-level']
       if (level) args.push(level)
@@ -4283,7 +4464,7 @@ function setupIPC(): void {
 
   // Inspect a sandbox — v0.35 `sbx inspect` lists its kits, injected secrets and
   // sandbox info. Try JSON first (stable to parse); fall back to raw text.
-  ipcMain.handle('minipit:sbx-inspect', async (_, name: string) => {
+  ipcMain.handle('den:sbx-inspect', async (_, name: string) => {
     try {
       let json: unknown = null
       let raw = ''
@@ -4300,10 +4481,51 @@ function setupIPC(): void {
     }
   })
 
+  // Claude Code's own account info (organization, email, login tier) and the
+  // proxy it's actually configured to use — NOT in `sbx inspect --json` (that
+  // only knows a generic `auth_mode` like "oauth · anthropic" and the proxy's
+  // address from the host/network side, e.g. a raw container IP rather than
+  // the `gateway.docker.internal` hostname the sandbox itself resolves).
+  // Read straight from what Claude Code itself already has inside the sandbox:
+  // the OAuth account it cached at login (`~/.claude.json`'s `oauthAccount`,
+  // the same data behind Claude's own `/status` screen) and the proxy env vars
+  // sbx injects into the container.
+  ipcMain.handle('den:claude-account', async (_, name: string) => {
+    try {
+      const script =
+        'cat ~/.claude.json 2>/dev/null; ' +
+        'printf "\\n@@@DEN_ENV@@@\\n"; ' +
+        'printf "HTTPS_PROXY=%s\\n" "${HTTPS_PROXY:-$https_proxy}"; ' +
+        'printf "CA_CERT=%s\\n" "${NODE_EXTRA_CA_CERTS:-$SSL_CERT_FILE}"'
+      const raw = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', script], { timeout: 12000 })
+      const [fileRaw, envRaw] = raw.split('@@@DEN_ENV@@@')
+      let oauthAccount: { organizationName?: string; emailAddress?: string; organizationType?: string } | undefined
+      try { oauthAccount = JSON.parse(fileRaw.trim())?.oauthAccount } catch { /* not logged in via OAuth, or no ~/.claude.json yet */ }
+      const env = Object.fromEntries(
+        (envRaw ?? '').trim().split('\n').filter(Boolean).map((l) => {
+          const i = l.indexOf('=')
+          return [l.slice(0, i), l.slice(i + 1)]
+        })
+      )
+      return {
+        ok: true,
+        loginMethod: oauthAccount
+          ? (oauthAccount.organizationType === 'claude_enterprise' ? 'Claude Enterprise account' : 'Claude account')
+          : undefined,
+        organization: oauthAccount?.organizationName,
+        email: oauthAccount?.emailAddress,
+        proxy: env.HTTPS_PROXY || undefined,
+        caCert: env.CA_CERT || undefined
+      }
+    } catch (err) {
+      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Persist a den-managed runtime env override (proxy / virtiofs cache) into
   // den's store. Applied to spawned sbx processes via guiEnv(); takes effect on
   // the next daemon restart.
-  ipcMain.handle('minipit:set-runtime-env', (_, key: string, value: string | boolean | null) => {
+  ipcMain.handle('den:set-runtime-env', (_, key: string, value: string | boolean | null) => {
     const allowed = ['runtimeProxy', 'runtimeNoProxy', 'runtimeVirtiofsCache']
     if (!allowed.includes(key)) return { ok: false, error: `unknown runtime key: ${key}` }
     if (value === null || value === '') store.delete(key)
@@ -4313,7 +4535,7 @@ function setupIPC(): void {
 
   // Publish a kit as an OCI artifact to a registry (Docker Hub, ghcr, …).
   // Auth uses the Docker credential store (the user must `docker login` first).
-  ipcMain.handle('minipit:kit-push', async (_, dir: string, ref: string) => {
+  ipcMain.handle('den:kit-push', async (_, dir: string, ref: string) => {
     try {
       const output = await sbx(['kit', 'push', dir, ref], { timeout: 180000 })
       return { ok: true, output }
@@ -4325,7 +4547,7 @@ function setupIPC(): void {
   // Validate a kit spec without saving/packing it — surfaces spec errors in the
   // editor. `sbx kit validate` exits non-zero on invalid specs, so a rejected
   // promise carries the validation message.
-  ipcMain.handle('minipit:kit-validate', async (_, dir: string) => {
+  ipcMain.handle('den:kit-validate', async (_, dir: string) => {
     try {
       const output = await sbx(['kit', 'validate', dir], { timeout: 20000 })
       return { ok: true, output }
@@ -4334,16 +4556,37 @@ function setupIPC(): void {
     }
   })
 
+  // Move a sandbox between local and cloud (sbx v0.42). Captures the source's
+  // filesystem as a template and launches a new sandbox from it on the other
+  // side — filesystem-only (no in-memory state), and per `move --help` the
+  // source is never deleted (a local→cloud move stops it; a cloud→local move
+  // tries to). No --cloud needed: `move` is inherently cross-boundary and
+  // resolves the source wherever it actually is. `--force` skips sbx's own
+  // confirmation for a bind-mounted workspace that won't travel to the cloud —
+  // den's own dialog already covers that (see MoveSandboxModal), matching how
+  // policy-reset/kit-sign already treat "our dialog confirms, --force skips
+  // sbx's own prompt". Streams like kit-sign/mcp auth (this can take minutes
+  // for a large workspace/session).
+  ipcMain.handle('den:move-sandbox', async (event, name: string, to: 'local' | 'cloud', newName?: string) => {
+    try {
+      const send = (chunk: string) => event.sender.send('den:move-output', chunk)
+      const args = ['move', name, '--to', to, '--force', ...(newName ? ['--name', newName] : [])]
+      const { code, output } = await ptyRun(args, send, 600000)
+      return code === 0
+        ? { ok: true as const, output: output.trim() }
+        : { ok: false as const, error: output.trim() || `sbx move exited ${code}` }
+    } catch (err) {
+      return { ok: false as const, error: (err instanceof Error ? err.message : String(err)).trim() }
+    }
+  })
+
   // Kit signing (v0.39): cosign-compatible Sigstore signatures, so a kit pulled
   // from a registry can be checked against who published it. Signing is
   // keyless-by-default in Sigstore, which means a browser flow on the host — so
   // it streams like `mcp auth` rather than returning a single result.
-  ipcMain.handle('minipit:kit-sign', async (event, ref: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Kit signing needs sbx ${SBX_ENV_VERSION} or newer.` }
-    }
+  ipcMain.handle('den:kit-sign', async (event, ref: string) => {
     try {
-      const send = (chunk: string) => event.sender.send('minipit:kit-sign-output', chunk)
+      const send = (chunk: string) => event.sender.send('den:kit-sign-output', chunk)
       // 5 minutes: a keyless signature waits on an interactive OIDC login.
       const { code, output } = await ptyRun(['kit', 'sign', ref], send, 300000)
       return code === 0
@@ -4358,10 +4601,7 @@ function setupIPC(): void {
   // check out": the first is the common case for a kit you wrote yourself and
   // isn't a problem, the second means the artifact doesn't match its publisher
   // and is. Collapsing them into one red state would make signing useless.
-  ipcMain.handle('minipit:kit-verify', async (_, ref: string) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, state: 'unsupported' as const, detail: '' }
-    }
+  ipcMain.handle('den:kit-verify', async (_, ref: string) => {
     try {
       const output = await sbx(['kit', 'verify', ref], { timeout: 60000 })
       return { ok: true as const, state: 'verified' as const, detail: output.trim() }
@@ -4374,7 +4614,7 @@ function setupIPC(): void {
 
   // Pack a kit into a distributable zip at a user-chosen location (complements
   // push — for sharing a file rather than an OCI reference).
-  ipcMain.handle('minipit:kit-pack', async (_, dir: string, name: string) => {
+  ipcMain.handle('den:kit-pack', async (_, dir: string, name: string) => {
     const res = await dialog.showSaveDialog(mainWindow!, {
       defaultPath: `${name}.zip`,
       filters: [{ name: 'Zip archive', extensions: ['zip'] }]
@@ -4391,7 +4631,7 @@ function setupIPC(): void {
   // Save a sandbox's current state as a reusable template (image) under a tag.
   // `sbx template save` interactively asks to stop the sandbox first (there is no
   // flag to skip it), so feed "y" to its stdin to auto-confirm.
-  ipcMain.handle('minipit:save-snapshot', async (_, name: string, tag: string) => {
+  ipcMain.handle('den:save-snapshot', async (_, name: string, tag: string) => {
     try {
       const output = await sbxWithInput(['template', 'save', name, tag], 'y\n', 180000)
       return { ok: true, output }
@@ -4402,7 +4642,7 @@ function setupIPC(): void {
 
   // Publish a template (image) to a registry. Auth uses the Docker credential
   // store, so the user must `docker login` first (same as kit push).
-  ipcMain.handle('minipit:template-push', async (_, ref: string) => {
+  ipcMain.handle('den:template-push', async (_, ref: string) => {
     try {
       const output = await sbx(['template', 'push', ref], { timeout: 300000 })
       return { ok: true, output }
@@ -4413,7 +4653,7 @@ function setupIPC(): void {
 
   // Import a remote kit by OCI reference: pull the artifact, then extract it
   // into the local kit library so it shows up like any locally-authored kit.
-  ipcMain.handle('minipit:kit-import', async (_, ref: string) => {
+  ipcMain.handle('den:kit-import', async (_, ref: string) => {
     const fs = require('fs')
     let r = ref.trim()
     if (!r) return { ok: false, error: 'Reference is required.' }
@@ -4449,19 +4689,24 @@ function setupIPC(): void {
           fs.rmdirSync(inner)
         }
       }
-      if (!fs.existsSync(join(dir, 'spec.yaml'))) {
+      if (!fs.existsSync(join(dir, 'spec.yaml')) && !(await tryFetchSpecFallback(r, dir))) {
         fs.rmSync(dir, { recursive: true, force: true })
         return { ok: false, error: 'Pulled artifact has no spec.yaml — not a valid kit.' }
       }
       return { ok: true, name }
     } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+      const message = (err instanceof Error ? err.message : String(err)).trim()
+      // sbx v0.39's `kit pull` demands a real tar+gzip content layer and rejects
+      // the standard OCI empty-layer placeholder that spec-only kits carry —
+      // fall back to reading spec.yaml straight off the registry instead.
+      if (await tryFetchSpecFallback(r, dir)) return { ok: true, name }
+      return { ok: false, error: message }
     }
   })
 
   // Import a kit from a local .zip / .tar.gz archive (a packed kit). Opens a
   // file picker, extracts it into the library, and packs it.
-  ipcMain.handle('minipit:kit-import-zip', async () => {
+  ipcMain.handle('den:kit-import-zip', async () => {
     const fs = require('fs')
     const r = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openFile'],
@@ -4481,7 +4726,7 @@ function setupIPC(): void {
 
   // Import a kit from a local folder (a kit source directory with spec.yaml).
   // Opens a folder picker, copies it into the library, and packs it.
-  ipcMain.handle('minipit:kit-import-folder', async () => {
+  ipcMain.handle('den:kit-import-folder', async () => {
     const fs = require('fs')
     const r = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'] })
     if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
@@ -4505,7 +4750,7 @@ function setupIPC(): void {
   // remote, or a browser URL pointing at a branch and subfolder. `pickDir`
   // overrides the subdirectory — that's how the renderer answers the kit picker
   // returned when a repo holds several kits.
-  ipcMain.handle('minipit:kit-import-git', async (_, url: string, pickDir?: string) => {
+  ipcMain.handle('den:kit-import-git', async (_, url: string, pickDir?: string) => {
     const fs = require('fs')
     const os = require('os')
     let parsed: GitKitRef
@@ -4554,8 +4799,8 @@ function setupIPC(): void {
   // ── Docker Hub kit gallery ────────────────────────────────────────────────
   // Browse published kits from the Docker Hub catalogue (search API + per-kit
   // registry enrichment; see listHubKits). Importing a kit reuses the existing
-  // `minipit:kit-import` path (`sbx kit pull <ref>`) — no bespoke clone step.
-  ipcMain.handle('minipit:list-hub-kits', async () => {
+  // `den:kit-import` path (`sbx kit pull <ref>`) — no bespoke clone step.
+  ipcMain.handle('den:list-hub-kits', async () => {
     try {
       return { ok: true, kits: await listHubKits() }
     } catch (err) {
@@ -4564,11 +4809,11 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:git-status', (_, name: string, workspace: string) => gitStatus(name, workspace))
+  ipcMain.handle('den:git-status', (_, name: string, workspace: string) => gitStatus(name, workspace))
 
   // Host-side check: is this workspace folder a Git repo? `--clone` sandboxes
   // clone the host repo, so this gates the "initialize a repo" offer.
-  ipcMain.handle('minipit:is-git-repo', (_, dir: string) => new Promise<boolean>((resolve) => {
+  ipcMain.handle('den:is-git-repo', (_, dir: string) => new Promise<boolean>((resolve) => {
     if (!dir) return resolve(false)
     execFile('git', ['-C', dir, 'rev-parse', '--is-inside-work-tree'], { timeout: 5000, env: guiEnv() },
       (err, stdout) => resolve(!err && stdout.trim() === 'true'))
@@ -4576,7 +4821,7 @@ function setupIPC(): void {
 
   // Host-side repo summary for a workspace folder: branch + origin remote.
   // Powers the project Git badge, "Open on GitHub", and "Copy remote".
-  ipcMain.handle('minipit:git-info', (_, dir: string) => new Promise<{
+  ipcMain.handle('den:git-info', (_, dir: string) => new Promise<{
     isRepo: boolean; branch?: string; remote?: string; remoteUrl?: string
   }>((resolve) => {
     if (!dir) return resolve({ isRepo: false })
@@ -4608,13 +4853,13 @@ function setupIPC(): void {
   })
 
   // Fetch the sandbox's work into a local review branch `sandbox/<name>`.
-  ipcMain.handle('minipit:sandbox-fetch-work', (_, name: string, repoDir: string) => fetchSandboxWork(name, repoDir))
+  ipcMain.handle('den:sandbox-fetch-work', (_, name: string, repoDir: string) => fetchSandboxWork(name, repoDir))
 
   // Per-sandbox "auto-sync to review branch" toggle (clone mode). Enabling runs
   // an immediate fetch so the branch is current right away; subsequent workspace
   // changes are picked up by scheduleAutoSync (debounced).
-  ipcMain.handle('minipit:auto-sync-get', () => getAutoSyncMap())
-  ipcMain.handle('minipit:auto-sync-set', (_, name: string, on: boolean) => {
+  ipcMain.handle('den:auto-sync-get', () => getAutoSyncMap())
+  ipcMain.handle('den:auto-sync-set', (_, name: string, on: boolean) => {
     setAutoSyncFlag(name, on)
     if (on) runAutoSync(name).catch(() => {})
     else { const t = autoSyncTimers.get(name); if (t) { clearTimeout(t); autoSyncTimers.delete(name) } }
@@ -4622,7 +4867,7 @@ function setupIPC(): void {
   })
 
   // Push the review branch and open a PR (via gh, falling back to a compare URL).
-  ipcMain.handle('minipit:sandbox-open-pr', async (_, repoDir: string, branch: string, opts?: { base?: string; title?: string; body?: string }) => {
+  ipcMain.handle('den:sandbox-open-pr', async (_, repoDir: string, branch: string, opts?: { base?: string; title?: string; body?: string }) => {
     const git = gitIn(repoDir)
     try {
       const pushed = await git(['push', '-u', 'origin', branch])
@@ -4661,7 +4906,7 @@ function setupIPC(): void {
   })
 
   // Merge a review branch into the current branch, aborting cleanly on conflict.
-  ipcMain.handle('minipit:sandbox-merge-branch', async (_, repoDir: string, branch: string) => {
+  ipcMain.handle('den:sandbox-merge-branch', async (_, repoDir: string, branch: string) => {
     const git = gitIn(repoDir)
     try {
       const base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
@@ -4678,7 +4923,7 @@ function setupIPC(): void {
 
   // Initialize a Git repo in a host folder and commit its current contents, so a
   // `--clone` sandbox has a repo (with the folder's files) to clone.
-  ipcMain.handle('minipit:git-init', async (_, dir: string) => {
+  ipcMain.handle('den:git-init', async (_, dir: string) => {
     const runGit = (args: string[]) => new Promise<string>((resolve, reject) => {
       execFile('git', args, { cwd: dir, timeout: 60000, env: guiEnv() },
         (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).trim())) : resolve(stdout.trim())))
@@ -4699,8 +4944,8 @@ function setupIPC(): void {
   })
 
   // Read a file's contents (untrimmed, up to 10 MB) via `sbx exec cat`.
-  ipcMain.handle('minipit:read-file', (_, name: string, path: string) => new Promise<string>((resolve, reject) => {
-    execFile(getSbxPath(), ['exec', name, 'cat', path], { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+  ipcMain.handle('den:read-file', (_, name: string, path: string) => new Promise<string>((resolve, reject) => {
+    execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'cat', path], { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message))
       else resolve(stdout)
     })
@@ -4711,11 +4956,11 @@ function setupIPC(): void {
   // `cat` for the bytes and let execFile decode stdout as base64, so no shell
   // quoting of binary is involved. Files over ~25 MB are refused (base64 inflates
   // ~33%, and previewing something that large isn't useful anyway).
-  ipcMain.handle('minipit:read-file-bytes', (_, name: string, path: string) =>
+  ipcMain.handle('den:read-file-bytes', (_, name: string, path: string) =>
     new Promise<{ base64: string; size: number }>((resolve, reject) => {
       execFile(
         getSbxPath(),
-        ['exec', name, 'cat', path],
+        [...cloudArgsFor(name), 'exec', name, 'cat', path],
         { timeout: 30000, encoding: 'base64', maxBuffer: 64 * 1024 * 1024 },
         (err, stdout, stderr) => {
           if (err) {
@@ -4738,14 +4983,14 @@ function setupIPC(): void {
   // files git's heuristic misflags as binary (a stray NUL in the first 8 KB)
   // still produce a real patch instead of "Binary files … differ". All git
   // errors collapse to "" (no diff).
-  ipcMain.handle('minipit:git-diff-file', (_, name: string, path: string) =>
+  ipcMain.handle('den:git-diff-file', (_, name: string, path: string) =>
     inSandboxFileDiff(name, path).then((diff) => ({ diff })))
 
   // Whole-review summary for the Changes panel. Clone/branch mode diffs the
   // agent's committed work (base...sandbox/<name>) on the host; direct-mount
   // mode reports the in-sandbox working-tree changes. Mode is detected by
   // whether the `sandbox-<name>` remote exists.
-  ipcMain.handle('minipit:review-summary', async (_, name: string, repoDir: string) => {
+  ipcMain.handle('den:review-summary', async (_, name: string, repoDir: string) => {
     const git = gitIn(repoDir)
     try {
       const hasSandboxRemote = (await git(['remote'])).out.split('\n').includes(`sandbox-${name}`)
@@ -4764,7 +5009,7 @@ function setupIPC(): void {
       // Direct-mount: in-sandbox working-tree changes.
       const st = await gitStatus(name, repoDir)
       const numOut = await new Promise<string>((resolve) => {
-        execFile(getSbxPath(), ['exec', name, 'git', '-C', repoDir, 'diff', '--no-renames', '--numstat', 'HEAD'],
+        execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'git', '-C', repoDir, 'diff', '--no-renames', '--numstat', 'HEAD'],
           { timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (_e, so) => resolve(so || ''))
       })
       const nums = parseNumstat(numOut)
@@ -4781,7 +5026,7 @@ function setupIPC(): void {
 
   // Per-file diff for the review surface. With a branch → host branch diff
   // (base...branch); otherwise the in-sandbox working-tree diff.
-  ipcMain.handle('minipit:review-file-diff', async (_, name: string, repoDir: string, branch: string | null, path: string) => {
+  ipcMain.handle('den:review-file-diff', async (_, name: string, repoDir: string, branch: string | null, path: string) => {
     if (branch) {
       const git = gitIn(repoDir)
       const base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'HEAD'
@@ -4792,7 +5037,7 @@ function setupIPC(): void {
   })
 
   // Local + origin branches (for the PR base picker).
-  ipcMain.handle('minipit:list-branches', async (_, repoDir: string) => {
+  ipcMain.handle('den:list-branches', async (_, repoDir: string) => {
     const git = gitIn(repoDir)
     const out = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'])).out
     const set = new Set<string>()
@@ -4804,7 +5049,7 @@ function setupIPC(): void {
   })
 
   // Prefill PR title/body from the branch's commits (base..branch).
-  ipcMain.handle('minipit:pr-defaults', async (_, repoDir: string, branch: string, base: string) => {
+  ipcMain.handle('den:pr-defaults', async (_, repoDir: string, branch: string, base: string) => {
     const git = gitIn(repoDir)
     const subjects = (await git(['log', '--format=%s', `${base}..${branch}`])).out.split('\n').map((s) => s.trim()).filter(Boolean)
     const title = subjects[subjects.length - 1] || branch
@@ -4814,7 +5059,7 @@ function setupIPC(): void {
 
   // Stage all + commit the working-tree changes (direct-mount review). Runs on
   // the host (shared bind-mounted tree) so it uses the host's git identity.
-  ipcMain.handle('minipit:sandbox-commit', async (_, repoDir: string, message: string, paths?: string[]) => {
+  ipcMain.handle('den:sandbox-commit', async (_, repoDir: string, message: string, paths?: string[]) => {
     const git = gitIn(repoDir)
     // `paths` (optional) = commit only these files ("exclude from commit"). An
     // empty/omitted list means stage-all. `-A -- <paths>` stages adds/mods/dels
@@ -4836,7 +5081,7 @@ function setupIPC(): void {
   // Append one or more patterns to the workspace's .gitignore (deduped, one per
   // line). Written inside the sandbox at the repo dir, so it works for both
   // direct-mount (shared tree) and clone-mode (the agent's in-container clone).
-  ipcMain.handle('minipit:git-ignore-add', (_, name: string, repoDir: string, patterns: string[]) => {
+  ipcMain.handle('den:git-ignore-add', (_, name: string, repoDir: string, patterns: string[]) => {
     const pats = (Array.isArray(patterns) ? patterns : []).map((p) => p.trim()).filter(Boolean)
     if (pats.length === 0) return Promise.resolve({ ok: false, error: 'No pattern given.' })
     return new Promise((resolve) => {
@@ -4844,20 +5089,20 @@ function setupIPC(): void {
       const script =
         'f="$1/.gitignore"; shift; ' +
         'for p in "$@"; do grep -qxF -- "$p" "$f" 2>/dev/null || printf "%s\\n" "$p" >> "$f"; done'
-      execFile(getSbxPath(), ['exec', name, 'sh', '-c', script, 'sh', repoDir, ...pats],
+      execFile(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', script, 'sh', repoDir, ...pats],
         { timeout: 10000 }, (err, _so, se) =>
           resolve(err ? { ok: false, error: (se || err.message || 'Failed to update .gitignore.').trim() } : { ok: true }))
     })
   })
 
   // Write contents back to a file (content piped to `cat > FILE`).
-  ipcMain.handle('minipit:write-file', async (_, name: string, path: string, content: string) => {
-    await sbxWithInput(['exec', name, 'sh', '-c', 'cat > "$1"', 'sh', path], content)
+  ipcMain.handle('den:write-file', async (_, name: string, path: string, content: string) => {
+    await sbxWithInput([...cloudArgsFor(name), 'exec', name, 'sh', '-c', 'cat > "$1"', 'sh', path], content)
   })
 
   // Open a host path (the workspace is bind-mounted) in the OS default app,
   // or an http(s) URL in the default browser.
-  ipcMain.handle('minipit:open-path', (_, path: string) => {
+  ipcMain.handle('den:open-path', (_, path: string) => {
     if (/^https?:\/\//i.test(path)) return openExternalSafe(path)
     const expanded = path.replace(/^~/, app.getPath('home'))
     return shell.openPath(expanded)
@@ -4865,8 +5110,8 @@ function setupIPC(): void {
 
   // Debug traces for agent API failures — where the file is, how much is in it,
   // and a way to get at it. See docs/errors.md for how to read one.
-  ipcMain.handle('minipit:api-traces', () => ({ path: traceFile(), count: traceCount() }))
-  ipcMain.handle('minipit:reveal-api-traces', async () => {
+  ipcMain.handle('den:api-traces', () => ({ path: traceFile(), count: traceCount() }))
+  ipcMain.handle('den:reveal-api-traces', async () => {
     const fs = require('fs')
     const file = traceFile()
     if (fs.existsSync(file)) {
@@ -4888,7 +5133,7 @@ function setupIPC(): void {
   })
 
   // Open the built-in file editor in its own window.
-  ipcMain.handle('minipit:open-file-window', (_, name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null) => {
+  ipcMain.handle('den:open-file-window', (_, name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null) => {
     const win = new BrowserWindow({
       width: 820,
       height: 640,
@@ -4911,8 +5156,8 @@ function setupIPC(): void {
   })
 
   // Delete a file or directory inside the sandbox workspace.
-  ipcMain.handle('minipit:delete-path', async (_, name: string, path: string) => {
-    await sbx(['exec', name, 'rm', '-rf', path])
+  ipcMain.handle('den:delete-path', async (_, name: string, path: string) => {
+    await sbx([...cloudArgsFor(name), 'exec', name, 'rm', '-rf', path])
   })
 
   // Write dropped files' bytes into a directory inside the sandbox. Mirrors the
@@ -4920,7 +5165,7 @@ function setupIPC(): void {
   // in over stdin), so it needs no host path and works for any container
   // directory regardless of how the workspace is mounted. Returns a per-file
   // result so the renderer can report partial failures (e.g. permission denied).
-  ipcMain.handle('minipit:copy-into', async (_, name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]) => {
+  ipcMain.handle('den:copy-into', async (_, name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]) => {
     const results: { name: string; ok: boolean; error?: string }[] = []
     for (const f of files) {
       const safe = ((f.name.split(/[\\/]/).pop() || 'file').replace(/[^A-Za-z0-9._ -]/g, '_').slice(-160)) || 'file'
@@ -4930,7 +5175,7 @@ function setupIPC(): void {
       }
       const r = await new Promise<{ name: string; ok: boolean; error?: string }>((resolve) => {
         // Positional args ($1 dir, $2 name) keep paths with spaces/quotes safe.
-        const proc = spawn(getSbxPath(), ['exec', name, 'sh', '-c', 'cat > "$1/$2"', 'sh', destDir, safe])
+        const proc = spawn(getSbxPath(), [...cloudArgsFor(name), 'exec', name, 'sh', '-c', 'cat > "$1/$2"', 'sh', destDir, safe])
         let err = ''
         proc.stderr.on('data', (d) => { err += d.toString() })
         proc.on('error', (e) => resolve({ name: safe, ok: false, error: String(e) }))
@@ -4946,7 +5191,7 @@ function setupIPC(): void {
   // Download a file from the sandbox to the host via a save dialog, then
   // `sbx cp sandbox:src → host`. Works for any container path, so it's the way
   // to get files that live outside the (host-mounted) workspace onto the host.
-  ipcMain.handle('minipit:download-from', async (_, name: string, srcPath: string) => {
+  ipcMain.handle('den:download-from', async (_, name: string, srcPath: string) => {
     const base = srcPath.split('/').pop() || 'file'
     const res = await dialog.showSaveDialog(mainWindow!, {
       defaultPath: join(app.getPath('downloads'), base),
@@ -4961,13 +5206,13 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:list-secrets', () => listSecrets())
+  ipcMain.handle('den:list-secrets', () => listSecrets())
 
   // Migrate host credential env vars (e.g. ANTHROPIC_API_KEY) into the keychain
   // via `sbx secret import`. sbx v0.35 stopped auto-injecting host env vars, so
   // this is the one-time move users need. Runs with the GUI env so sbx sees the
   // same variables the user's shell would.
-  ipcMain.handle('minipit:secret-import', async () => {
+  ipcMain.handle('den:secret-import', async () => {
     try {
       const output = await sbx(['secret', 'import'], { timeout: 30000 })
       return { ok: true, output }
@@ -4976,20 +5221,26 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:set-secret', async (_, service: string, value: string, scope?: string) => {
-    await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
+  ipcMain.handle('den:set-secret', async (_, service: string, value: string, scope?: string, cloud?: boolean) => {
+    await sbxWithInput(
+      [...(cloud ? ['--cloud'] : []), 'secret', 'set', ...secretScopeArgs(scope), service],
+      value.endsWith('\n') ? value : value + '\n'
+    )
   })
 
   // Is the 1Password CLI installed? Gates the "Load from 1Password" option.
-  ipcMain.handle('minipit:op-available', () => opAvailable())
+  ipcMain.handle('den:op-available', () => opAvailable())
 
   // Resolve a 1Password reference with `op read` and store the result — mirrors
   // `op read "op://…" | sbx secret set <scope> <service>`. The real value stays
   // on the host and is never pasted into den.
-  ipcMain.handle('minipit:set-secret-op', async (_, service: string, ref: string, scope?: string) => {
+  ipcMain.handle('den:set-secret-op', async (_, service: string, ref: string, scope?: string, cloud?: boolean) => {
     const value = await opRead(ref)
     if (!value) throw new Error('1Password returned an empty value for that reference.')
-    await sbxWithInput(['secret', 'set', ...secretScopeArgs(scope), service], value.endsWith('\n') ? value : value + '\n')
+    await sbxWithInput(
+      [...(cloud ? ['--cloud'] : []), 'secret', 'set', ...secretScopeArgs(scope), service],
+      value.endsWith('\n') ? value : value + '\n'
+    )
   })
 
   // Dynamic secrets (v0.39): sbx resolves the value itself, from a reference or
@@ -5000,7 +5251,7 @@ function setupIPC(): void {
   //
   // The 1Password path stays for 0.38 runtimes and is still the right answer for
   // a one-off paste; this is offered alongside it, not instead of it.
-  ipcMain.handle('minipit:set-secret-dynamic', async (_, opts: {
+  ipcMain.handle('den:set-secret-dynamic', async (_, opts: {
     service: string
     scope?: string
     /** `op://…`-style reference resolved by sbx, or a command whose stdout is the value. */
@@ -5008,10 +5259,8 @@ function setupIPC(): void {
     kind: 'reference' | 'command'
     refresh?: string
     custom?: boolean
+    cloud?: boolean
   }) => {
-    if (!sbxAtLeast(SBX_ENV_VERSION)) {
-      return { ok: false as const, error: `Dynamic secrets need sbx ${SBX_ENV_VERSION} or newer.` }
-    }
     // `secret set-custom` is the non-catalog form; both take the same options.
     const verb = opts.custom ? 'set-custom' : 'set'
     const kindFlag = await sbxFlag(['secret', verb],
@@ -5021,7 +5270,9 @@ function setupIPC(): void {
         `This sbx build doesn't document a ${opts.kind} option for \`secret ${verb}\`. ` +
         `Store the value directly instead, or update sbx.` }
     }
-    const args = ['secret', verb, ...secretScopeArgs(opts.scope), opts.service, kindFlag, opts.source]
+    const args = [
+      ...(opts.cloud ? ['--cloud'] : []), 'secret', verb, ...secretScopeArgs(opts.scope), opts.service, kindFlag, opts.source
+    ]
     if (opts.refresh) {
       const refreshFlag = await sbxFlag(['secret', verb], ['--refresh', '--refresh-interval', '--ttl'])
       // A missing refresh flag is not worth failing the whole write over: the
@@ -5036,15 +5287,17 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:remove-secret', async (_, service: string, scope?: string) => {
-    await sbx(['secret', 'rm', ...secretScopeArgs(scope), service, '-f'])
+  ipcMain.handle('den:remove-secret', async (_, service: string, scope?: string, cloud?: boolean) => {
+    await sbx([...(cloud ? ['--cloud'] : []), 'secret', 'rm', ...secretScopeArgs(scope), service, '-f'])
   })
 
-  ipcMain.handle('minipit:anthropic-oauth', () => anthropicOAuth())
+  ipcMain.handle('den:anthropic-oauth', () => anthropicOAuth())
 
   // sbx has a built-in OAuth flow for OpenAI (opens the browser, stores tokens).
-  ipcMain.handle('minipit:oauth-secret', (_, service: string) => new Promise((resolve, reject) => {
-    const proc = spawn(getSbxPath(), ['secret', 'set', service, '--oauth'])
+  // With --cloud, per `secret set --help`, --oauth also supports anthropic and
+  // stores only in the cloud store, never the local one.
+  ipcMain.handle('den:oauth-secret', (_, service: string, cloud?: boolean) => new Promise((resolve, reject) => {
+    const proc = spawn(getSbxPath(), [...(cloud ? ['--cloud'] : []), 'secret', 'set', service, '--oauth'])
     let err = ''
     proc.stderr?.on('data', (d) => (err += d))
     proc.on('error', reject)
@@ -5052,7 +5305,7 @@ function setupIPC(): void {
     setTimeout(() => { try { proc.kill() } catch { /* ignore */ }; reject(new Error('OAuth timed out')) }, 180000)
   }))
 
-  ipcMain.handle('minipit:open-in-finder', (_, path: string) => {
+  ipcMain.handle('den:open-in-finder', (_, path: string) => {
     const fs = require('fs')
     // Expand a leading `~` (only when it's the home marker, not part of a name)
     // and strip trailing slashes — macOS `showItemInFolder` no-ops on both.
@@ -5069,12 +5322,12 @@ function setupIPC(): void {
     return undefined
   })
 
-  ipcMain.handle('minipit:exec', async (_, name: string, command: string) => {
-    return sbx(['exec', name, 'sh', '-c', command], { timeout: 10000 })
+  ipcMain.handle('den:exec', async (_, name: string, command: string) => {
+    return sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', command], { timeout: 10000 })
   })
 
   // ── sbx daemon logs ──────────────────────────────────────────────────────
-  ipcMain.handle('minipit:list-logs', () => {
+  ipcMain.handle('den:list-logs', () => {
     const base = join(app.getPath('home'), 'Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd')
     try {
       const fs = require('fs')
@@ -5087,32 +5340,32 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:start-log-tail', (_, path: string) => {
+  ipcMain.handle('den:start-log-tail', (_, path: string) => {
     if (logTail) { logTail.kill(); logTail = null }
     const proc = spawn('tail', ['-n', '500', '-f', path])
     logTail = proc
-    proc.stdout?.on('data', (d) => mainWindow?.webContents.send('minipit:log-tail', d.toString()))
-    proc.stderr?.on('data', (d) => mainWindow?.webContents.send('minipit:log-tail', d.toString()))
+    proc.stdout?.on('data', (d) => mainWindow?.webContents.send('den:log-tail', d.toString()))
+    proc.stderr?.on('data', (d) => mainWindow?.webContents.send('den:log-tail', d.toString()))
   })
 
-  ipcMain.handle('minipit:stop-log-tail', () => {
+  ipcMain.handle('den:stop-log-tail', () => {
     if (logTail) { logTail.kill(); logTail = null }
   })
 
   // Kit/startup logs live INSIDE the sandbox (the durable-startup dispatcher
   // writes every startup command's output here). Not host-tailable, so read it
   // on demand via exec; callers poll for "follow".
-  ipcMain.handle('minipit:sandbox-log', async (_, name: string, which: 'kit' | 'sandbox') => {
+  ipcMain.handle('den:sandbox-log', async (_, name: string, which: 'kit' | 'sandbox') => {
     const path = which === 'sandbox' ? '/var/log/dockerd.log' : '/var/log/sbx-kit-startup.log'
     try {
-      const text = await sbx(['exec', name, 'sh', '-c', `cat ${path} 2>/dev/null`], { timeout: 10000 })
+      const text = await sbx([...cloudArgsFor(name), 'exec', name, 'sh', '-c', `cat ${path} 2>/dev/null`], { timeout: 10000 })
       return { ok: true, text }
     } catch (e) {
       return { ok: false, text: '', error: e instanceof Error ? e.message : String(e) }
     }
   })
 
-  ipcMain.handle('minipit:get-settings', () => ({
+  ipcMain.handle('den:get-settings', () => ({
     sbxPath: getSbxPath(),
     pollFocused: (store.get('pollFocused') as string) ?? '5s',
     pollBackground: (store.get('pollBackground') as string) ?? '30s',
@@ -5132,7 +5385,7 @@ function setupIPC(): void {
   // terminal — and a security-relevant switch showing the wrong state is worse
   // than showing none. `settings get` is preferred; `settings ls` is parsed as a
   // fallback because the subcommand set isn't pinned across versions.
-  ipcMain.handle('minipit:sbx-setting-get', async (_, key: string) => {
+  ipcMain.handle('den:sbx-setting-get', async (_, key: string) => {
     const clean = (v: string): string => v.trim().replace(/^["']|["']$/g, '')
     try {
       const out = await sbx(['settings', 'get', key], { timeout: 15000 })
@@ -5156,7 +5409,7 @@ function setupIPC(): void {
 
   // Write a runtime setting via `sbx settings set <key> <value>` (e.g.
   // clipboard.imagePaste). Distinct from den's own app settings above.
-  ipcMain.handle('minipit:sbx-setting-set', async (_, key: string, value: string) => {
+  ipcMain.handle('den:sbx-setting-set', async (_, key: string, value: string) => {
     try {
       const output = await sbx(['settings', 'set', key, value], { timeout: 15000 })
       return { ok: true, output }
@@ -5167,7 +5420,7 @@ function setupIPC(): void {
 
   // Destructive: `sbx reset` stops all VMs and deletes sandbox data. It prompts
   // for confirmation, so feed "y". `--preserve-secrets` keeps stored creds.
-  ipcMain.handle('minipit:sbx-reset', async (_, preserveSecrets: boolean) => {
+  ipcMain.handle('den:sbx-reset', async (_, preserveSecrets: boolean) => {
     try {
       const args = ['reset']
       if (preserveSecrets) args.push('--preserve-secrets')
@@ -5178,7 +5431,7 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:save-settings', (_, settings: Record<string, unknown>) => {
+  ipcMain.handle('den:save-settings', (_, settings: Record<string, unknown>) => {
     for (const [k, v] of Object.entries(settings)) store.set(k, v)
     if (typeof settings.launchAtLogin === 'boolean') {
       app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
@@ -5189,7 +5442,7 @@ function setupIPC(): void {
 
   // ── sbx runtime (version / update / release notes) ──────────────────────────
 
-  ipcMain.handle('minipit:sbx-version', (_, path?: string) =>
+  ipcMain.handle('den:sbx-version', (_, path?: string) =>
     new Promise((resolve) => {
       const bin = path || getSbxPath()
       execFile(bin, ['version'], { timeout: 10000 }, (err, stdout, stderr) => {
@@ -5204,7 +5457,7 @@ function setupIPC(): void {
     })
   )
 
-  ipcMain.handle('minipit:sbx-releases', async () => {
+  ipcMain.handle('den:sbx-releases', async () => {
     try {
       const res = await fetch('https://api.github.com/repos/docker/sbx-releases/releases?per_page=8', {
         headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'den' }
@@ -5225,7 +5478,7 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:sbx-install-info', async () => {
+  ipcMain.handle('den:sbx-install-info', async () => {
     const { manager, real } = await detectInstallManager()
     return {
       manager,
@@ -5239,9 +5492,9 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:sbx-update', async (_, action: 'update' | 'redownload') => {
+  ipcMain.handle('den:sbx-update', async (_, action: 'update' | 'redownload') => {
     const { manager } = await detectInstallManager()
-    const send = (chunk: string) => mainWindow?.webContents.send('minipit:runtime-output', chunk)
+    const send = (chunk: string) => mainWindow?.webContents.send('den:runtime-output', chunk)
     const cmd = pkgCommand(manager, action)
     // Only brew/winget can run non-interactively from the GUI (apt needs sudo).
     if (!cmd || !(manager === 'brew' || manager === 'winget')) {
@@ -5262,13 +5515,13 @@ function setupIPC(): void {
     })
   })
 
-  ipcMain.handle('minipit:network-policy', async (_, name?: string) => {
+  ipcMain.handle('den:network-policy', async (_, name?: string) => {
     try {
       // `--wide` keeps the full column set parsePolicyLs() depends on. We list
       // every rule and filter in-process rather than relying on the `--type`
       // flag or a positional sandbox filter (their availability isn't pinned
       // across sbx versions, and a bad flag would blank the whole view).
-      const out = await sbx(['policy', 'ls', '--wide'], { timeout: 12000 })
+      const out = await withPolicyInitRetry(() => sbx([...cloudArgsFor(name), 'policy', 'ls', '--wide'], { timeout: 12000 }))
       const parsed = parsePolicyLs(out)
       let rules = parsed.rules.filter((r) => !r.type || r.type === 'network')
       // Narrow to the rules that actually apply to this sandbox: its own rules
@@ -5280,18 +5533,20 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:policy-log', (_, name?: string) => fetchPolicyLog(name))
+  ipcMain.handle('den:policy-log', (_, name?: string) => fetchPolicyLog(name))
 
   // Test whether the current policy would allow a network request, without
   // running anything — `sbx policy check network <resource>` (new in v0.35).
   // Returns the parsed decision (allow/deny) plus the raw output for detail.
-  ipcMain.handle('minipit:policy-check', async (_, resource: string, _name?: string) => {
+  ipcMain.handle('den:policy-check', async (_, resource: string, name?: string) => {
     // Read the decision from `--json` (v0.37+) rather than scanning the text.
     // The old regex tested the whole output, so an ALLOWED host that merely
     // contains "blocked"/"deny" in its name parsed as a denial. `allowed` is an
     // explicit boolean, and the same payload carries the governance detail.
     try {
-      const raw = await sbx(['policy', 'check', 'network', '--json', resource], { timeout: 12000 })
+      const raw = await withPolicyInitRetry(() =>
+        sbx([...cloudArgsFor(name), 'policy', 'check', 'network', '--json', resource], { timeout: 12000 })
+      )
       const j = JSON.parse(raw) as {
         allowed?: boolean
         governance?: Record<string, unknown>
@@ -5310,7 +5565,9 @@ function setupIPC(): void {
       // Documented form: `sbx policy check network <host>`. It's read-only and
       // evaluates the daemon-side authorizer, so no per-sandbox flag is passed
       // (its availability isn't pinned, and a bad flag would error the check).
-      const raw = await sbx(['policy', 'check', 'network', resource], { timeout: 12000 })
+      const raw = await withPolicyInitRetry(() =>
+        sbx([...cloudArgsFor(name), 'policy', 'check', 'network', resource], { timeout: 12000 })
+      )
       // Only look at the decision line, not the whole body (which repeats the
       // host). sbx prints "Allowed: <target>" / "Denied: <target>" first.
       const head = raw.split('\n').find((l) => /^\s*(allowed|denied|blocked)\s*:/i.test(l)) ?? raw
@@ -5327,9 +5584,9 @@ function setupIPC(): void {
     }
   })
 
-  ipcMain.handle('minipit:policy-allow', async (_, name: string, resources: string) => {
+  ipcMain.handle('den:policy-allow', async (_, name: string, resources: string) => {
     try {
-      const args = ['policy', 'allow', 'network']
+      const args = [...cloudArgsFor(name), 'policy', 'allow', 'network']
       if (name) args.push('--sandbox', name)
       args.push(resources)
       const output = await sbx(args, { timeout: 15000 })
@@ -5341,9 +5598,9 @@ function setupIPC(): void {
 
   // Add a deny rule (block a host). Mirror of policy-allow. Comma-separated
   // resources and an optional per-sandbox scope are both supported by the CLI.
-  ipcMain.handle('minipit:policy-deny', async (_, name: string, resources: string) => {
+  ipcMain.handle('den:policy-deny', async (_, name: string, resources: string) => {
     try {
-      const args = ['policy', 'deny', 'network']
+      const args = [...cloudArgsFor(name), 'policy', 'deny', 'network']
       if (name) args.push('--sandbox', name)
       args.push(resources)
       const output = await sbx(args, { timeout: 15000 })
@@ -5356,9 +5613,9 @@ function setupIPC(): void {
   // Remove a local network rule by resource (the value shown as a chip). Only
   // effective when org governance is inactive — the renderer hides the control
   // otherwise.
-  ipcMain.handle('minipit:policy-rm', async (_, name: string, resource: string) => {
+  ipcMain.handle('den:policy-rm', async (_, name: string, resource: string) => {
     try {
-      const args = ['policy', 'rm', 'network']
+      const args = [...cloudArgsFor(name), 'policy', 'rm', 'network']
       if (name) args.push('--sandbox', name)
       args.push('--resource', resource)
       const output = await sbx(args, { timeout: 15000 })
@@ -5368,12 +5625,43 @@ function setupIPC(): void {
     }
   })
 
+  // `sbx policy reset` takes no preset — it wipes the policy store back to
+  // uninitialized (stopping the daemon, and any running sandboxes, in the
+  // process) and only prompts if sandboxes are currently running. Den already
+  // confirms the whole operation in its own UI, so `--force` skips sbx's own
+  // y/n rather than trying to answer it over stdin — which is what this used
+  // to (wrongly) feed the chosen preset into, leaving the policy uninitialized
+  // and stuck on whatever sbx treats that as (Balanced). The daemon restarts
+  // on the next command; the policy then needs an explicit `policy init`.
+  async function resetNetworkPolicy(preset: string): Promise<string> {
+    await sbx(['policy', 'reset', '--force'], { timeout: 20000 })
+    return sbx(['policy', 'init', preset], { timeout: 20000 })
+  }
+
+  // A fresh policy store (before the first `policy init`) makes read-only
+  // commands like `policy ls`/`policy check` fail with an "ERROR: global
+  // network policy has not been initialized" instead of returning empty
+  // results — there's no way to fix that from the UI otherwise, since it
+  // isn't a per-sandbox or per-rule problem. Auto-heal by initializing to the
+  // same default preset the reset path uses, then retry once, so callers see
+  // a normal empty-policy response instead of a raw CLI error.
+  const POLICY_UNINITIALIZED_RE = /not (?:been )?initialized/i
+  async function withPolicyInitRetry<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!POLICY_UNINITIALIZED_RE.test(msg)) throw err
+      await sbx(['policy', 'init', 'balanced'], { timeout: 20000 })
+      return run()
+    }
+  }
+
   // Set the default network preset (allow-all | balanced | deny-all).
   // `policy set-default` is deprecated in favour of `policy init`, but `init`
   // only works on an uninitialized policy — once initialized, changing it needs
-  // `policy reset`. So try init first and fall back to reset (which prompts for
-  // the preset, fed over stdin) when the policy already exists.
-  ipcMain.handle('minipit:policy-set-default', async (_, preset: string) => {
+  // a `policy reset` first.
+  ipcMain.handle('den:policy-set-default', async (_, preset: string) => {
     try {
       let output: string
       try {
@@ -5381,7 +5669,7 @@ function setupIPC(): void {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         if (/already initialized/i.test(msg)) {
-          output = await sbxWithInput(['policy', 'reset'], `${preset}\n`, 20000)
+          output = await resetNetworkPolicy(preset)
         } else {
           throw e
         }
@@ -5392,19 +5680,17 @@ function setupIPC(): void {
     }
   })
 
-  // Reset all custom network rules. `sbx policy reset` prompts for a new default
-  // preset, so feed the chosen preset to stdin (timeout-guarded so it can never
-  // hang the app if the prompt shape changes).
-  ipcMain.handle('minipit:policy-reset', async (_, preset: string) => {
+  // Reset all custom network rules and set a fresh default preset.
+  ipcMain.handle('den:policy-reset', async (_, preset: string) => {
     try {
-      const output = await sbxWithInput(['policy', 'reset'], `${preset}\n`, 20000)
+      const output = await resetNetworkPolicy(preset)
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
     }
   })
 
-  ipcMain.handle('minipit:default-workspace', () => {
+  ipcMain.handle('den:default-workspace', () => {
     // Base folder for new sandboxes; each one gets its own ~/den/<name> subfolder.
     const dir = join(app.getPath('home'), 'den')
     try {
@@ -5415,7 +5701,7 @@ function setupIPC(): void {
     return dir
   })
 
-  ipcMain.handle('minipit:show-open-dialog', async () => {
+  ipcMain.handle('den:show-open-dialog', async () => {
     // createDirectory lets the user make a new workspace folder from the picker
     // (shown by default on macOS; gated by this flag on Windows/Linux).
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory', 'createDirectory'] })
@@ -5431,9 +5717,9 @@ function setupIPC(): void {
   const umountSpec = (m: MountEntry) => m.host + (m.target ? `:${m.target}` : '')
   const sameMount = (a: MountEntry, host: string, target: string) => a.host === host && (a.target ?? '') === (target || '')
 
-  ipcMain.handle('minipit:mounts-get', (_, name: string) => mountsAll()[name] ?? [])
+  ipcMain.handle('den:mounts-get', (_, name: string) => mountsAll()[name] ?? [])
 
-  ipcMain.handle('minipit:sbx-mount', async (_, name: string, host: string, target: string, ro: boolean) => {
+  ipcMain.handle('den:sbx-mount', async (_, name: string, host: string, target: string, ro: boolean) => {
     const entry: MountEntry = { host, target: target || undefined, ro: !!ro }
     try {
       await sbx(['mount', name, mountSpec(entry)], { timeout: 20000 })
@@ -5446,7 +5732,7 @@ function setupIPC(): void {
     return { ok: true, mounts: all[name] }
   })
 
-  ipcMain.handle('minipit:sbx-umount', async (_, name: string, host: string, target: string) => {
+  ipcMain.handle('den:sbx-umount', async (_, name: string, host: string, target: string) => {
     try {
       await sbx(['umount', name, umountSpec({ host, target: target || undefined })], { timeout: 20000 })
     } catch (err) {
@@ -5474,13 +5760,13 @@ function setupIPC(): void {
   })
 
   // Named sandbox groups (id + name only). Stored as a JSON array.
-  ipcMain.handle('minipit:groups-get', () => (store.get('groups') as { id: string; name: string }[]) ?? [])
-  ipcMain.handle('minipit:groups-set', (_, groups: { id: string; name: string }[]) => { store.set('groups', groups ?? []) })
+  ipcMain.handle('den:groups-get', () => (store.get('groups') as { id: string; name: string }[]) ?? [])
+  ipcMain.handle('den:groups-set', (_, groups: { id: string; name: string }[]) => { store.set('groups', groups ?? []) })
 
   // One-time-per-origin sync from the renderer: merge any localStorage-cached
   // config into the store (the store wins on conflict — it's the source of
   // truth), then return the authoritative merged config to hydrate the UI.
-  ipcMain.handle('minipit:project-config-sync', (_, local: Partial<ProjectConfig>) => {
+  ipcMain.handle('den:project-config-sync', (_, local: Partial<ProjectConfig>) => {
     for (const [field, key] of Object.entries(CFG_KEYS) as [keyof ProjectConfig, string][]) {
       const incoming = local?.[field] ?? {}
       const existing = (store.get(key) as Record<string, string>) ?? {}
@@ -5490,9 +5776,9 @@ function setupIPC(): void {
   })
 
   // Per-sandbox working-tree isolation (name → true if created with --clone).
-  ipcMain.handle('minipit:sandbox-isolation', () => (store.get('sandboxIsolation') as Record<string, boolean>) ?? {})
+  ipcMain.handle('den:sandbox-isolation', () => (store.get('sandboxIsolation') as Record<string, boolean>) ?? {})
 
-  ipcMain.handle('minipit:project-config-set', (_, field: keyof ProjectConfig, workspace: string, value: string | null) => {
+  ipcMain.handle('den:project-config-set', (_, field: keyof ProjectConfig, workspace: string, value: string | null) => {
     const key = CFG_KEYS[field]
     if (!key || !workspace) return
     const map = (store.get(key) as Record<string, string>) ?? {}
@@ -5503,12 +5789,12 @@ function setupIPC(): void {
 
   // ── Shell PTY ──────────────────────────────────────────────────────────────
 
-  ipcMain.handle('minipit:pty-start', (_, name: string, cols: number, rows: number) => {
+  ipcMain.handle('den:pty-start', (_, name: string, cols: number, rows: number) => {
     // Kill existing PTY for this sandbox
     const existing = ptyMap.get(name)
     if (existing) { existing.kill(); ptyMap.delete(name) }
 
-    const proc = pty.spawn(getSbxPath(), ['exec', '-it', name, 'bash'], {
+    const proc = pty.spawn(getSbxPath(), [...cloudArgsFor(name), 'exec', '-it', name, 'bash'], {
       name: 'xterm-256color',
       cols,
       rows,
@@ -5523,40 +5809,40 @@ function setupIPC(): void {
     ptyMap.set(name, proc)
 
     proc.onData((data: string) => {
-      mainWindow?.webContents.send('minipit:pty-output', name, data)
+      mainWindow?.webContents.send('den:pty-output', name, data)
     })
 
     proc.onExit(() => {
       ptyMap.delete(name)
-      mainWindow?.webContents.send('minipit:pty-exit', name)
+      mainWindow?.webContents.send('den:pty-exit', name)
     })
 
     return null
   })
 
-  ipcMain.handle('minipit:pty-write', (_, name: string, data: string) => {
+  ipcMain.handle('den:pty-write', (_, name: string, data: string) => {
     ptyMap.get(name)?.write(data)
   })
 
-  ipcMain.handle('minipit:pty-resize', (_, name: string, cols: number, rows: number) => {
+  ipcMain.handle('den:pty-resize', (_, name: string, cols: number, rows: number) => {
     ptyMap.get(name)?.resize(cols, rows)
   })
 
-  ipcMain.handle('minipit:agent-write', (_, name: string, data: string) => {
+  ipcMain.handle('den:agent-write', (_, name: string, data: string) => {
     sbxProcesses.get(name)?.write(data)
   })
 
   // Copy a dropped file's bytes into the sandbox (under /tmp/den-dropped) and
   // return its absolute in-sandbox path. The agent is a terminal TUI that takes
   // a file path, not raw bytes, so the renderer types this path into the PTY.
-  ipcMain.handle('minipit:agent-drop-file', async (_, name: string, fileName: string, bytes: Uint8Array): Promise<string | null> => {
+  ipcMain.handle('den:agent-drop-file', async (_, name: string, fileName: string, bytes: Uint8Array): Promise<string | null> => {
     if (!sbxProcesses.get(name)) return null
     if (!bytes?.byteLength || bytes.byteLength > 100 * 1024 * 1024) return null // cap at 100 MB (docs/PDFs/decks)
     // Strip path components and shell-hostile chars; keep it short.
     const safe = ((fileName.split(/[\\/]/).pop() || 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(-120)) || 'file'
     return new Promise((resolve) => {
       const proc = spawn(getSbxPath(), [
-        'exec', name, 'sh', '-c',
+        ...cloudArgsFor(name), 'exec', name, 'sh', '-c',
         'd=/tmp/den-dropped; mkdir -p "$d" && cat > "$d/$1" && printf %s "$d/$1"',
         'sh', safe
       ])
@@ -5573,13 +5859,13 @@ function setupIPC(): void {
     })
   })
 
-  ipcMain.handle('minipit:agent-resize', (_, name: string, cols: number, rows: number) => {
+  ipcMain.handle('den:agent-resize', (_, name: string, cols: number, rows: number) => {
     sbxProcesses.get(name)?.resize(cols, rows)
   })
 
   // Ensure an agent session is attached (used when opening an already-running
   // sandbox that has no live session in this app instance).
-  ipcMain.handle('minipit:agent-ensure', (_, name: string, cols: number, rows: number) => {
+  ipcMain.handle('den:agent-ensure', (_, name: string, cols: number, rows: number) => {
     const proc = sbxProcesses.get(name)
     if (!proc) {
       // No live session in this app instance. If the container is already
@@ -5603,14 +5889,17 @@ function setupIPC(): void {
       // nudge below for many seconds, leaving the terminal blank until then.
       // The renderer subscribed before invoking this, so it receives the replay.
       const buf = agentOutBuf.get(name)
-      if (buf) mainWindow?.webContents.send('minipit:agent-output', name, buf)
+      // Flagged as a replay: this is history, not live output, so the renderer
+      // has to re-pin the viewport to the bottom once it lands (see the write
+      // handler in TerminalPanel). Live writes carry no flag.
+      if (buf) mainWindow?.webContents.send('den:agent-output', name, buf, true)
       // Nudge the size so the TUI repaints cleanly at this size.
       try { proc.resize(Math.max(2, cols - 1), rows) } catch { /* ignore */ }
       try { proc.resize(cols, rows) } catch { /* ignore */ }
     }
   })
 
-  ipcMain.handle('minipit:pty-stop', (_, name: string) => {
+  ipcMain.handle('den:pty-stop', (_, name: string) => {
     const proc = ptyMap.get(name)
     if (proc) { proc.kill(); ptyMap.delete(name) }
   })
@@ -5625,7 +5914,7 @@ function setupIPC(): void {
   // overwriting an existing skill, and there's no TTY behind an IPC call to
   // answer it, so the command would hang until the timeout. The preview is what
   // makes that safe: the user sees the exact overwrite list before confirming.
-  ipcMain.handle('minipit:skills-import', async (_, opts?: { dryRun?: boolean }) => {
+  ipcMain.handle('den:skills-import', async (_, opts?: { dryRun?: boolean }) => {
     const dryRun = !!opts?.dryRun
     const args = ['skills', 'import', dryRun ? '--dry-run' : '--force']
     try {
@@ -5647,10 +5936,10 @@ function setupIPC(): void {
   // through the daemon's Unix socket plus an active Docker login, and starts the
   // daemon/sandbox on demand). That's also what makes remote-development clients
   // like VS Code and Cursor work against a sandbox.
-  ipcMain.handle('minipit:ssh-status', () => readSshStatus())
+  ipcMain.handle('den:ssh-status', () => readSshStatus())
 
   // Writes to ~/.ssh/config, so it only ever runs from an explicit user action.
-  ipcMain.handle('minipit:ssh-setup', () => sshSetup())
+  ipcMain.handle('den:ssh-setup', () => sshSetup())
 
   // Open a sandbox in a remote-development editor over the *.sbx SSH host.
   //
@@ -5660,7 +5949,7 @@ function setupIPC(): void {
   // ~/workspace (/home/agent/workspace), which is an empty stub, NOT the mount.
   // Verified against v0.37.0: the two are different inodes and only the host path
   // holds the project, so opening the default cwd would give an empty window.
-  ipcMain.handle('minipit:open-remote-editor', async (_, name: string, workspace: string, editor?: string) => {
+  ipcMain.handle('den:open-remote-editor', async (_, name: string, workspace: string, editor?: string) => {
     // Allowlist the binary: it ends up in spawn(), and the renderer shouldn't be
     // able to name an arbitrary executable. Each entry also carries the URI
     // scheme its app registers, for the no-CLI fallback below.
@@ -5725,7 +6014,7 @@ function setupIPC(): void {
 
   // Point a desktop app (Claude Desktop, ChatGPT) at a sandbox over its *.sbx SSH
   // host. See REMOTE_APPS for why this stops short of a fully automated open.
-  ipcMain.handle('minipit:open-remote-app', async (_, name: string, appId: string, agent?: string) => {
+  ipcMain.handle('den:open-remote-app', async (_, name: string, appId: string, agent?: string) => {
     const app = REMOTE_APPS[appId]
     if (!app) return { ok: false, error: `Unknown app "${appId}".` }
     const host = `${name}.sbx`
@@ -5798,22 +6087,22 @@ function setupIPC(): void {
   // claude (see spawnSandboxProcess), so this is picked up by the next agent
   // session; an agent already running keeps the palette it started with until it
   // restarts — the terminal's minimumContrastRatio keeps that legible meanwhile.
-  ipcMain.handle('minipit:term-mode', (_, mode: 'light' | 'dark') => {
+  ipcMain.handle('den:term-mode', (_, mode: 'light' | 'dark') => {
     if (mode === 'light' || mode === 'dark') termMode = mode
   })
 
   // Preferred terminal app, mirrored from the renderer so the Sandboxes menu's
   // "Connect in Terminal" honours it (menus are built in main).
-  ipcMain.handle('minipit:terminal-app', (_, id: string) => {
+  ipcMain.handle('den:terminal-app', (_, id: string) => {
     if (typeof id === 'string' && id) terminalPref = id
   })
 
-  ipcMain.handle('minipit:open-ssh-terminal', (_, name: string) => openSshInTerminal(name))
+  ipcMain.handle('den:open-ssh-terminal', (_, name: string) => openSshInTerminal(name))
 
   // Which sandbox the window has open. Rebuilds the Sandboxes menu so the ✓ and
   // the accelerators follow it (the signature includes this name, so the rebuild
   // isn't skipped).
-  ipcMain.handle('minipit:active-sandbox', (_, name: string | null) => {
+  ipcMain.handle('den:active-sandbox', (_, name: string | null) => {
     const next = typeof name === 'string' && name ? name : null
     if (next === activeSandboxName) return
     activeSandboxName = next
@@ -5825,7 +6114,7 @@ function startPolling(): void {
   const poll = async () => {
     try {
       const sandboxes = await listSandboxes()
-      mainWindow?.webContents.send('minipit:sandboxes-updated', sandboxes)
+      mainWindow?.webContents.send('den:sandboxes-updated', sandboxes)
       updateTrayMenu(sandboxes)
       // Refresh the app menu's sandbox/project lists only when the sandbox set
       // changes — this avoids running `sbx template ls` on every poll tick.

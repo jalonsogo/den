@@ -1,7 +1,7 @@
 // Notification cues. Built-ins are synthesized with the Web Audio API so we
 // don't ship binary assets; the user can also point at their own audio file
 // (stored as a data URL in localStorage). Settings live alongside the other
-// `minipit:*` prefs.
+// `den:*` prefs.
 //
 // Two independent cues:
 //   • finalize — the agent finished a turn (Stop)
@@ -19,9 +19,9 @@ export const SOUND_OPTIONS: { id: SoundId; label: string }[] = [
 ]
 
 // ── Finalize cue (agent finished) ──
-const KEY_ENABLED = 'minipit:soundEnabled'
-const KEY_SOUND = 'minipit:finalizeSound'
-const KEY_CUSTOM = 'minipit:finalizeSoundData'
+const KEY_ENABLED = 'den:soundEnabled'
+const KEY_SOUND = 'den:finalizeSound'
+const KEY_CUSTOM = 'den:finalizeSoundData'
 
 export const isSoundEnabled = (): boolean => localStorage.getItem(KEY_ENABLED) !== '0'
 export const setSoundEnabled = (on: boolean): void => localStorage.setItem(KEY_ENABLED, on ? '1' : '0')
@@ -31,9 +31,9 @@ export const getCustomSound = (): string | null => localStorage.getItem(KEY_CUST
 export const setCustomSound = (dataUrl: string): void => localStorage.setItem(KEY_CUSTOM, dataUrl)
 
 // ── Ask cue (agent needs your input) ──
-const KEY_ASK_ENABLED = 'minipit:askSoundEnabled'
-const KEY_ASK_SOUND = 'minipit:askSound'
-const KEY_ASK_CUSTOM = 'minipit:askSoundData'
+const KEY_ASK_ENABLED = 'den:askSoundEnabled'
+const KEY_ASK_SOUND = 'den:askSound'
+const KEY_ASK_CUSTOM = 'den:askSoundData'
 
 export const isAskSoundEnabled = (): boolean => localStorage.getItem(KEY_ASK_ENABLED) !== '0'
 export const setAskSoundEnabled = (on: boolean): void => localStorage.setItem(KEY_ASK_ENABLED, on ? '1' : '0')

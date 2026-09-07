@@ -140,7 +140,7 @@ Template:
   `"$1"`, `$PWD`, `$HOME`, `/` inside the sandbox and roots the Files tree at the
   first that exists. When it can't reach the container it now returns nothing and
   the caller retries, rather than falling back to the unverified host path and
-  guaranteeing a failed listing. `src/main/index.ts` → `minipit:workspace-root`,
+  guaranteeing a failed listing. `src/main/index.ts` → `den:workspace-root`,
   `src/renderer/src/components/FilesPanel.tsx`.
 - **Status:** worked around. **Open:** whether `sbx inspect <name> --json`
   reports the container-side mount target — den passes that payload straight to
@@ -201,7 +201,7 @@ Template:
      that makes the two disagree (a folder renamed by hand, a kit edited
      outside den, a spec shape the reader doesn't recognise) then still works
      instead of dead-ending on an error carrying its own fix.
-  `src/main/index.ts` → `listKits()`, `minipit:create-sandbox`;
+  `src/main/index.ts` → `listKits()`, `den:create-sandbox`;
   `NewSandboxModal.tsx` → `kitKinds`.
 - **Status:** fixed. Worth remembering as a pattern: sbx errors of the form
   "X does not match Y (use Y)" are machine-readable, and acting on them beats
@@ -283,7 +283,7 @@ Template:
      `authState()` in the renderer does the same, so neither layer can guess.
   2. Record what *is* observable. `sbx mcp auth <name>` ends with
      `MCP server "x" authorized` and exits 0, so den notes the server and the
-     time in `localStorage` (`minipit:mcp-authorized:v1`) and shows Authorized
+     time in `localStorage` (`den:mcp-authorized:v1`) and shows Authorized
      from that when sbx says nothing. Anything sbx *does* report outranks the
      note, so a later revocation isn't masked; removing a server clears it.
      The badge tooltip says the state came from den and when.
@@ -304,7 +304,29 @@ Template:
   in the renderer, drop any entry whose name contains whitespace, so a future
   parse failure can only ever render less rather than a fake server.
   `src/main/index.ts` → `parseMcpTable()`; `McpPage.tsx` → `isServer()`.
-- **Status:** fixed.
+- **Status:** fixed, then fixed again — see below.
+
+### …and so does the help printed underneath it
+- **Version:** v0.38.0
+- **Symptom:** the same empty registry produced a second phantom, named
+  `add one`. It never reached the MCP page (the renderer's whitespace filter
+  caught it there), but New Sandbox had no such filter and showed it as a
+  selectable pill — pressing it did nothing visible and would have passed
+  `--static-mcp "add one"` to `sbx create`.
+- **Cause:** two holes, both from the fix above. The parser's identifier test
+  only ran on *single-column* lines, and the help beneath the sentence is
+  column-aligned (`add one   sbx mcp add <name> --url <url>`), so it split like
+  a real row. And the renderer guard lived in `McpPage.tsx`, private to the one
+  consumer that had already been bitten.
+- **Fix:** the identifier test now applies to every row regardless of column
+  count, plus a second check that rejects columns carrying placeholders,
+  backticks or a full stop (help text; a url or command has none of those). The
+  renderer guard moved to `isMcpServerName()` in `lib/mcpCatalog.ts` and every
+  consumer of `mcpList()` filters through it. `parseMcpTable()` moved to
+  `src/main/parse.ts` so the empty-registry output is a regression test rather
+  than a comment.
+- **Status:** fixed. Note the exact wording of sbx's empty-registry output is
+  still unobserved here — the guards are shape-based for that reason.
 
 ## Open / unverified
 
@@ -356,6 +378,81 @@ Template:
   confirmed flag. When a v0.39 binary is to hand, run each command's `--help`
   and replace the candidate lists with what's really there.
 
+### v0.42 flag spellings — confirmed against a real binary
+- **Version:** sbx v0.42.0. Originally written against the release notes only
+  (same situation the v0.39 entry above describes); since resolved by running
+  the actual `linux-arm64` release binary's `--help` output end to end
+  (`sbx version` → `v0.42.0 ca4a4bd42035628137d78c5a0bef5c0d3301a35a`). Couldn't
+  authenticate (`sbx login` needs a real Docker Hub account), so anything
+  behind auth — actual sandbox creation, cloud API calls — is still unverified
+  by a live run; everything below is `--help` text and argument parsing, which
+  don't need the daemon or an account.
+- **Confirmed, matching what den already does:**
+  - **`--kit-arg name=value` / `kit.name=value`** — exact spelling confirmed on
+    both `create --help` and the new `kit add --help`. den's implementation
+    (`NewSandboxModal.tsx`'s `kitArgFlags()`) needed no change.
+  - **`--cloud`** is a persistent flag on the root command, not per-subcommand
+    — `sbx --cloud <verb>` and `sbx <verb> --cloud` both parse (cobra
+    convention). "supported by a growing set of verbs" per its own `--help`
+    text, so a verb refusing it is expected to still happen sometimes.
+  - **`mcp auth --no-scope`** — exact spelling confirmed.
+  - **Ports default (tcp4 vs. dual-stack `tcp`)** — confirmed via `ports
+    --help`: publishing with no `/PROTOCOL` now binds tcp4 (or tcp6 if
+    `HOST_IP` is an IPv6 literal); plain `tcp` must be named explicitly for
+    dual-stack. den's own publish UI (`PortsPanel.tsx`) already forced
+    `tcp4`/`udp4` explicitly for the old default, so this was already a no-op.
+- **New, resolving prior open questions:**
+  - **`sbx move SANDBOX --to local|cloud [--name X] [-f/--force]`** — exact
+    flags confirmed via `move --help`. Wired into den as a context-menu
+    action (`den:move-sandbox`); always passes `--force` since den's own
+    confirm dialog already covers what sbx's prompt would ask.
+  - **`sbx --cloud secret` / `sbx --cloud policy`** — same subcommand tree as
+    local, just with `--cloud` added; no separate cloud-specific verbs.
+    `secret set --oauth`'s help text confirms `--cloud` changes *where* a
+    secret is stored (cloud-only store, "never the local secrets-engine"),
+    not just which sandbox it's scoped to. `secret ls --cloud` confirmed via
+    `secret ls --help` — same flags (`-g`/`--sandbox`/`--service`/`--json`),
+    a separate listing to merge in, not a filter on one combined list.
+  - **Cloud ports** — confirmed via `ports --help`: cloud `--publish`/
+    `--unpublish` take a bare `SANDBOX_PORT`, and only a sandbox ID/name is
+    accepted as the target (no host:container mapping). The JSON field name
+    for the assigned public URL is still unconfirmed (no live cloud sandbox
+    to check `--json` output against) — `normalizePorts()`'s cloud branch
+    tries several candidates the same tolerant way every other field here
+    already does.
+  - **Cloud agent reattach** — confirmed via `run --help` and `attach --help`:
+    `sbx --cloud attach <name>` only works on an already-*running* cloud
+    sandbox; a stopped one needs `sbx --cloud run --name <name> <agent>`,
+    which the help text says prompts interactively to pick a sandbox unless
+    `--name` narrows it to one match. That disambiguation claim is *not*
+    verified live (no cloud account was available this session) —
+    `spawnSandboxProcess`'s cloud branch relies on it, and if wrong, sbx's
+    own prompt will appear in the pty rather than silently misbehaving.
+  - **Cloud entitlement/plan status**: still no dedicated read-only command —
+    checked the full top-level and `secret`/`policy`/`volume` help text, found
+    nothing resembling "does this account have a plan". The practical answer
+    is to attempt `sbx --cloud ls` (already what `listCloudSandboxes()` does)
+    and treat any failure as "cloud unavailable" rather than parsing a
+    specific entitlement error, since none is documented.
+- **A real bug this surfaced and fixed:** `create --help` documents `--kit` as
+  mixin-only ("must be a mixin") as of v0.42 — a sandbox/agent kit is the bare
+  positional (`sbx create <kit-ref> [workspace]`), never also passed via
+  `--kit`. den's `NewSandboxModal.tsx` was still passing the *base* kit
+  through `--kit` as well (the pre-0.42 shape, per the old sbx error message
+  this file used to quote: `invoke as sbx create --kit <kit> X ...`) — fixed
+  by splitting `selKits` into `mixinKits` (goes to `--kit`) vs. the full
+  selection (stays in `kits`, for den's own `recordKits()` bookkeeping only).
+  Not verified against a live create (auth-gated), but the `--help` text
+  and every one of its own examples are unambiguous that this is required.
+- **New commands/surface noticed in passing, not yet used by den:** `kit add
+  SANDBOX REFERENCE [--kit-arg ...]` (attach a mixin to an *existing*
+  sandbox, recreating its container); `attach`/`ttl`/`volume` (cloud-only);
+  `create`'s positional accepting multiple workspace paths
+  (`PATH [PATH:ro ...]`) for read-only additional mounts; `devin` as a
+  built-in agent (added to `AGENTS`/`AgentIcon`/`AGENT_BASES`).
+- **Status:** confirmed for everything above; still open only where noted
+  (cloud entitlement probe, and anything gated behind real Docker Hub auth).
+
 ### `settings` has no read path den could rely on
 - **Version:** sbx v0.38–v0.39.
 - **Symptom:** den's runtime toggles showed whatever den last wrote, so a
@@ -364,7 +461,7 @@ Template:
   than showing nothing.
 - **Cause:** den only ever called `settings set`, and seeded its toggles from
   its own saved copy of the value (`clipboard.imagePaste` still does).
-- **Fix:** `minipit:sbx-setting-get` tries `sbx settings get <key>` (accepting
+- **Fix:** `den:sbx-setting-get` tries `sbx settings get <key>` (accepting
   either a bare value or `key: value`), falls back to parsing `sbx settings ls`,
   and returns `ok: false` when it can't tell. "Unknown" is kept distinct from
   "off": the Claude remote-control row says the switch shows what den will set

@@ -149,7 +149,7 @@ confirm the GUI produced the same effect (`sbx policy ls`, `sbx ports <name>`, e
 - [ ] Phase 3 (3.1–3.8)
 - [ ] Phase 4 (4.1–4.5)
 - [ ] Phase 5 runtime settings (5.1–5.3)
-- [ ] Phase 5 policy reset (5.4–5.7)
+- [x] Phase 5 policy reset (5.4–5.7) — reset previously piped the preset into `policy reset`'s unrelated stopped-sandboxes prompt, which doesn't take a preset; fixed to `policy reset --force` + `policy init <preset>`
 - [ ] Phase 5 sbx reset (5.8–5.12) — disposable state
 - [ ] Regression sweep
 - [ ] `npm run typecheck` clean

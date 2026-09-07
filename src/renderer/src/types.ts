@@ -7,6 +7,7 @@ export type AgentType =
   | 'codex'
   | 'copilot'
   | 'cursor'
+  | 'devin'
   | 'docker-agent'
   | 'droid'
   | 'gemini'
@@ -21,6 +22,7 @@ export const AGENTS: { id: AgentType; label: string }[] = [
   { id: 'codex',          label: 'Codex' },
   { id: 'copilot',        label: 'Copilot' },
   { id: 'cursor',         label: 'Cursor' },
+  { id: 'devin',          label: 'Devin' },
   { id: 'docker-agent',   label: 'Docker Agent' },
   { id: 'droid',          label: 'Droid' },
   { id: 'gemini',         label: 'Gemini' },
@@ -41,7 +43,9 @@ export interface Group {
 }
 
 export interface Port {
-  host: number
+  // Absent for a cloud port: there's no host-side mapping, just a sandbox port
+  // the control plane exposes at `url` (see below).
+  host?: number
   container: number
   // May carry an address-family suffix (TCP4/UDP4/TCP6/UDP6) so unpublish can
   // reproduce the exact spec sbx reported. Strip the suffix for display.
@@ -51,6 +55,10 @@ export interface Port {
   // defaults to loopback and would miss it.
   hostIp?: string
   active: boolean
+  location: 'local' | 'cloud'
+  // Cloud only: the publicly reachable URL the control plane assigned this
+  // port. There's no host:container mapping to show instead.
+  url?: string
 }
 
 export interface LogLine {
@@ -122,6 +130,8 @@ export interface Sandbox {
   uptimeSeconds?: number
   ports: Port[]
   logs: LogLine[]
+  // Which `sbx ls` listing produced this row (`sbx ls` vs `sbx --cloud ls`).
+  location: 'local' | 'cloud'
 }
 
 // Services accepted by `sbx secret set` (see `sbx secret set --help`).
@@ -183,6 +193,11 @@ export interface StoredSecret {
   envOnly?: boolean
   oauthShadowed?: boolean
   note?: string   // any extra flag/annotation text sbx printed for the row
+  // Which secrets store reported this row — local (sandboxd's own) or cloud,
+  // a wholly separate store (see `secret set --oauth`'s "never the local
+  // secrets-engine" wording). Independent of `scope`: a cloud secret can be
+  // global or --sandbox-scoped the same as a local one.
+  location: 'local' | 'cloud'
 }
 
 export interface Template {
@@ -208,6 +223,27 @@ export interface PromptConfig {
 // Whether an agent is mid-task or waiting on the user. `null` clears it (agent
 // process exited).
 export type AgentState = 'working' | 'waiting'
+
+// A Claude Code statusline payload (https://code.claude.com/docs/en/statusline),
+// captured from inside the sandbox via a den-injected `statusLine` command and
+// trimmed to the fields den's UI shows. Everything but `updatedAt` is optional:
+// most fields are null/absent early in a session or on models that don't
+// support them (e.g. `effort`, `rateLimit*`).
+export interface AgentStatusLine {
+  model?: string
+  effort?: string
+  contextUsedPct?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+  costUsd?: number
+  durationMs?: number
+  rateLimitFiveHourPct?: number
+  rateLimitSevenDayPct?: number
+  transcriptPath?: string
+  updatedAt: number
+}
 
 // A network-policy denial — an agent's request that was blocked. Surfaced so
 // the user can allow the host in one click.
@@ -399,7 +435,7 @@ export interface SbxEnvFile {
 
 declare global {
   interface Window {
-    minipit: {
+    den: {
       listSandboxes(): Promise<Sandbox[]>
       createSandbox(config: unknown): Promise<string>
       runSandbox(name: string): Promise<void>
@@ -455,12 +491,12 @@ declare global {
       kitPack(dir: string, name: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; output?: string; error?: string }>
       saveSnapshot(name: string, tag: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitImport(ref: string): Promise<{ ok: boolean; name?: string; error?: string }>
-      kitImportZip(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
-      kitImportFolder(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string }>
+      kitImportZip(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string; packError?: string }>
+      kitImportFolder(): Promise<{ ok: boolean; name?: string; canceled?: boolean; error?: string; packError?: string }>
       // `choices` comes back instead of an import when the repo holds several
       // kits — re-call with the chosen `dir` as `pickDir`.
       kitImportGit(url: string, pickDir?: string): Promise<{
-        ok: boolean; name?: string; error?: string; choices?: RepoKit[]; repo?: string; ref?: string
+        ok: boolean; name?: string; error?: string; packError?: string; choices?: RepoKit[]; repo?: string; ref?: string
       }>
       listHubKits(): Promise<{ ok: boolean; kits?: HubKit[]; error?: string }>
       dockerAccount(): Promise<{ loggedIn: boolean; username?: string; email?: string; fullName?: string; gravatar?: string; orgs?: string[] }>
@@ -469,12 +505,12 @@ declare global {
       onLoginOutput(cb: (chunk: string) => void): () => void
       listSecrets(): Promise<StoredSecret[]>
       secretImport(): Promise<{ ok: boolean; output?: string; error?: string }>
-      setSecret(service: string, value: string, scope?: string): Promise<void>
-      setSecretOp(service: string, ref: string, scope?: string): Promise<void>
+      setSecret(service: string, value: string, scope?: string, cloud?: boolean): Promise<void>
+      setSecretOp(service: string, ref: string, scope?: string, cloud?: boolean): Promise<void>
       opAvailable(): Promise<boolean>
-      removeSecret(service: string, scope?: string): Promise<void>
+      removeSecret(service: string, scope?: string, cloud?: boolean): Promise<void>
       anthropicOAuth(): Promise<{ ok: true }>
-      oauthSecret(service: string): Promise<{ ok: true }>
+      oauthSecret(service: string, cloud?: boolean): Promise<{ ok: true }>
       openInFinder(path: string): Promise<void>
       exec(name: string, cmd: string): Promise<string>
       listLogs(): Promise<{ name: string; path: string }[]>
@@ -499,6 +535,12 @@ declare global {
       daemonStatus(): Promise<{ ok: boolean; running: boolean; raw?: string; error?: string }>
       daemonLogLevel(level?: string): Promise<{ ok: boolean; level?: string; raw?: string; error?: string }>
       sbxInspect(name: string): Promise<{ ok: boolean; json?: unknown; raw?: string; error?: string }>
+      // Claude Code's own account info + configured proxy, read from inside the
+      // sandbox (~/.claude.json's oauthAccount + proxy env vars) — not from
+      // `sbx inspect`, which doesn't carry organization/email/friendly login tier.
+      claudeAccount(name: string): Promise<{
+        ok: boolean; loginMethod?: string; organization?: string; email?: string; proxy?: string; caCert?: string; error?: string
+      }>
       setRuntimeEnv(key: string, value: string | boolean | null): Promise<{ ok: boolean; error?: string }>
       onDiagnoseOutput(cb: (chunk: string) => void): () => void
       onDaemonOutput(cb: (chunk: string) => void): () => void
@@ -538,11 +580,7 @@ declare global {
       onApiError(cb: (trace: ApiErrorTrace) => void): () => void
       // known=false while the probe is still running or the daemon is down.
       mainBuildId(): Promise<string>
-      sbxVersionCheck(): Promise<{
-        version: string; min: string; known: boolean; outdated: boolean
-        /** sbx >= 0.39: prune, env files, dynamic secrets, kit signing. */
-        hasEnvFiles?: boolean
-      }>
+      sbxVersionCheck(): Promise<{ version: string; min: string; known: boolean; outdated: boolean }>
       pickSbxBinary(): Promise<{ ok: boolean; path: string; version?: string; error?: string }>
       runtimeSetupState(): Promise<{
         needsSetup: boolean
@@ -578,14 +616,16 @@ declare global {
       }>
       setSecretDynamic(opts: {
         service: string; scope?: string; source: string
-        kind: 'reference' | 'command'; refresh?: string; custom?: boolean
+        kind: 'reference' | 'command'; refresh?: string; custom?: boolean; cloud?: boolean
       }): Promise<{ ok: boolean; output?: string; error?: string; refreshing?: boolean }>
       kitSign(ref: string): Promise<{ ok: boolean; output?: string; error?: string }>
       kitVerify(ref: string): Promise<{
-        ok: boolean; state: 'verified' | 'unsigned' | 'invalid' | 'unsupported'; detail: string
+        ok: boolean; state: 'verified' | 'unsigned' | 'invalid'; detail: string
       }>
       onKitSignOutput(cb: (chunk: string) => void): () => void
-      envDiscover(): Promise<{ supported: boolean; files: SbxEnvFile[] }>
+      moveSandbox(name: string, to: 'local' | 'cloud', newName?: string): Promise<{ ok: boolean; output?: string; error?: string }>
+      onMoveOutput(cb: (chunk: string) => void): () => void
+      envDiscover(): Promise<{ files: SbxEnvFile[] }>
       envProvisioned(): Promise<Record<string, string>>
       envRead(path: string): Promise<{ ok: boolean; text?: string; error?: string }>
       envPick(): Promise<{ ok: boolean; path: string }>
@@ -605,6 +645,7 @@ declare global {
       onAgentActivity(cb: (name: string, state: AgentState | null) => void): () => void
       onAgentAttention(cb: (name: string) => void): () => void
       onFilesChanged(cb: (name: string) => void): () => void
+      onAgentStatus(cb: (name: string, status: AgentStatusLine) => void): () => void
       onNavigate(cb: (page: string) => void): () => void
       onOpenSandbox(cb: (name: string) => void): () => void
       onOpenModal(cb: (modal: string) => void): () => void
@@ -617,7 +658,7 @@ declare global {
       agentResize(name: string, cols: number, rows: number): Promise<void>
       agentEnsure(name: string, cols: number, rows: number): Promise<void>
       setTermMode(mode: 'light' | 'dark'): Promise<void>
-      onAgentOutput(cb: (name: string, data: string) => void): () => void
+      onAgentOutput(cb: (name: string, data: string, replay?: boolean) => void): () => void
       onAgentExit(cb: (name: string) => void): () => void
       ptyStart(name: string, cols: number, rows: number): Promise<void>
       ptyWrite(name: string, data: string): Promise<void>

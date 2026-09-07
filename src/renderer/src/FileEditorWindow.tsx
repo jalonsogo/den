@@ -93,7 +93,7 @@ function MdImg({ src, alt, width, height, sandbox, baseDir }: {
     const rel = src.replace(/^\.\//, '')
     const abs = normalizePath(rel.startsWith('/') ? rel : `${baseDir}/${rel}`)
     let alive = true
-    window.minipit?.readFileBytes(sandbox, abs)
+    window.den?.readFileBytes(sandbox, abs)
       .then((r) => { if (alive) setUrl(`data:${imageMime(abs)};base64,${r.base64}`) })
       .catch(() => { if (alive) setFailed(true) })
     return () => { alive = false }
@@ -108,7 +108,7 @@ function MdImg({ src, alt, width, height, sandbox, baseDir }: {
 // Resolve the app theme the same way main.tsx does at startup, so the preview
 // window follows the selected theme (localStorage is shared across windows).
 function resolveTheme(): 'light' | 'dark' {
-  const pref = localStorage.getItem('minipit:themePref') ?? 'system'
+  const pref = localStorage.getItem('den:themePref') ?? 'system'
   if (pref === 'dark') return 'dark'
   if (pref === 'light') return 'light'
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -129,9 +129,9 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
   const mdDir = path.replace(/\/[^/]*$/, '') || ''          // dir of the doc, for resolving relative images
   // Diff layout: 'flow' (side-by-side) or 'inline' (unified). Persisted.
   const [diffMode, setDiffModeState] = useState<'inline' | 'flow'>(
-    () => (localStorage.getItem('minipit:diffMode') === 'inline' ? 'inline' : 'flow')
+    () => (localStorage.getItem('den:diffMode') === 'inline' ? 'inline' : 'flow')
   )
-  const setDiffMode = (m: 'inline' | 'flow') => { localStorage.setItem('minipit:diffMode', m); setDiffModeState(m) }
+  const setDiffMode = (m: 'inline' | 'flow') => { localStorage.setItem('den:diffMode', m); setDiffModeState(m) }
 
   const lang = useMemo(() => languageOf(name), [name])
   const hasDiff = diff.trim().length > 0
@@ -165,17 +165,17 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
       let readErr: string | null = null
       try {
         if (kind === 'image') {
-          const { base64 } = await window.minipit!.readFileBytes(sandbox, path)
+          const { base64 } = await window.den!.readFileBytes(sandbox, path)
           if (!alive) return
           setDataUrl(`data:${imageMime(name)};base64,${base64}`); setView('image')
         } else if (kind === 'unknown') {
           // Sniff the bytes: text-like → treat as code, otherwise "can't preview".
-          const { base64 } = await window.minipit!.readFileBytes(sandbox, path)
+          const { base64 } = await window.den!.readFileBytes(sandbox, path)
           if (!alive) return
           if (sniffBinary(base64)) setView('binary')
           else { const t = base64ToUtf8(base64); setContent(t); setOrig(t); setView('code'); textish = true }
         } else {
-          const t = (await window.minipit!.readFile(sandbox, path)) ?? ''
+          const t = (await window.den!.readFile(sandbox, path)) ?? ''
           if (!alive) return
           setContent(t); setOrig(t); setView(kind); textish = true
         }
@@ -190,8 +190,8 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
       let d = ''
       if (textish) {
         const r = reviewBranch
-          ? await window.minipit?.reviewFileDiff(sandbox, path.replace(/\/[^/]*$/, '') || '/', reviewBranch, path).catch(() => null)
-          : await window.minipit?.gitDiffFile(sandbox, path).catch(() => null)
+          ? await window.den?.reviewFileDiff(sandbox, path.replace(/\/[^/]*$/, '') || '/', reviewBranch, path).catch(() => null)
+          : await window.den?.gitDiffFile(sandbox, path).catch(() => null)
         d = r?.diff?.trim() ? r.diff : ''
       }
       if (!alive) return
@@ -213,7 +213,7 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
     if (view !== 'code') return
     setSaving(true)
     try {
-      await window.minipit?.writeFile(sandbox, path, content)
+      await window.den?.writeFile(sandbox, path, content)
       setOrig(content)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -270,7 +270,14 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
             )}
           </div>
         )}
-        <button className="btn btn-ghost btn-sm" onClick={() => window.minipit?.openPath(path)} title="Open in default app">
+        {/* `openPath` (below) only reaches host filesystem paths — for a file
+            outside the sandbox's bind-mounted workspace (e.g. a transcript
+            under ~/.claude), that silently does nothing. `downloadFrom` works
+            for any container path, via a save dialog + `sbx cp`. */}
+        <button className="btn btn-ghost btn-sm" onClick={() => window.den?.downloadFrom(sandbox, path)} title="Download">
+          <Download size={13} />
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={() => window.den?.openPath(path)} title="Open in default app">
           <ExternalLink size={13} />
         </button>
         {view === 'code' && tab === 'edit' && (
@@ -292,10 +299,10 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
           <div className="fp-binary-title">We can’t preview this file</div>
           <div className="fp-binary-sub">It looks like a binary file. Download it or open it in your default app.</div>
           <div className="fp-binary-actions">
-            <button className="btn btn-default btn-sm" onClick={() => window.minipit?.downloadFrom(sandbox, path)}>
+            <button className="btn btn-default btn-sm" onClick={() => window.den?.downloadFrom(sandbox, path)}>
               <Download size={13} /> Download…
             </button>
-            <button className="btn btn-default btn-sm" onClick={() => window.minipit?.openPath(path)}>
+            <button className="btn btn-default btn-sm" onClick={() => window.den?.openPath(path)}>
               <ExternalLink size={13} /> Open in default app
             </button>
           </div>
@@ -319,7 +326,7 @@ export function FileEditorWindow({ sandbox, path, name, openDiff, reviewBranch }
                 a: ({ href, children }) => (
                   <a
                     href={href}
-                    onClick={(e) => { e.preventDefault(); if (href && /^https?:/i.test(href)) window.minipit?.openPath(href) }}
+                    onClick={(e) => { e.preventDefault(); if (href && /^https?:/i.test(href)) window.den?.openPath(href) }}
                   >{children}</a>
                 ),
                 img: ({ src, alt, width, height }) => <MdImg src={typeof src === 'string' ? src : undefined} alt={alt} width={width} height={height} sandbox={sandbox} baseDir={mdDir} />

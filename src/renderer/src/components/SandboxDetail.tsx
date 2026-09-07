@@ -5,15 +5,16 @@ import { TerminalPanel } from './TerminalPanel'
 import { InfoPanel } from './InfoPanel'
 import { NetworkPanel } from './NetworkPanel'
 import { FilesPanel } from './FilesPanel'
+import { StatsPanel } from './StatsPanel'
 import { SandboxAvatar } from './SandboxAvatar'
 import { ChangesList } from './ChangesList'
 import { formatUptime } from '../lib/utils'
 import type { FileChange } from '../types'
 
-type Dock = 'files' | 'info' | 'network' | null
+type Dock = 'files' | 'info' | 'network' | 'stats' | null
 
 export function SandboxDetail() {
-  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen, clearSandboxError } = useStore()
+  const { sandboxes, activeSandboxId, updateSandbox, setContextMenu, gitInfo, loadGitInfo, sandboxChanges, sandboxIsolation, sandboxAutoSync, setAutoSync, setRightDockOpen, clearSandboxError, pendingDock, setPendingDock } = useStore()
   const sandbox = sandboxes.find((s) => s.id === activeSandboxId)
   // The last launch this sandbox refused, if it hasn't started since (see the
   // banner below the header).
@@ -83,6 +84,16 @@ export function SandboxDetail() {
     return () => window.removeEventListener('den:toggle-dock', onToggle)
   }, [])
 
+  // A dock requested from elsewhere (e.g. "Review" on a blocked-request toast,
+  // which may fire before this component exists). Set rather than toggled, so it
+  // opens whether or not a panel was already showing, and cleared once honoured.
+  useEffect(() => {
+    if (!pendingDock) return
+    setDock(pendingDock)
+    if (pendingDock === 'files') setFilesTab('files')
+    setPendingDock(null)
+  }, [pendingDock, setPendingDock])
+
   // Mirror the dock's open state into the store, so the toolbar can show a
   // collapse toggle for it.
   useEffect(() => {
@@ -106,7 +117,7 @@ export function SandboxDetail() {
   // Refresh ports when the Network dock is shown (ports live inside Network).
   useEffect(() => {
     if (dock === 'network' && sandbox?.name) {
-      window.minipit?.getPorts(sandbox.name).then((ports) => {
+      window.den?.getPorts(sandbox.name).then((ports) => {
         if (ports?.length) updateSandbox(sandbox.name, { ports })
       }).catch(() => {})
     }
@@ -144,7 +155,7 @@ export function SandboxDetail() {
   const handleStop = async () => {
     updateSandbox(sandbox.id, { status: 'stopping' })
     try {
-      await window.minipit?.stopSandbox(sandbox.name)
+      await window.den?.stopSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'stopped', uptimeSeconds: undefined })
     } catch (e) {
       console.error(e)
@@ -157,7 +168,7 @@ export function SandboxDetail() {
     clearSandboxError(sandbox.name)
     updateSandbox(sandbox.id, { status: 'starting' })
     try {
-      await window.minipit?.runSandbox(sandbox.name)
+      await window.den?.runSandbox(sandbox.name)
       // Status will update via log lines and polling
     } catch (e) {
       console.error(e)
@@ -171,7 +182,7 @@ export function SandboxDetail() {
     if (!confirm(`Remove "${sandbox.name}"?\n\nIts workspace folder is gone, so the sandbox can't start.`)) return
     updateSandbox(sandbox.id, { status: 'deleting' })
     try {
-      await window.minipit?.deleteSandbox(sandbox.name)
+      await window.den?.deleteSandbox(sandbox.name)
       clearSandboxError(sandbox.name)
     } catch (e) {
       console.error(e)
@@ -182,8 +193,8 @@ export function SandboxDetail() {
   const handleRestart = async () => {
     updateSandbox(sandbox.id, { status: 'stopping' })
     try {
-      await window.minipit?.stopSandbox(sandbox.name)
-      await window.minipit?.runSandbox(sandbox.name)
+      await window.den?.stopSandbox(sandbox.name)
+      await window.den?.runSandbox(sandbox.name)
       updateSandbox(sandbox.id, { status: 'running' })
     } catch (e) {
       console.error(e)
@@ -291,7 +302,7 @@ export function SandboxDetail() {
                   onClick={() => {
                     const open = !changesOpen
                     setChangesOpen(open)
-                    if (open) window.minipit?.gitStatus(sandbox.name, sandbox.workspace)
+                    if (open) window.den?.gitStatus(sandbox.name, sandbox.workspace)
                       .then((r) => setChangeFiles(r?.changes ?? [])).catch(() => {})
                   }}
                 >
@@ -302,7 +313,7 @@ export function SandboxDetail() {
                     <div className="ds-changes-scroll">
                       <ChangesList
                         changes={changeFiles}
-                        onOpen={(rel, name) => { window.minipit?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true); setChangesOpen(false) }}
+                        onOpen={(rel, name) => { window.den?.openFileWindow(sandbox.name, `${sandbox.workspace}/${rel}`, name, true); setChangesOpen(false) }}
                       />
                     </div>
                     <button className="ds-changes-link" onClick={openChangesPanel}>
@@ -313,7 +324,7 @@ export function SandboxDetail() {
               </div>
             )}
             {gi?.remoteUrl && (
-              <a className="ds-remote" title={gi.remote || gi.remoteUrl} onClick={() => window.minipit?.openPath(gi.remoteUrl!)}>
+              <a className="ds-remote" title={gi.remote || gi.remoteUrl} onClick={() => window.den?.openPath(gi.remoteUrl!)}>
                 <Github size={12} />{repoShort || 'remote'}
               </a>
             )}
@@ -373,6 +384,7 @@ export function SandboxDetail() {
             onShowInfo={() => setDock((d) => (d === 'info' ? null : 'info'))}
             onShowNetwork={() => setDock((d) => (d === 'network' ? null : 'network'))}
             onShowChanges={toggleChanges}
+            onShowStats={() => setDock((d) => (d === 'stats' ? null : 'stats'))}
             onStart={handleStart}
           />
         </div>
@@ -384,6 +396,8 @@ export function SandboxDetail() {
                 ? <FilesPanel sandbox={sandbox} tab={filesTab} onTabChange={setFilesTab} />
                 : dock === 'network'
                 ? <NetworkPanel sandbox={sandbox} />
+                : dock === 'stats'
+                ? <StatsPanel sandbox={sandbox} />
                 : <InfoPanel sandbox={sandbox} />}
             </div>
           </>

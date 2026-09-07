@@ -56,4 +56,4 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
 // localStorage key AccordionSection persists its open state under. Writing it
 // before navigating means a collapsed section is already open on arrival,
 // instead of the scroll landing on a closed header.
-export const accordionKey = (id: string): string => `minipit:info-acc:v2:${id}`
+export const accordionKey = (id: string): string => `den:info-acc:v2:${id}`

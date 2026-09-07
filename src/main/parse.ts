@@ -50,3 +50,65 @@ export function semverLt(a: string, b: string): boolean {
   if (a2 !== b2) return a2 < b2
   return a3 < b3
 }
+
+// A registered MCP server as den shows it. Fields are best-effort: which of
+// url/command/transport/auth a given sbx build reports isn't pinned.
+export interface McpServerEntry {
+  name: string
+  url: string
+  command: string
+  transport: string
+  auth: string
+}
+
+/**
+ * Fallback for `sbx mcp ls` without --json: a column-aligned table. Take the
+ * first field as the name and classify the rest by shape rather than by column
+ * position, which has moved before in other sbx tables.
+ *
+ * The hard part is what is NOT a row. With an empty registry sbx prints prose
+ * and aligned help where the table would be, and both split into columns just
+ * like a real entry — that has produced a phantom server twice, once named `No`
+ * (from "No MCP servers registered") and once named `add one` (from the help
+ * beneath it), each rendered with live Authorize / Remove buttons and each
+ * passable to `--static-mcp`. A name is an identifier, so anything else is
+ * dropped: the worst case has to be showing less, never inventing a server.
+ */
+export function parseMcpTable(out: string): McpServerEntry[] {
+  const rows: McpServerEntry[] = []
+  for (const line of out.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    const cols = t.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+    if (cols.length < 1) continue
+    // Skip the header row, whatever it's called.
+    if (/^(name|server)\b/i.test(cols[0])) continue
+    // Skip prose: with nothing registered sbx prints a sentence ("No MCP
+    // servers registered"), and add/auth emit INFO/ERROR lines.
+    if (/^(no|none|error|info|warn|warning|usage|failed)\b/i.test(cols[0])) continue
+    // And skip anything whose name isn't a bare identifier, however many
+    // columns follow it. The line under that sentence is aligned help ("add
+    // one   sbx mcp add <name> --url <url>") which splits into columns exactly
+    // like a real row, so it walked through a check that only looked at
+    // single-column lines and became a server called "add one".
+    if (/\s/.test(cols[0])) continue
+    const rest = cols.slice(1)
+    // Belt and braces for help text whose first word happens to be a lone
+    // identifier ("Run  sbx mcp add <name>  to add one."): the columns of such
+    // a line carry placeholders, backticks or a full stop, none of which appear
+    // in a registered server's url or command. Not observed on a build — it's
+    // the same failure one wording away, and the cost of being wrong here is
+    // hiding a row rather than inventing one.
+    if (rest.some((c) => /[<>`]/.test(c) || /\.$/.test(c))) continue
+    rows.push({
+      name: cols[0],
+      url: rest.find((c) => /^https?:\/\//i.test(c)) ?? '',
+      command: rest.find((c) => !/^https?:\/\//i.test(c) && /\s|\//.test(c)) ?? '',
+      transport: rest.find((c) => /^(http|sse|stdio|local|remote)$/i.test(c)) ?? '',
+      // Widened past the obvious words: a column can just as well read "yes",
+      // "valid" or "active", and missing it shows an authorized server as blank.
+      auth: rest.find((c) => /^(yes|no|ok|valid|active|none|never)$/i.test(c) || /auth|token|expired|pending/i.test(c)) ?? ''
+    })
+  }
+  return rows
+}
