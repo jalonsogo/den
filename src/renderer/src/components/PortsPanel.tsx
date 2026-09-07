@@ -41,12 +41,13 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
     if (!h || busy) return
     setBusy('publish')
     setErr(null)
-    // Publish IPv4-only (tcp4/udp4). A plain `tcp` spec makes sbx bind both
-    // 127.0.0.1 and [::1], but sandbox services typically listen on IPv4
-    // 0.0.0.0 only — leaving a dead ::1 forwarder. Since macOS resolves
-    // `localhost` to ::1 first, that dead binding breaks `http://localhost:PORT`.
-    // Binding IPv4-only means the ::1 attempt is refused and the client falls
-    // back to 127.0.0.1, so `localhost` works.
+    // Publish IPv4-only (tcp4/udp4) explicitly, rather than relying on sbx's
+    // default. Below v0.42, a plain `tcp` spec made sbx bind both 127.0.0.1 and
+    // [::1] — but sandbox services typically listen on IPv4 0.0.0.0 only,
+    // leaving a dead ::1 forwarder, and since macOS resolves `localhost` to ::1
+    // first, that dead binding broke `http://localhost:PORT`. sbx 0.42+ made
+    // tcp4 the default anyway, so this is now redundant with a current runtime
+    // — kept explicit so den still gets IPv4-only behaviour on an older one.
     //
     // Default to loopback (127.0.0.1); when "Expose to network" is checked bind
     // 0.0.0.0 so the port is also reachable from other machines on the LAN. The
@@ -86,10 +87,12 @@ export function PortsPanel({ sandbox }: { sandbox: Sandbox }) {
             <button
               className="btn btn-ghost btn-sm"
               style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-              // Use the IPv4 literal, not `localhost`: sbx publishes both a
-              // 127.0.0.1 and a [::1] binding, but macOS resolves `localhost`
-              // to ::1 first — and sandbox services that listen only on IPv4
-              // 0.0.0.0 (the common case) return an empty reply over IPv6.
+              // Use the IPv4 literal, not `localhost`: below sbx v0.42, a
+              // publish also opened a [::1] binding, and macOS resolves
+              // `localhost` to ::1 first — sandbox services that listen only
+              // on IPv4 0.0.0.0 (the common case) returned an empty reply over
+              // IPv6. sbx 0.42+ defaults to tcp4-only, making this moot on a
+              // current runtime, but the literal is kept for older ones.
               onClick={() => window.den?.openPath(`http://127.0.0.1:${port.host}`)}
             >
               Open <ExternalLink size={13} />

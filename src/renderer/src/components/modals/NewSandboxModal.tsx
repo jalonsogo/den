@@ -126,6 +126,10 @@ export function NewSandboxModal() {
   const [nameEdited, setNameEdited]   = useState(false)
   const [agent, setAgent]             = useState<AgentType>('claude')
   const [workspace, setWorkspace]     = useState(pinnedWs)
+  // sbx >= 0.42: create with no workspace bind mount at all. Off by default —
+  // most sandboxes want a mounted folder, and it forces an explicit name since
+  // there's no folder left to derive one from.
+  const [noWorkspace, setNoWorkspace] = useState(false)
   const [wsBase, setWsBase]           = useState('')     // ~/den base for the default path
   const [wsEdited, setWsEdited]       = useState(false)  // user picked their own folder
   const [memIdx, setMemIdx]           = useState(0)
@@ -381,16 +385,21 @@ export function NewSandboxModal() {
     // Surface the offending field, not just the message: the error is pinned
     // outside the tab panels, so from the Advanced tab it would otherwise name
     // a control the user can't see.
-    if (!workspace) { setTab('basic'); setError('Workspace is required'); return }
+    if (noWorkspace) {
+      // No folder to derive a name from — an explicit one is the only option.
+      if (!name.trim()) { setTab('basic'); setError('Name is required when there is no workspace'); return }
+    } else if (!workspace) {
+      setTab('basic'); setError('Workspace is required'); return
+    }
     const finalName = (name.trim() || suggestedName() || randomName())
     // Remember this folder so the next standalone sandbox defaults to it.
-    localStorage.setItem('den:lastWorkspace', workspace)
+    if (!noWorkspace) localStorage.setItem('den:lastWorkspace', workspace)
     setError('')
     setProgress('')
     setCreating(true)
     addCreatingSandbox({
       id: `creating-${finalName}`, name: finalName, status: 'creating',
-      agent: effAgent as typeof agent, workspace, ports: [], logs: []
+      agent: effAgent as typeof agent, workspace: noWorkspace ? '' : workspace, ports: [], logs: []
     })
     const unsub = window.den?.onCreateOutput((chunk) => {
       setProgress((p) => p + chunk)
@@ -402,9 +411,9 @@ export function NewSandboxModal() {
         await window.den?.createSandbox({
           name: finalName,
           agent: effAgent,
-          workspace,
+          workspace: noWorkspace ? undefined : workspace,
           memory: memValue !== 'default' ? memValue : undefined,
-          branch: clone,
+          branch: noWorkspace ? false : clone,
           template: source === 'template' && template ? template : undefined,
           kits: selKits,
           staticMcps: selMcps,
@@ -441,14 +450,14 @@ export function NewSandboxModal() {
     ...(name.trim() ? ['--name', name.trim()] : []),
     ...(source === 'template' && template ? ['-t', template] : []),
     ...(memValue !== 'default' ? ['-m', memValue] : []),
-    ...(clone ? ['--clone'] : []),
+    ...(!noWorkspace && clone ? ['--clone'] : []),
     ...parsePorts(portsRaw).flatMap((p) => ['-p', p]),
     ...parseEnv(envRaw).flatMap((e) => ['-e', e]),
     ...(shareSkills ? [] : ['--no-share-skills']),
     ...selKits.flatMap((entry) => ['--kit', q(entry)]),
     ...selMcps.flatMap((m) => ['--static-mcp', m]),
     effAgent,
-    q(workspace || '<workspace>')
+    ...(noWorkspace ? [] : [q(workspace || '<workspace>')])
   ]
 
   return (
@@ -533,6 +542,19 @@ export function NewSandboxModal() {
               directly or cloned first. */}
           <div className="fgroup">
             <div className="fgroup-hdr">Workspace</div>
+            {caps.hasNoWorkspaceCreate && (
+              <div className="fg">
+                <div className="tog-row">
+                  <button
+                    className={`s-toggle${noWorkspace ? ' on' : ''}`}
+                    onClick={() => setNoWorkspace(!noWorkspace)}
+                  />
+                  No workspace bind mount
+                </div>
+                <div className="fhint">Create a sandbox with no folder mounted. Requires an explicit name below.</div>
+              </div>
+            )}
+            {!noWorkspace && (
             <div className="fg">
               <label className="flabel">Path</label>
               <div className="frow-2">
@@ -547,6 +569,8 @@ export function NewSandboxModal() {
               </div>
               <div className="fhint">The directory sbx mounts as the agent's primary workspace.</div>
             </div>
+            )}
+            {!noWorkspace && (
             <div className="fg">
               <label className="flabel">Isolation</label>
               <div className="tog-row">
@@ -594,6 +618,7 @@ export function NewSandboxModal() {
                 ) : null
               })()}
             </div>
+            )}
           </div>
 
           {/* MCP servers from the gateway. Selecting any switches this sandbox

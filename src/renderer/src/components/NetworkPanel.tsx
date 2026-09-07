@@ -204,9 +204,12 @@ export function NetworkPanel({ sandbox }: { sandbox: Sandbox }) {
   }
 
   // Reset ALL custom network rules, then set the chosen preset as default.
+  // sbx does this by wiping the policy store and restarting its daemon, which
+  // stops any currently running sandboxes — so this is the only warning of
+  // that the user gets (den passes --force to skip sbx's own confirmation).
   const resetPolicy = async () => {
     if (presetBusy) return
-    if (!window.confirm(`Remove all custom network rules and set the default preset to “${preset}”?`)) return
+    if (!window.confirm(`Remove all custom network rules and set the default preset to “${preset}”? Running sandboxes will be stopped.`)) return
     setPresetBusy(true)
     setAllowMsg(null)
     const res = await window.den?.policyReset(preset).catch(() => null)

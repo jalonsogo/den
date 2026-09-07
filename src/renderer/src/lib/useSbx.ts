@@ -13,9 +13,22 @@ export interface SbxCaps {
   version: string
   /** sbx >= 0.39: prune, .sbxenv.yaml, dynamic secrets, kit signing. */
   hasEnvFiles: boolean
+  /** sbx >= 0.42: cloud sandboxes (`sbx --cloud ...`). */
+  hasCloud: boolean
+  /** sbx >= 0.42: kit `args:` block + `--kit-arg name=value`. */
+  hasKitArgs: boolean
+  /** sbx >= 0.42: `sbx create` without a workspace bind mount. */
+  hasNoWorkspaceCreate: boolean
 }
 
-const EMPTY: SbxCaps = { known: false, version: '', hasEnvFiles: false }
+const EMPTY: SbxCaps = {
+  known: false,
+  version: '',
+  hasEnvFiles: false,
+  hasCloud: false,
+  hasKitArgs: false,
+  hasNoWorkspaceCreate: false
+}
 
 // What a runtime older than 0.39 doesn't get, and where it would otherwise be.
 //
@@ -32,6 +45,13 @@ export const V039_FEATURES: Array<{ name: string; where: string }> = [
   { name: 'Claude remote control, registry mirror', where: 'Settings → Runtime' }
 ]
 
+// Same disclosure list, for the v0.42 wave.
+export const V042_FEATURES: Array<{ name: string; where: string }> = [
+  { name: 'Cloud sandboxes', where: 'Sandboxes' },
+  { name: 'Kit arguments', where: 'New Sandbox, Library → Kits' },
+  { name: 'Sandboxes without a workspace', where: 'New Sandbox' }
+]
+
 export function useSbxCaps(): SbxCaps {
   const [caps, setCaps] = useState<SbxCaps>(EMPTY)
   useEffect(() => {
@@ -40,7 +60,14 @@ export function useSbxCaps(): SbxCaps {
       void window.den?.sbxVersionCheck?.()
         .then((r) => {
           if (cancelled || !r?.known) return
-          setCaps({ known: true, version: r.version, hasEnvFiles: !!r.hasEnvFiles })
+          setCaps({
+            known: true,
+            version: r.version,
+            hasEnvFiles: !!r.hasEnvFiles,
+            hasCloud: !!r.hasCloud,
+            hasKitArgs: !!r.hasKitArgs,
+            hasNoWorkspaceCreate: !!r.hasNoWorkspaceCreate
+          })
         })
         .catch(() => {})
     }

@@ -126,18 +126,18 @@ export function InfoPanel({ sandbox }: { sandbox: Sandbox }) {
               leaves a ragged, oddly-gapped row whenever it doesn't divide evenly. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {loginMethod && (
-              <div className="info-stat"><span className="is-k">Login method</span><span className="is-v" style={{ fontWeight: 400 }}>{loginMethod}</span></div>
+              <div className="info-stat"><span className="is-k">Login method</span><span className="is-v">{loginMethod}</span></div>
             )}
             {account?.organization && (
-              <div className="info-stat"><span className="is-k">Organization</span><span className="is-v" style={{ fontWeight: 400 }}>{account.organization}</span></div>
+              <div className="info-stat"><span className="is-k">Organization</span><span className="is-v">{account.organization}</span></div>
             )}
             {account?.email && (
-              <div className="info-stat"><span className="is-k">Email</span><span className="is-v" style={{ fontWeight: 400 }} title={account.email}>{account.email}</span></div>
+              <div className="info-stat"><span className="is-k">Email</span><span className="is-v" title={account.email}>{account.email}</span></div>
             )}
             {account?.proxy && (
               <div className="info-stat">
                 <span className="is-k">Proxy</span>
-                <span className="is-v" style={{ fontWeight: 400, whiteSpace: 'normal', wordBreak: 'break-all' }}>{account.proxy}</span>
+                <span className="is-v" style={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>{account.proxy}</span>
               </div>
             )}
           </div>

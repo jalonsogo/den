@@ -378,6 +378,50 @@ Template:
   confirmed flag. When a v0.39 binary is to hand, run each command's `--help`
   and replace the candidate lists with what's really there.
 
+### v0.42 flag spellings and confirmations den still needs a real binary for
+- **Version:** sbx v0.42 (written against the release notes, not a binary — the
+  same situation the v0.39 entry above describes, and the same fix applies).
+- **Symptom:** none yet — pre-empting the same "unknown flag" / guessed-argv
+  failure mode as v0.39, for a new wave of surface: cloud sandboxes
+  (`sbx --cloud ...`), kit `args:`/`--kit-arg`, `sbx move`, and workspace-optional
+  `sbx create`.
+- **Already reasoned through from the release notes + den's own code, pending
+  confirmation once a v0.42 binary exists (no code change expected):**
+  - **Ports default (tcp4 vs. dual-stack `tcp`)** — 0.42.0 makes `tcp4` the
+    default for `sbx ports --publish` and kit-declared ports. den's own publish
+    UI (`PortsPanel.tsx`) already forces `tcp4`/`udp4` explicitly on every
+    call it makes, specifically to work around the *old* dual-stack default —
+    unaffected either way. The one path that relied on the old default is the
+    creation-time free-text `-p` field (`NewSandboxModal.tsx` →
+    `buildArgs`, `main/index.ts`) — a bare `host:container` spec there will now
+    bind tcp4-only automatically, which is the behaviour den wants; nothing to
+    change.
+  - **`sbx run <name> --kit <ref>` deprecation** — doesn't apply to den. `sbx
+    create` (den's only creation path) already invokes kits via `--kit <dir>`
+    flags plus a resolved agent-name positional — the *recommended* shape, not
+    the deprecated one. den's only `sbx run` usage is `sbx run --name
+    <existing> [-- --continue]`, for reattaching to an already-created
+    sandbox, which this deprecation doesn't touch.
+- **Open questions to resolve via `sbxFlag()`/`sbxHasCommand()`
+  (`src/main/index.ts`) once a v0.42 binary is available, not by guessing:**
+  - **`--kit-arg`**: exact separator/spelling for the bare (`name=value`) and
+    disambiguated (`kit.name=value`) forms.
+  - **`--cloud`**: whether it's a global flag (before the subcommand) or repeated
+    per-subcommand — release-note examples show it before `run`/`cp`/`secret`/
+    `policy`, but this isn't confirmed against `--help`.
+  - **`sbx move`**: argv shape for moving a sandbox filesystem between local and
+    cloud (flag names for direction are unconfirmed).
+  - **`sbx --cloud secret` / `sbx --cloud policy`**: whether these mirror the
+    existing `secret`/`policy` subcommand spellings exactly, or diverge.
+  - **`mcp auth --no-scope`**: confirmed by name in the release notes, but not
+    yet probed against `--help` output.
+  - **Cloud entitlement/plan status**: no read-only command is named in the
+    release notes for "does this account have a Docker Agentic Platform plan" —
+    needs discovery before `den:cloud-status` (or equivalent) can be built.
+- **Status:** unverified — same discipline as the v0.39 entry: replace every
+  guess above with what `--help` actually documents once a v0.42 binary is to
+  hand, and decline (rather than improvise) anywhere nothing matches.
+
 ### `settings` has no read path den could rely on
 - **Version:** sbx v0.38–v0.39.
 - **Symptom:** den's runtime toggles showed whatever den last wrote, so a

@@ -569,6 +569,12 @@ declare global {
         version: string; min: string; known: boolean; outdated: boolean
         /** sbx >= 0.39: prune, env files, dynamic secrets, kit signing. */
         hasEnvFiles?: boolean
+        /** sbx >= 0.42: cloud sandboxes. */
+        hasCloud?: boolean
+        /** sbx >= 0.42: kit `args:` block + `--kit-arg`. */
+        hasKitArgs?: boolean
+        /** sbx >= 0.42: `sbx create` without a workspace bind mount. */
+        hasNoWorkspaceCreate?: boolean
       }>
       pickSbxBinary(): Promise<{ ok: boolean; path: string; version?: string; error?: string }>
       runtimeSetupState(): Promise<{

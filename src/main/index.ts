@@ -373,6 +373,26 @@ async function fetchKitArtifact(slug: string): Promise<{ annotations: Record<str
   return { annotations, spec }
 }
 
+// Best-effort recovery for `den:kit-import`: some v2 kits keep spec.yaml only
+// in the manifest's config blob, never inside a layer — either because the
+// layer is an empty placeholder (spec-only kits) or because it holds nothing
+// but bundled overlay files (image-based kits, e.g. openclaw/kiro/copilot).
+// Either way `sbx kit pull`'s zip/tar export can't produce spec.yaml, so read
+// it straight off the registry instead, via the same anonymous-pull path the
+// Hub browse tab already uses to preview these kits. Writes spec.yaml into
+// `dir` (creating it if needed) without touching any files already extracted
+// there, and reports whether it found one.
+async function tryFetchSpecFallback(ref: string, dir: string): Promise<boolean> {
+  if (!ref.startsWith('docker.io/')) return false
+  const slug = ref.split('@')[0].replace(/^docker\.io\//, '').split(':')[0]
+  const { spec } = await fetchKitArtifact(slug)
+  if (!spec) return false
+  const fs = require('fs')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(join(dir, 'spec.yaml'), spec)
+  return true
+}
+
 // Normalise a kit's kind to the two pages we render. sbx spells sandbox kits
 // "agent" on disk; the annotation uses "sandbox". Fall back to spec shape.
 function normalizeKitKind(rawKind: string, spec: string): 'sandbox' | 'mixin' {
@@ -915,9 +935,12 @@ function normalizePorts(ports?: RawPort[]) {
       active: true
     }))
     .filter((p) => !Number.isNaN(p.host) && !Number.isNaN(p.container))
-  // A single published port is reported once per host binding address (IPv4
-  // 127.0.0.1 and IPv6 ::1), which we don't surface — collapse to one row per
-  // host:container/protocol so the panel doesn't show every port twice.
+  // Below sbx v0.42, a single published port was reported once per host
+  // binding address (IPv4 127.0.0.1 and IPv6 ::1), which we don't surface —
+  // collapse to one row per host:container/protocol so the panel doesn't show
+  // every port twice. sbx 0.42+ defaults to tcp4-only, so a current runtime
+  // only ever reports one row per mapping and this is a no-op — kept for
+  // sandboxes still running an older sbx.
   const seen = new Set<string>()
   return mapped.filter((p) => {
     const key = `${p.host}:${p.container}/${p.protocol}`
@@ -2549,6 +2572,12 @@ export const MIN_SBX_VERSION = '0.38.0'
 // new surface is gated instead — forcing an upgrade buys a 0.38 user nothing.
 export const SBX_ENV_VERSION = '0.39.0'
 
+// ── sbx v0.42 capabilities ───────────────────────────────────────────────────
+// Same "additive, gate don't require" treatment as v0.39: cloud sandboxes, kit
+// `args:`/`--kit-arg`, and workspace-optional `create` all landed together in
+// this release, so one floor covers the whole wave.
+export const SBX_CLOUD_VERSION = '0.42.0'
+
 /** True when the installed runtime is at least `want`. False while unknown. */
 export function sbxAtLeast(want: string): boolean {
   return !!cachedSbxVersion && !semverLt(cachedSbxVersion, want)
@@ -2615,14 +2644,14 @@ export async function sbxHasCommand(args: string[]): Promise<boolean> {
 //   · macOS/arm64 only. The darwin tarball has no x86_64 payload, and Windows
 //     ships an MSI with no portable archive to pin.
 export const PINNED_SBX = {
-  version: '0.39.0',
-  minor: '0.39',
+  version: '0.42.0',
+  minor: '0.42',
   asset: 'DockerSandboxes-darwin.tar.gz',
   // sha256 of the published asset. NOT the digest inside provenance.json —
-  // that attests `sandboxes-v0.39.0.darwin-arm64.tar.gz`, a differently-named
+  // that attests `sandboxes-v0.42.0.darwin-arm64.tar.gz`, a differently-named
   // build artifact whose hash never matches what we download. Recompute by
   // downloading the asset whenever this pin moves.
-  sha256: 'd12fa06aeece298d96dae058101f256537770a00ef46e6584762e0f27b06a5a3'
+  sha256: '1780e195ef7bb3cfaad31773f35933b317c9034fd46ae2fe5442f1117e9cc842'
 }
 
 function runtimeRoot(): string { return join(app.getPath('userData'), 'runtime') }
@@ -3265,7 +3294,10 @@ function setupIPC(): void {
 
   ipcMain.handle('den:create-sandbox', async (_, config: {
     agent: string
-    workspace: string
+    // Optional from sbx v0.42 (`hasNoWorkspaceCreate`): a sandbox can be
+    // created with no workspace bind mount at all. Omitted, not empty-string —
+    // the modal requires a name instead when there's no workspace to derive one from.
+    workspace?: string
     memory?: string
     branch?: boolean
     name?: string
@@ -3279,8 +3311,10 @@ function setupIPC(): void {
   }) => {
     // Ensure the target workspace folder exists — defaults like ~/den/<name>
     // won't have been created yet (no-op for existing project/clone folders).
-    try { require('fs').mkdirSync(config.workspace, { recursive: true }) }
-    catch (err) { console.error('could not create workspace folder:', err) }
+    if (config.workspace) {
+      try { require('fs').mkdirSync(config.workspace, { recursive: true }) }
+      catch (err) { console.error('could not create workspace folder:', err) }
+    }
     const buildArgs = (agent: string): string[] => {
       const args = ['create']
       if (config.name) args.push('--name', config.name)
@@ -3309,7 +3343,10 @@ function setupIPC(): void {
       // instead of the process table.
       if (config.envFile) args.push('--env-file', config.envFile)
       for (const pair of config.env ?? []) args.push('-e', pair)
-      args.push(agent, config.workspace)
+      // The workspace positional is omitted entirely (sbx v0.42+) rather than
+      // passed empty — a sandbox with no bind mount, not one mounting cwd.
+      args.push(agent)
+      if (config.workspace) args.push(config.workspace)
       return args
     }
     // Stream output so the New Sandbox modal can show live progress (image pull,
@@ -3358,7 +3395,8 @@ function setupIPC(): void {
     // so parse the quoted name rather than using the whole message.
     const match = out.match(/sandbox ['"]([^'"]+)['"]/i)
     const sandboxName =
-      config.name ?? match?.[1] ?? `${agent}-${config.workspace.split('/').pop()}`
+      config.name ?? match?.[1] ??
+      (config.workspace ? `${agent}-${config.workspace.split('/').pop()}` : agent)
     recordKits(sandboxName, config.kits ?? [])
     recordIsolation(sandboxName, !!config.branch)
     // Brand-new sandbox: its first agent session must start fresh, never
@@ -3464,7 +3502,12 @@ function setupIPC(): void {
       // Additive v0.39 surface (prune, env files, dynamic secrets, kit signing,
       // per-sandbox env vars). Gated rather than required: a 0.38 runtime keeps
       // working, it just doesn't show what it can't do.
-      hasEnvFiles: sbxAtLeast(SBX_ENV_VERSION)
+      hasEnvFiles: sbxAtLeast(SBX_ENV_VERSION),
+      // Additive v0.42 surface (cloud sandboxes, kit args, workspace-optional
+      // create) — same gate-don't-require treatment.
+      hasCloud: sbxAtLeast(SBX_CLOUD_VERSION),
+      hasKitArgs: sbxAtLeast(SBX_CLOUD_VERSION),
+      hasNoWorkspaceCreate: sbxAtLeast(SBX_CLOUD_VERSION)
     }
   })
 
@@ -4549,13 +4592,18 @@ function setupIPC(): void {
           fs.rmdirSync(inner)
         }
       }
-      if (!fs.existsSync(join(dir, 'spec.yaml'))) {
+      if (!fs.existsSync(join(dir, 'spec.yaml')) && !(await tryFetchSpecFallback(r, dir))) {
         fs.rmSync(dir, { recursive: true, force: true })
         return { ok: false, error: 'Pulled artifact has no spec.yaml — not a valid kit.' }
       }
       return { ok: true, name }
     } catch (err) {
-      return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
+      const message = (err instanceof Error ? err.message : String(err)).trim()
+      // sbx v0.39's `kit pull` demands a real tar+gzip content layer and rejects
+      // the standard OCI empty-layer placeholder that spec-only kits carry —
+      // fall back to reading spec.yaml straight off the registry instead.
+      if (await tryFetchSpecFallback(r, dir)) return { ok: true, name }
+      return { ok: false, error: message }
     }
   })
 
@@ -5368,7 +5416,7 @@ function setupIPC(): void {
       // every rule and filter in-process rather than relying on the `--type`
       // flag or a positional sandbox filter (their availability isn't pinned
       // across sbx versions, and a bad flag would blank the whole view).
-      const out = await sbx(['policy', 'ls', '--wide'], { timeout: 12000 })
+      const out = await withPolicyInitRetry(() => sbx(['policy', 'ls', '--wide'], { timeout: 12000 }))
       const parsed = parsePolicyLs(out)
       let rules = parsed.rules.filter((r) => !r.type || r.type === 'network')
       // Narrow to the rules that actually apply to this sandbox: its own rules
@@ -5391,7 +5439,9 @@ function setupIPC(): void {
     // contains "blocked"/"deny" in its name parsed as a denial. `allowed` is an
     // explicit boolean, and the same payload carries the governance detail.
     try {
-      const raw = await sbx(['policy', 'check', 'network', '--json', resource], { timeout: 12000 })
+      const raw = await withPolicyInitRetry(() =>
+        sbx(['policy', 'check', 'network', '--json', resource], { timeout: 12000 })
+      )
       const j = JSON.parse(raw) as {
         allowed?: boolean
         governance?: Record<string, unknown>
@@ -5410,7 +5460,9 @@ function setupIPC(): void {
       // Documented form: `sbx policy check network <host>`. It's read-only and
       // evaluates the daemon-side authorizer, so no per-sandbox flag is passed
       // (its availability isn't pinned, and a bad flag would error the check).
-      const raw = await sbx(['policy', 'check', 'network', resource], { timeout: 12000 })
+      const raw = await withPolicyInitRetry(() =>
+        sbx(['policy', 'check', 'network', resource], { timeout: 12000 })
+      )
       // Only look at the decision line, not the whole body (which repeats the
       // host). sbx prints "Allowed: <target>" / "Denied: <target>" first.
       const head = raw.split('\n').find((l) => /^\s*(allowed|denied|blocked)\s*:/i.test(l)) ?? raw
@@ -5468,11 +5520,42 @@ function setupIPC(): void {
     }
   })
 
+  // `sbx policy reset` takes no preset — it wipes the policy store back to
+  // uninitialized (stopping the daemon, and any running sandboxes, in the
+  // process) and only prompts if sandboxes are currently running. Den already
+  // confirms the whole operation in its own UI, so `--force` skips sbx's own
+  // y/n rather than trying to answer it over stdin — which is what this used
+  // to (wrongly) feed the chosen preset into, leaving the policy uninitialized
+  // and stuck on whatever sbx treats that as (Balanced). The daemon restarts
+  // on the next command; the policy then needs an explicit `policy init`.
+  async function resetNetworkPolicy(preset: string): Promise<string> {
+    await sbx(['policy', 'reset', '--force'], { timeout: 20000 })
+    return sbx(['policy', 'init', preset], { timeout: 20000 })
+  }
+
+  // A fresh policy store (before the first `policy init`) makes read-only
+  // commands like `policy ls`/`policy check` fail with an "ERROR: global
+  // network policy has not been initialized" instead of returning empty
+  // results — there's no way to fix that from the UI otherwise, since it
+  // isn't a per-sandbox or per-rule problem. Auto-heal by initializing to the
+  // same default preset the reset path uses, then retry once, so callers see
+  // a normal empty-policy response instead of a raw CLI error.
+  const POLICY_UNINITIALIZED_RE = /not (?:been )?initialized/i
+  async function withPolicyInitRetry<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!POLICY_UNINITIALIZED_RE.test(msg)) throw err
+      await sbx(['policy', 'init', 'balanced'], { timeout: 20000 })
+      return run()
+    }
+  }
+
   // Set the default network preset (allow-all | balanced | deny-all).
   // `policy set-default` is deprecated in favour of `policy init`, but `init`
   // only works on an uninitialized policy — once initialized, changing it needs
-  // `policy reset`. So try init first and fall back to reset (which prompts for
-  // the preset, fed over stdin) when the policy already exists.
+  // a `policy reset` first.
   ipcMain.handle('den:policy-set-default', async (_, preset: string) => {
     try {
       let output: string
@@ -5481,7 +5564,7 @@ function setupIPC(): void {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         if (/already initialized/i.test(msg)) {
-          output = await sbxWithInput(['policy', 'reset'], `${preset}\n`, 20000)
+          output = await resetNetworkPolicy(preset)
         } else {
           throw e
         }
@@ -5492,12 +5575,10 @@ function setupIPC(): void {
     }
   })
 
-  // Reset all custom network rules. `sbx policy reset` prompts for a new default
-  // preset, so feed the chosen preset to stdin (timeout-guarded so it can never
-  // hang the app if the prompt shape changes).
+  // Reset all custom network rules and set a fresh default preset.
   ipcMain.handle('den:policy-reset', async (_, preset: string) => {
     try {
-      const output = await sbxWithInput(['policy', 'reset'], `${preset}\n`, 20000)
+      const output = await resetNetworkPolicy(preset)
       return { ok: true, output }
     } catch (err) {
       return { ok: false, error: (err instanceof Error ? err.message : String(err)).trim() }
