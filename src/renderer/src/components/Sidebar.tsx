@@ -275,7 +275,6 @@ export function Sidebar() {
   const hasFilter = !!filter || !showGroups || agentFilter.length > 0 || statusFilter !== 'all' ||
     locationFilter !== 'all' || sortBy !== 'manual'
   const runningCount = sandboxes.filter((s) => s.status === 'running').length
-  const hasCloudSandboxes = sandboxes.some((s) => s.location === 'cloud')
 
   // Agents that actually appear in the current sandboxes — the only ones worth
   // offering as a filter.
@@ -487,22 +486,20 @@ export function Sidebar() {
                       </div>
                     </div>
 
-                    {hasCloudSandboxes && (
-                      <div className="sb-filter-grp">
-                        <span className="sb-filter-lbl">Location</span>
-                        <div className="sb-filter-seg">
-                          {(['all', 'local', 'cloud'] as const).map((l) => (
-                            <button
-                              key={l}
-                              className={`sb-filter-seg-btn${locationFilter === l ? ' active' : ''}`}
-                              onClick={() => setLocation(l)}
-                            >
-                              {l === 'all' ? 'All' : l === 'local' ? 'Local' : 'Cloud'}
-                            </button>
-                          ))}
-                        </div>
+                    <div className="sb-filter-grp">
+                      <span className="sb-filter-lbl">Location</span>
+                      <div className="sb-filter-seg">
+                        {(['all', 'local', 'cloud'] as const).map((l) => (
+                          <button
+                            key={l}
+                            className={`sb-filter-seg-btn${locationFilter === l ? ' active' : ''}`}
+                            onClick={() => setLocation(l)}
+                          >
+                            {l === 'all' ? 'All' : l === 'local' ? 'Local' : 'Cloud'}
+                          </button>
+                        ))}
                       </div>
-                    )}
+                    </div>
 
                     <div className="sb-filter-grp">
                       <span className="sb-filter-lbl">Groups</span>
