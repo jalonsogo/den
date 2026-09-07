@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  den — interactive UI capture (self-contained). Current as of den v0.10.0.
+  den — interactive UI capture (self-contained). Current as of den v0.11.0.
 
   A faithful, dependency-free replica of the den app UI for embedding in other
   pages. Generated from the app's real stylesheet (src/renderer/src/styles/main.css,
@@ -10,16 +10,23 @@
     · Agent / Shell terminals showing REAL captured CLI output
       (claude, codex, opencode recorded through a PTY; bash for the shell tab)
     · Files dock (browsable tree, Changes tab) and Info dock (accordion sections,
-      network policy) per sandbox
-    · Mixin Kits & Sandbox Kits with the Browse-contrib marketplace
+      network policy, cloud-shaped ports) per sandbox
+    · Mixin Kits & Sandbox Kits with the Browse-contrib marketplace, including
+      the kit-arguments composer capability (name / description / default / required)
     · Environments — the v0.39 `.sbxenv.yaml` page: what a project's file declares,
       values that defer to a host variable, and its welcome screen
     · Settings → Runtime — the managed-vs-own sbx switch and the pinned version
+      (den 0.11 requires sbx 0.42+, full stop — no more soft feature-gating)
     · MCP Servers — the v0.38 gateway: registered servers as a table with an
       Auth column, per-row ⋮ menu, Info (inspect) rows, the browser-authorization
       wait, and the welcome screen the page shows with nothing registered
-    · right-click context menus (sandbox, group, file rows)
-    · New Sandbox modal with a streaming creation-log flow
+    · right-click context menus (sandbox, group, file rows) — including
+      "Move to Cloud…" / "Move to Local…" over `sbx move`
+    · one cloud sandbox in the list (`sbx --cloud ls`, merged silently): a small
+      cloud glyph next to its name, cloud-shaped ports (bare port + public URL,
+      no host mapping), and a "Move to Local…" entry on its context menu
+    · New Sandbox modal with a streaming creation-log flow, a workspace-optional
+      toggle (name-only sandboxes), and per-kit argument inputs
     · Settings: light/dark/system, full-interface color themes, density
 
   Keeping it current: the stylesheet is a verbatim copy, so re-embed it whenever
@@ -480,6 +487,7 @@ html, body, #root {
   line-height: 1.25;
 }
 .sb-item.active .sb-item-name { font-weight: 500; }
+.sb-item-cloud { color: var(--sb-muted); margin-left: 4px; vertical-align: -1px; flex-shrink: 0; }
 
 .sb-item-sub {
   font-size: 11px;
@@ -530,7 +538,14 @@ html, body, #root {
 .sb-nav-item.active { background: var(--sb-active); color: var(--sb-active-fg); }
 
 .sb-foot {
-  padding: 8px 12px;
+  /* Fixed height (not padding-derived) so every bottom bar in the app —
+     this, .term-status-bar, .files-local — lines up at the exact same
+     height regardless of each one's own font-size/content. */
+  height: 34px;
+  /* 16px, not 12px: every nav row above (.sb-section/.sb-bottom's 8px wrapper
+     padding + .sb-item/.sb-nav-item's own 8px) lands its icon at a 16px
+     indent — this must match or the plug icon reads as shifted left. */
+  padding: 0 16px;
   border-top: 1px solid var(--sb-border);
   display: flex;
   align-items: center;
@@ -747,6 +762,17 @@ html, body, #root {
 
 /* Filter icon active state */
 .sb-add.has-filter { color: var(--green); }
+.sb-only-active {
+  width: 20px; height: 20px;
+  /* Pulls it against the filter icon (6px gap -> 2px): the two are one cluster
+     of filtering controls, and the header has no width to spare at 216px. */
+  margin-right: -4px;
+}
+.sb-only-active.on {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+}
+.sb-only-active.on:hover { background: color-mix(in srgb, var(--green) 24%, transparent); }
 
 /* Inline filter row — lives inside the sidebar, never overflows outward */
 .sb-filter-row {
@@ -873,9 +899,12 @@ html, body, #root {
 /* Section header whose title navigates */
 .sb-sec-head { display: flex; align-items: center; gap: 6px; padding: 0 8px 5px; }
 .sb-sec-title {
-  flex: 1; text-align: left;
+  flex: 1; min-width: 0; text-align: left;
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
   color: var(--sb-muted); background: none; border: none; cursor: pointer; padding: 2px 0;
+  /* Yields before the icon row does — the header is tight at the default 216px
+     and the buttons matter more than the full word. */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sb-sec-title:hover { color: var(--sb-fg); }
 .sb-sec-title.active { color: var(--sb-active-fg); }
@@ -1214,11 +1243,12 @@ html, body, #root {
   display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
   font-size: 12px; color: var(--t3); white-space: nowrap;
 }
-.d-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--border-hi); }
-.d-status.on::before { background: var(--green); }
-/* Agent-activity states — match the sidebar/toolbar dots so the header agrees. */
-.d-status.working::before { background: var(--yellow); animation: activity-pulse 1.3s ease-in-out infinite; }
-.d-status.waiting::before { background: var(--blue); animation: activity-pulse 1.3s ease-in-out infinite; }
+/* Color the text itself rather than drawing a second dot — the avatar right
+   next to this already carries an always-on pulsing corner dot for the same
+   state (SandboxAvatar's .sbx-avatar-activity), so a dot here duplicated it. */
+.d-status.on { color: var(--green); }
+.d-status.working { color: var(--yellow); }
+.d-status.waiting { color: var(--blue); }
 .d-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .d-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 .d-back {
@@ -1326,9 +1356,11 @@ html, body, #root {
   transition: color 0.12s, background 0.12s;
 }
 .term-rail-btn:hover { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 8%, transparent); }
-/* Active is signalled by full-strength icon colour only — no background box, so
-   an active dock + active terminal tab don't read as "two selected" chips. */
-.term-rail-btn.active { color: var(--tfg, #fff); }
+/* Active gets its own chip so the selected panel/tab reads as "on" even
+   before you hover it; hovering it darkens that chip a touch further rather
+   than falling back to the plain hover tint. */
+.term-rail-btn.active { color: var(--tfg, #fff); background: color-mix(in srgb, var(--tfg, #fff) 14%, transparent); }
+.term-rail-btn.active:hover { background: color-mix(in srgb, var(--tfg, #fff) 20%, transparent); }
 /* Full-opacity red so the block warning reads clearly (not faded). */
 .term-rail-btn.warn { color: var(--destruct); }
 .term-rail-btn.warn:hover { background: color-mix(in srgb, var(--destruct) 14%, transparent); }
@@ -1343,6 +1375,55 @@ html, body, #root {
   font-size: 9px; font-weight: 700; line-height: 1;
   border-radius: 8px;
   color: #fff; background: var(--primary);
+}
+
+/* Status bar under the Agent terminal: Claude Code's own statusline data
+   (context usage, cost, rate limits, …), read from outside the sandbox so it
+   stays visible regardless of scroll position. Themed off the same --tbg/--tfg
+   the terminal itself uses, not the app chrome, so it reads as part of the
+   terminal rather than a den panel. */
+.term-status-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 12px;
+  /* Fixed height, matching .sb-foot and .files-local, so every bottom bar in
+     the app lines up at the same height instead of each deriving its own
+     from padding + font-size. */
+  height: 34px;
+  padding: 0 13px;
+  font-size: 11px; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--tfg, #fff) 62%, transparent);
+  background: var(--tbg, #0a0a0a);
+  box-shadow: inset 0 1px 0 var(--tline);
+  overflow-x: auto; white-space: nowrap;
+}
+.tsb-item { display: inline-flex; align-items: center; gap: 5px; }
+.tsb-strong { color: var(--tfg, #fff); font-weight: 600; }
+.tsb-badge {
+  padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--tfg, #fff) 12%, transparent);
+}
+.tsb-ctx-track {
+  width: 42px; height: 4px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--tfg, #fff) 16%, transparent);
+}
+.tsb-ctx-fill { display: block; height: 100%; background: var(--primary); }
+/* Sized to sit close to the row's own text line-height (~16px) — a fixed
+   20x20 box here used to force the whole bar taller than that, since a flex
+   row stretches to its tallest child, which threw off alignment with the
+   sidebar footer. */
+.tsb-transcript {
+  margin-left: auto; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--tfg, #fff) 25%, transparent);
+  color: color-mix(in srgb, var(--tfg, #fff) 55%, transparent);
+  background: none; cursor: pointer;
+}
+.tsb-transcript:hover {
+  color: var(--tfg, #fff);
+  border-color: color-mix(in srgb, var(--tfg, #fff) 45%, transparent);
+  background: color-mix(in srgb, var(--tfg, #fff) 10%, transparent);
 }
 
 /* Drag-and-drop overlay shown while dragging a file over the agent terminal */
@@ -1465,7 +1546,7 @@ html, body, #root {
   color: var(--t3);
 }
 .is-v {
-  font-size: 13px; font-weight: 500; color: var(--t1);
+  font-size: 13px; font-weight: 400; color: var(--t1);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
 }
 .is-agent { display: inline-flex; align-items: center; gap: 5px; }
@@ -1509,7 +1590,12 @@ html, body, #root {
 .ir-val { font-size: 12px; color: var(--t2); font-family: 'SF Mono','Menlo',monospace; }
 /* Stacked variant: label on its own line, value (e.g. a long path) below it. */
 .info-row-stack { flex-direction: column; align-items: stretch; gap: 3px; }
-.info-row-stack .ir-label { color: var(--t3); font-size: 11px; }
+/* Same treatment as .is-k (the Status/Agent/Account field labels) — this is
+   the same "small label above a value" role, just in a different section. */
+.info-row-stack .ir-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--t3);
+}
 .info-row-stack .ir-val { word-break: break-all; line-height: 1.4; }
 
 /* Network policy block */
@@ -1610,12 +1696,25 @@ html, body, #root {
 .np-dec-opt {
   display: inline-flex; align-items: center; gap: 5px;
   font: inherit; font-size: 12px; padding: 4px 12px;
-  border: none; background: none; color: var(--t2); border-radius: 4px; cursor: pointer;
+  border: none; background: none; color: var(--t3); border-radius: 4px; cursor: pointer;
 }
 .np-dec-opt:hover { color: var(--t1); }
-.np-dec-opt.on { background: var(--bg); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
-.np-dec-ic-allow { color: var(--green); }
-.np-dec-ic-block { color: var(--destruct); }
+/* The selected side carries its own decision colour. It used to be `--bg` on a
+   `--bg-subtle` track — all but identical in light mode — with a 1px shadow
+   doing the work, so neither side looked chosen. Allow/Block is a binary worth
+   being certain about, so it reuses the palette of the ALLOW/BLOCK badges
+   (.np-dec-allow / .np-dec-deny) rather than a neutral raised pill. */
+.np-dec-opt-allow.on {
+  background: var(--green-dim); color: var(--green);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 45%, transparent);
+}
+.np-dec-opt-block.on {
+  background: color-mix(in srgb, var(--destruct) 16%, transparent); color: var(--destruct);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--destruct) 45%, transparent);
+}
+/* Icons inherit, so neither is tinted until its side is picked — a green tick
+   beside an unselected "Allow" was itself reading as the selection. */
+.np-dec-opt svg { color: currentColor; }
 .np-add-form-actions { display: flex; justify-content: flex-end; gap: 7px; }
 .np-rule-pending { border-style: dashed; }
 .np-pending-x {
@@ -1721,7 +1820,8 @@ html, body, #root {
 .mount-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .mount-ro { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--t2); cursor: pointer; }
 .mount-actions-btns { display: flex; gap: 7px; }
-.mounts-hint { font-size: 11px; color: var(--t3); margin-top: 6px; line-height: 1.4; }
+/* Same size as .ss-sub — both are the same "secondary hint paragraph" tier. */
+.mounts-hint { font-size: 11.5px; color: var(--t3); margin-top: 6px; line-height: 1.4; }
 .ports-hint { font-size: 11px; color: var(--t3); margin-top: 6px; }
 
 /* ── Files ── */
@@ -2459,11 +2559,8 @@ html, body, #root {
   display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
   font-size: 11.5px; color: var(--t3);
 }
-.home-row-status.is-working { color: var(--green); }
-.home-row-status.is-waiting { color: var(--yellow); }
-.home-row-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-hi); flex-shrink: 0; }
-.home-row-dot.on { background: var(--green); }
-.home-row-status.is-waiting .home-row-dot { background: var(--yellow); }
+.home-row-status.is-working { color: var(--yellow); }
+.home-row-status.is-waiting { color: var(--blue); }
 .home-row-agent { font-size: 11.5px; color: var(--t3); flex-shrink: 0; }
 /* Metadata chips take the middle, pushing uptime + menu to the right edge. */
 .home-row-meta { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
@@ -2664,11 +2761,73 @@ html, body, #root {
 .toast-ic { color: var(--destruct); flex-shrink: 0; margin-top: 1px; }
 .toast-main { flex: 1; min-width: 0; padding-right: 14px; }
 .toast-title { font-size: 12.5px; font-weight: 600; color: var(--t1); }
+/* The sandbox leads — which one hit the rule is the part not already on screen.
+   Chipped rather than set as text: as a bare bold line it ran into the copy
+   under it and read as one sentence ("den-evolution tried to reach …"), so the
+   identifier has to look like an identifier. Bordered pill, not just a heavier
+   weight, because weight alone still scans as emphasis within a phrase. */
+.toast-sbx {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 100%; margin: 6px 0 5px; padding: 2px 9px 2px 7px;
+  border: 1px solid var(--border-hi); border-radius: 100px;
+  background: var(--bg-subtle);
+  font-size: 11.5px; font-weight: 600; color: var(--t1);
+}
+.toast-sbx > svg { flex-shrink: 0; color: var(--t3); }
+.toast-sbx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toast-sub { font-size: 11.5px; color: var(--t2); margin-top: 1px; word-break: break-all; }
+.toast-host { font-family: 'SF Mono','Menlo',monospace; color: var(--t1); }
 .toast-note { font-size: 11px; margin-top: 5px; }
 .toast-note.ok { color: var(--green); }
 .toast-note.err { color: var(--destruct); }
-.toast-actions { margin-top: 8px; }
+.toast-actions { margin-top: 9px; display: flex; align-items: center; gap: 7px; }
+
+/* Split button: Allow, plus a caret for the alternatives.
+   The CONTAINER paints the pill and clips its halves, rather than each half
+   rounding its own outer corners. Two reasons: `.btn` sets `border-radius`
+   later in this file at equal specificity, so per-half corner overrides were
+   silently dead and it rendered as two separate rounded pills; and one
+   background means the seam is a real divider instead of two shapes that have
+   to be talked into looking joined.
+   Every child selector is `.toast-split > .x` (two classes) so it outranks
+   `.btn` whatever the source order. No `overflow: hidden` to clip the halves —
+   .toast-menu is absolutely positioned against this box, so clipping here would
+   swallow the dropdown; the halves carry matching outer radii instead, which
+   also keeps their hover fill inside the pill. */
+.toast-split {
+  position: relative;
+  display: inline-flex;
+  gap: 0;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--prim-fg, white);
+}
+.toast-split > .btn { background: none; color: inherit; }
+.toast-split > .btn:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+.toast-split > .toast-split-main { border-radius: var(--radius) 0 0 var(--radius); }
+.toast-split > .toast-split-caret {
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding-left: 7px; padding-right: 7px;
+  border-left: 1px solid rgba(255,255,255,0.24);
+}
+.toast-menu {
+  position: absolute; bottom: calc(100% + 5px); right: 0; z-index: 10;
+  min-width: 210px; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+.toast-menu-item {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  font: inherit; font-size: 12px; color: var(--t1);
+  background: none; border: none; border-radius: 5px; padding: 6px 8px; cursor: pointer;
+}
+.toast-menu-item:hover { background: var(--bg-subtle); }
+.toast-menu-item svg { flex-shrink: 0; color: var(--t3); }
+.toast-menu-host {
+  font-family: 'SF Mono','Menlo',monospace; font-size: 11px; color: var(--t3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.toast-menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 .toast-x {
   position: absolute; right: 6px; top: 6px;
   display: flex; align-items: center; justify-content: center;
@@ -2899,15 +3058,20 @@ html, body, #root {
   padding: 7px 10px;
 }
 .kit-dd-trigger:hover { border-color: var(--border-hi); color: var(--t1); }
+/* Portaled to document.body with fixed coords set inline (see kitDdPlace) so
+   the modal's scrolling body can't clip it; z-index clears the modal overlay. */
 .kit-dd-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  position: fixed; z-index: 3000;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.18); overflow: hidden;
+  /* A column so an inline max-height (the room on whichever side it opened)
+     lands on the options list rather than clipping the search row off. */
+  display: flex; flex-direction: column;
 }
 .kit-dd-search { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .kit-dd-search-ic { color: var(--t3); flex-shrink: 0; }
 .kit-dd-search input { flex: 1; border: none; background: none; outline: none; font-size: 12.5px; color: var(--t1); }
-.kit-dd-options { max-height: 200px; overflow-y: auto; padding: 5px; }
+.kit-dd-options { flex: 1; min-height: 0; max-height: 200px; overflow-y: auto; padding: 5px; }
 .kit-dd-opt {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   font-size: 12.5px; color: var(--t1); cursor: pointer;
@@ -3045,10 +3209,6 @@ html, body, #root {
 
 .proj-box-new { color: var(--t2); border-style: dashed; }
 .proj-box-new:hover { color: var(--t1); border-color: var(--border-hi); }
-.proj-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.proj-dot.running { background: var(--green); }
-.proj-dot.stopped { background: var(--t4); }
-.proj-dot.creating { background: var(--amber, #f59e0b); animation: pulse 1.4s infinite; }
 
 /* --clone on a non-repo folder: warn + offer to initialize one. */
 .clone-warn {
@@ -3166,7 +3326,9 @@ html, body, #root {
 
 /* Capability hover popover (fixed-positioned to escape table overflow) */
 .kit-pop {
-  position: fixed; z-index: 300; min-width: 200px; max-width: 340px;
+  /* Above .kit-dd-menu (3000): the caps chips this describes are rendered
+     inside that menu, so a tooltip below it would be invisible. */
+  position: fixed; z-index: 3001; min-width: 200px; max-width: 340px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.18); padding: 8px; cursor: default;
 }
@@ -3695,6 +3857,78 @@ html, body, #root {
 }
 .rt-badge-pre { background: var(--bg-subtle); color: var(--t2); font-size: 10px; padding: 1px 6px; }
 
+/* The "what this runtime can't do" list. Sits inside an .ss-sub, so it inherits
+   its colour and only needs layout. */
+.rt-gated { margin: 8px 0 0; padding-left: 16px; display: grid; gap: 3px; }
+.rt-gated li { font-size: 12px; }
+.rt-gated-where { color: var(--t3); }
+
+/* First-run runtime choice. Full-window because nothing in den works until it's
+   answered — showing the dashboard behind it would just be a broken app the user
+   has to diagnose. */
+.rs-gate {
+  position: fixed; inset: 0; z-index: 400;
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px 24px;
+  background: var(--bg);
+  overflow-y: auto;
+}
+.rs-card {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center;
+  max-width: 620px; width: 100%;
+}
+.rs-options {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  width: 100%; margin-top: 24px;
+}
+@media (max-width: 640px) { .rs-options { grid-template-columns: 1fr; } }
+.rs-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  text-align: left;
+  padding: 16px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.rs-opt:hover:not(:disabled) { border-color: var(--border-hi); background: var(--bg-muted); }
+.rs-opt:disabled { cursor: default; opacity: 0.55; }
+/* The recommended one carries the accent, so the default reads as a default
+   without a second badge competing with the "Recommended" chip. */
+.rs-opt-primary { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.rs-opt-off { border-style: dashed; }
+.rs-opt-hd { display: flex; align-items: center; gap: 8px; color: var(--t1); }
+.rs-opt-title { font-size: 13.5px; font-weight: 600; }
+.rs-opt-sub { font-size: 12.5px; color: var(--t2); line-height: 1.45; }
+.rs-opt-meta { font-size: 11.5px; color: var(--t3); }
+.rs-opt-meta code { font-size: 11px; }
+.rs-progress-wrap { width: 100%; margin-top: 18px; text-align: left; }
+.rs-foot {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 22px; font-size: 11.5px; color: var(--t3);
+}
+
+/* Managed-runtime download progress. A determinate bar when the server sent a
+   content-length, an indeterminate sweep when it didn't — better than a
+   percentage that sits at 0 because the total is unknown. */
+.rt-progress {
+  width: 100%; height: 5px; border-radius: 3px;
+  background: var(--bg-subtle); overflow: hidden;
+}
+.rt-progress-fill {
+  height: 100%; border-radius: 3px;
+  background: var(--primary);
+  transition: width 0.2s linear;
+}
+.rt-progress-fill.indet {
+  width: 34%;
+  animation: rt-progress-sweep 1.1s ease-in-out infinite;
+}
+@keyframes rt-progress-sweep {
+  0%   { margin-left: -34%; }
+  100% { margin-left: 100%; }
+}
+
 .rt-output {
   width: 100%;
   max-height: 240px;
@@ -4006,23 +4240,84 @@ html, body, #root {
 .agent-dd-item:hover { background: var(--bg-subtle); }
 .agent-dd-item.on { background: var(--bg-subtle); }
 
-/* Advanced collapsible */
-.adv { border-top: 1px solid var(--border); }
-/* First section (Basic) sits right under the modal header divider — no second
-   line above it. */
-.m-body > .adv:first-child { border-top: none; }
-.adv-toggle {
+/* Form tabs (Basic / Advanced). The bar lives between .m-hdr and .m-body so it
+   stays fixed while the panel scrolls. */
+.m-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  flex-shrink: 0;
+}
+.m-tab {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t3);
+  padding: 10px 12px;
+  /* Reserve the indicator's height on every tab so activating one doesn't
+     shift the row by 2px. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.m-tab:hover { color: var(--t1); }
+.m-tab.active { color: var(--t1); font-weight: 600; border-bottom-color: var(--primary); }
+
+.m-tabpanel { display: flex; flex-direction: column; gap: 18px; padding-bottom: 4px; }
+/* The panel owns spacing via gap; drop the field's own margin so the two don't
+   stack. */
+.m-tabpanel .fg { margin-bottom: 0; }
+
+/* Fields that only make sense together — Workspace path + Isolation, Base
+   image + Memory — boxed under one header so each set reads as a single
+   decision instead of a flat run of controls. */
+.fgroup {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+.fgroup-hdr {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--t3);
+}
+
+/* Command preview — pinned between .m-body and .m-ftr, collapsed to a single
+   toggle row by default so it costs one line when unused. */
+.cmd-strip { border-top: 1px solid var(--border); flex-shrink: 0; padding: 0 20px; }
+.cmd-strip-tog {
   display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
   background: none; border: none; cursor: pointer; line-height: 1;
-  font-size: 12.5px; font-weight: 600; color: var(--t2); padding: 12px 0;
+  font-size: 12px; font-weight: 500; color: var(--t3); padding: 9px 0;
 }
-.adv-toggle svg { flex-shrink: 0; display: block; }
-.adv-chev { color: var(--t3); transition: transform 0.12s; }
-.adv-toggle:hover { color: var(--t1); }
-.adv-body { margin-top: 2px; padding-bottom: 12px; display: flex; flex-direction: column; gap: 16px; }
-/* Section bodies own the spacing via gap; drop the field's own margin so they
-   don't stack (14px + 16px). */
-.adv-body .fg { margin-bottom: 0; }
+.cmd-strip-tog:hover { color: var(--t1); }
+.cmd-strip-tog svg { flex-shrink: 0; display: block; }
+.cmd-strip-chev { transition: transform 0.12s; }
+.cmd-strip .cmd-blk {
+  margin-bottom: 12px;
+  /* A long flag list shouldn't grow the strip without bound — scroll instead. */
+  max-height: 22vh;
+  overflow-y: auto;
+}
+
+/* Validation errors are pinned above the preview strip, outside the scrolling
+   body, so one raised by a field in the inactive tab is still visible. */
+.m-err {
+  flex-shrink: 0;
+  color: var(--destruct);
+  font-size: 12px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+  background: rgba(239,68,68,0.06);
+}
 
 .cmd-blk {
   background: #111;
@@ -4290,6 +4585,30 @@ html, body, #root {
   padding: 48px 20px; text-align: center; color: var(--t3);
 }
 
+/* Which servers a sandbox can reach follows from this field, so the resulting
+   mode is stated as a card with the action that leaves it — as a grey suffix on
+   the label ("dynamic — the agent discovers them itself") it went unread. */
+.mcp-mode {
+  display: flex; align-items: center; gap: 9px; margin-bottom: 9px;
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+.mcp-mode > svg { flex-shrink: 0; align-self: flex-start; margin-top: 2px; color: var(--t3); }
+.mcp-mode.static { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--bg)); }
+.mcp-mode.static > svg { color: var(--primary); }
+.mcp-mode-txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.mcp-mode-txt b { color: var(--t1); font-weight: 600; }
+.mcp-mode-txt span { color: var(--t3); line-height: 1.45; }
+.mcp-mode-act {
+  margin-left: auto; flex-shrink: 0;
+  padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--t2); font-size: 11.5px; cursor: pointer;
+}
+.mcp-mode-act:hover { border-color: var(--border-hi); color: var(--t1); }
+/* Prompts the chips below it, so it sits above them rather than reading as a
+   footnote to the mode card. */
+.mcp-pick-cap { font-size: 11px; color: var(--t3); margin-bottom: 6px; }
+
 /* Static-MCP picker in New Sandbox — toggles, not a dropdown: the set is small
    and which servers are pre-loaded is worth seeing at a glance. */
 .mcp-pick { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -4366,7 +4685,6 @@ html, body, #root {
   padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-subtle); color: var(--t2);
 }
-
 </style>
 <style>
 /* ═══ Capture-specific additions ═══ */
@@ -4534,7 +4852,8 @@ const LUCIDE = {
  "git-compare": "<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M13 6h3a2 2 0 0 1 2 2v7\"/><path d=\"M11 18H8a2 2 0 0 1-2-2V9\"/>",
  "file-code-2": "<path d=\"M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4\"/><path d=\"M14 2v4a2 2 0 0 0 2 2h4\"/><path d=\"m5 12-3 3 3 3\"/><path d=\"m9 18 3-3-3-3\"/>",
  "key-round": "<path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/>",
- "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>"
+ "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>",
+ "cloud": "<path d=\"M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z\"/>"
 };
 function ic(name, size, cls) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${cls ? ` class="${cls}"` : ''}>${LUCIDE[name] || ''}</svg>`;
@@ -4558,8 +4877,9 @@ function agentIconMono(agent, size) {
 const AGENTS = [
   { id: 'claude', label: 'Claude Code' }, { id: 'claude-bedrock', label: 'Claude (Bedrock)' },
   { id: 'codex', label: 'Codex' }, { id: 'copilot', label: 'Copilot' }, { id: 'cursor', label: 'Cursor' },
-  { id: 'docker-agent', label: 'Docker Agent' }, { id: 'droid', label: 'Droid' }, { id: 'gemini', label: 'Gemini' },
-  { id: 'kiro', label: 'Kiro' }, { id: 'opencode', label: 'OpenCode' }, { id: 'shell', label: 'Shell' }
+  { id: 'devin', label: 'Devin' }, { id: 'docker-agent', label: 'Docker Agent' }, { id: 'droid', label: 'Droid' },
+  { id: 'gemini', label: 'Gemini' }, { id: 'kiro', label: 'Kiro' }, { id: 'opencode', label: 'OpenCode' },
+  { id: 'shell', label: 'Shell' }
 ];
 
 /* ── Real captured terminal frames (recorded via node-pty + xterm) ──────── */
@@ -4601,23 +4921,29 @@ const SANDBOXES = [
   { id:'atlas-color-themes', name:'atlas-color-themes', agent:'claude', agentLabel:'Claude Code',
     status:'running', activity:'working', uptime:'2h 14m', changes:4,
     workspace:'/Users/isabella/Code/atlas', branch:'color-themes', remote:'isabellabird/atlas',
-    group:'atlas', color:'#5B8DEF' },
+    group:'atlas', color:'#5B8DEF', location:'local' },
   { id:'import-parser-fix', name:'import-parser-fix', agent:'codex', agentLabel:'Codex',
     status:'running', activity:'waiting', uptime:'41m', changes:2,
     workspace:'/Users/isabella/Code/atlas', branch:'fix/import-parser', remote:'isabellabird/atlas',
-    group:'atlas', color:'#6FA96C' },
+    group:'atlas', color:'#6FA96C', location:'local' },
   { id:'website-refresh', name:'website-refresh', agent:'claude', agentLabel:'Claude Code',
     status:'stopped', activity:null, uptime:null, changes:3,
     workspace:'/Users/isabella/Code/atlas-site', branch:'main', remote:'isabellabird/atlas-site',
-    group:'atlas', color:'#9B8CEF' },
+    group:'atlas', color:'#9B8CEF', location:'local' },
   { id:'docs-site', name:'docs-site', agent:'opencode', agentLabel:'OpenCode',
     status:'running', activity:null, uptime:'3h 02m', changes:4,
     workspace:'/Users/isabella/Code/docs-site', branch:'main', remote:'isabellabird/docs-site',
-    group:null, color:'#D98E63' },
+    group:null, color:'#D98E63', location:'local' },
   { id:'api-lab', name:'api-lab', agent:'shell', agentLabel:'Shell',
     status:'stopped', activity:null, uptime:null, changes:2,
     workspace:'/Users/isabella/Code/api-lab', branch:'main', remote:null,
-    group:null, color:null }
+    group:null, color:null, location:'local' },
+  // The one cloud row — `sbx --cloud ls` merged into the same list. Moved here from
+  // local via `sbx move`, so its workspace snapshot (and git branch) carried over.
+  { id:'nightly-docs-sync', name:'nightly-docs-sync', agent:'claude', agentLabel:'Claude Code',
+    status:'running', activity:'waiting', uptime:'6h 40m', changes:0,
+    workspace:'/workspace/docs-nightly', branch:'main', remote:'isabellabird/docs-nightly',
+    group:null, color:'#4FA0A0', location:'cloud' }
 ];
 const GROUPS = ['atlas'];
 // Agent frames are captured twice — once against a light terminal, once dark —
@@ -4663,6 +4989,11 @@ const FILES = {
     { n:'docs', d:1, open:1, c:[ { n:'capture-mockup.mjs', b:'N', s:'1.1 KB' }, { n:'networking.md', b:'M', s:'9.4 KB' }, { n:'quickstart.md', s:'4.2 KB' } ] },
     { n:'package.json', b:'M', s:'1.1 KB' },
     { n:'README.md', s:'0.8 KB' }
+  ],
+  'nightly-docs-sync': [
+    { n:'scripts', d:1, c:[ { n:'sync-nightly.ts', s:'3.6 KB' } ] },
+    { n:'package.json', s:'1.0 KB' },
+    { n:'README.md', s:'0.5 KB' }
   ]
 };
 const CHANGES = {
@@ -4722,7 +5053,15 @@ const INFO = {
       { dec:'ALLOW', name:'local', scope:'sandbox:docs-site', prov:'local', res:['docs.docker.com'] }
     ] },
   'website-refresh': { memory:'default', kits:[], secrets:[], ports:[], preset:'balanced', rules:[] },
-  'api-lab': { memory:'default', kits:[], secrets:[], ports:[], preset:'balanced', rules:[] }
+  'api-lab': { memory:'default', kits:[], secrets:[], ports:[], preset:'balanced', rules:[] },
+  'nightly-docs-sync': { memory:'default', kits:['github-cli'], authMode:'oauth',
+    secrets:[{ n:'anthropic', src:'oauth' }, { n:'github' }],
+    ports:[{ c:4321, url:'https://nightly-docs-sync-4321.sbx.docker.com' }],
+    preset:'balanced',
+    rules:[
+      { dec:'ALLOW', name:'balanced-ai-apis', scope:'all sandboxes', prov:'default', res:['api.anthropic.com','api.openai.com','generativelanguage.googleapis.com'] },
+      { dec:'ALLOW', name:'kit:github-cli', scope:'sandbox:nightly-docs-sync', prov:'kit', res:['github.com','api.github.com'] }
+    ] }
 };
 
 const KITS = {
@@ -4732,7 +5071,9 @@ const KITS = {
       spec:`name: workspace-context\nkind: mixin\ndescription: Notion + Linear context for planning work\n\nmcp:\n  - notion\n  - linear\n\nenv:\n  - NOTION_API_KEY\n  - LINEAR_API_KEY\n\nnetwork:\n  allow:\n    - api.notion.com\n    - api.linear.app\n\nagent_context: |\n  Read the spec in Notion and the ticket in Linear\n  before you start, then link the PR back to the issue.` },
     { name:'playwright', star:true,
       caps:{ mcp:[], net:{allow:['cdn.playwright.dev','registry.npmjs.org'],deny:[]}, env:['PLAYWRIGHT_BROWSERS_PATH'], cmd:['npm install -g playwright@1.49','npx playwright install chromium --with-deps'], mem:'Playwright is preinstalled. Prefer `npx playwright test` and store traces under ./test-results.' },
-      spec:`name: playwright\nkind: mixin\ndescription: Browser automation for agent test runs\n\nenv:\n  - PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers\n\ninstall:\n  - npm install -g playwright@1.49\n  - npx playwright install chromium --with-deps\n\nnetwork:\n  allow:\n    - cdn.playwright.dev\n    - registry.npmjs.org\n\nagent_context: |\n  Playwright is preinstalled. Prefer \`npx playwright test\`\n  and store traces under ./test-results.` },
+      // args: (sbx >= 0.42) surfaced as inputs in New Sandbox when this kit is selected.
+      args:[{ name:'browser', description:'Which browser to install', default:'chromium', required:false }],
+      spec:`name: playwright\nkind: mixin\ndescription: Browser automation for agent test runs\n\nargs:\n  - name: browser\n    description: Which browser to install\n    default: chromium\n\nenv:\n  - PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers\n\ninstall:\n  - npm install -g playwright@1.49\n  - npx playwright install chromium --with-deps\n\nnetwork:\n  allow:\n    - cdn.playwright.dev\n    - registry.npmjs.org\n\nagent_context: |\n  Playwright is preinstalled. Prefer \`npx playwright test\`\n  and store traces under ./test-results.` },
     { name:'github-cli', star:false,
       caps:{ mcp:[], net:{allow:['github.com','api.github.com'],deny:[]}, env:['GITHUB_TOKEN'], cmd:['type gh >/dev/null || brew install gh'], cred:['github'], mem:null },
       spec:`name: github-cli\nkind: mixin\ndescription: gh CLI wired to a sandbox-scoped token\n\nenv:\n  - GITHUB_TOKEN\n\ninstall:\n  - type gh >/dev/null || brew install gh\n\nnetwork:\n  allow:\n    - github.com\n    - api.github.com` },
@@ -4784,7 +5125,8 @@ const state = {
   creating: false,
   nk: null,                              // new-kit composer form
   ns: { name:'claude-atlas', nameEdited:false, agent:'claude', workspace:'/Users/isabella/Code/atlas',
-        kits:['playwright'], clone:true, basicOpen:true, advOpen:false, cmdOpen:true, agentOpen:false, kitDdOpen:false },
+        kits:['playwright'], clone:true, cloud:false, noWorkspace:false, kitArgValues:{},
+        basicOpen:true, advOpen:false, cmdOpen:true, agentOpen:false, kitDdOpen:false },
   infoAcc: { workspaces:true, kits:false, secrets:false, ports:true, network:true },
   npDraft: null,                         // network 'Add rule' draft {decision}
   mcpInspect: null,                      // server whose `sbx mcp inspect` rows are open
@@ -4873,7 +5215,7 @@ function sbItem(s) {
   return `<div class="sb-item${active ? ' active' : ''}${stopped ? ' is-stopped' : ''}${creating ? ' is-deleting' : ''}" data-sbx="${s.id}">
     ${avatar(s, 30)}
     <div class="sb-item-body">
-      <div class="sb-item-name">${s.name}</div>
+      <div class="sb-item-name">${s.name}${s.location === 'cloud' ? `<span class="sb-item-cloud" title="Cloud sandbox">${ic('cloud', 11)}</span>` : ''}</div>
       <div class="sb-item-sub${s.activity === 'working' || creating ? ' is-working' : ''}">${statusLabel(s)}</div>
     </div>
     ${creating ? '' : `<button class="sb-item-menu" data-act="sbx-menu" data-sbx-menu="${s.id}" title="Actions">${ic('ellipsis-vertical', 15)}</button>`}
@@ -5064,11 +5406,12 @@ function renderInfoDock(s, mode) {
         <div class="info-stat"><span class="is-k">Status</span><span class="is-v" style="text-transform:capitalize">${s.status}${s.status === 'running' && s.uptime ? ` <span class="is-sub">· ${s.uptime}</span>` : ''}</span></div>
         <div class="info-stat"><span class="is-k">Agent</span><span class="is-v is-agent">${agentIcon(s.agent, 14)}${s.agentLabel}</span></div>
         <div class="info-stat"><span class="is-k">Memory</span><span class="is-v">${info.memory === 'default' ? '—' : info.memory} <span class="is-sub">· max 32g</span></span></div>
-        <div class="info-stat"><span class="is-k">Branch</span><span class="is-v">${s.branch} <span class="is-sub">· worktree</span></span></div>
+        ${s.branch ? `<div class="info-stat"><span class="is-k">Branch</span><span class="is-v">${s.branch} <span class="is-sub">· worktree</span></span></div>` : ''}
       </div>`}
-      ${net ? '' : infoAccSection('workspaces', 'Workspaces', null, `
-        <div class="info-row info-row-stack"><span class="ir-label">Primary (read-write)</span><span class="ir-val">${s.workspace}</span></div>
-        <div class="info-row info-row-stack"><span class="ir-label">Read-only</span><span class="ir-val">~/Code/shared-fixtures</span></div>`)}
+      ${net ? '' : infoAccSection('workspaces', 'Workspaces', null, s.workspace
+        ? `<div class="info-row info-row-stack"><span class="ir-label">Primary (read-write)</span><span class="ir-val">${s.workspace}</span></div>
+        <div class="info-row info-row-stack"><span class="ir-label">Read-only</span><span class="ir-val">~/Code/shared-fixtures</span></div>`
+        : '<div class="np-empty">No workspace bind mount.</div>')}
       ${!net && info.kits.length ? infoAccSection('kits', 'Kits', info.kits.length, `
         <div class="info-kits">${info.kits.map((k) => `<span class="info-kit">${ic('layers', 12)}${k}</span>`).join('')}</div>`) : ''}
       ${!net && info.secrets.length ? infoAccSection('secrets', 'Injected secrets', info.secrets.length, `
@@ -5076,7 +5419,10 @@ function renderInfoDock(s, mode) {
         <div class="info-kits">${info.secrets.map((x) => `<span class="info-kit">${ic('lock', 12)}${x.n}${x.src ? `<span style="opacity:0.6"> · ${x.src}</span>` : ''}</span>`).join('')}</div>
         <div class="ss-sub" style="margin-top:6px">Credentials this sandbox receives via the proxy (from <code>sbx inspect</code>). Values are never exposed.</div>`) : ''}
       ${infoAccSection('ports', 'Ports', info.ports.length || null, info.ports.length
-        ? info.ports.map((p) => `<div class="info-row"><span class="ir-label">${p.h} → ${p.c}</span><span class="ir-val">${p.p} · ${p.on ? 'published' : 'inactive'}</span></div>`).join('')
+        ? info.ports.map((p) => s.location === 'cloud'
+            // Cloud has no host mapping — a bare sandbox port, control-plane-assigned URL.
+            ? `<div class="info-row"><span class="ir-label">Sandbox port ${p.c}</span><span class="ir-val">${p.url ? `<a class="ds-remote" style="display:inline">${p.url}</a>` : 'no public URL yet'}</span></div>`
+            : `<div class="info-row"><span class="ir-label">${p.h} → ${p.c}</span><span class="ir-val">${p.p} · ${p.on ? 'published' : 'inactive'}</span></div>`).join('')
         : '<div class="np-empty">No published ports.</div>')}
       ${infoAccSection('network', 'Network policy', info.rules.length || null, `
         <div class="np-preset">
@@ -5155,11 +5501,11 @@ function renderDetail() {
       </div>
     </div>
     <div class="detail-subhdr">
-      <button class="ds-folder-btn" title="Open in Finder — ${s.workspace}">
+      ${s.workspace ? `<button class="ds-folder-btn" title="Open in Finder — ${s.workspace}">
         ${ic('folder', 12, 'ds-folder-ico ds-folder-ico-closed')}${ic('folder-open', 12, 'ds-folder-ico ds-folder-ico-open')}
         <span class="ds-folder">${folder}</span>
-      </button>
-      <span class="ds-branch" title="On branch ${s.branch}">${ic('git-branch', 12)}${s.branch}</span>
+      </button>` : `<span class="ds-folder-btn" style="opacity:0.6" title="No workspace bind mount">${ic('folder', 12, 'ds-folder-ico ds-folder-ico-closed')}<span class="ds-folder">No workspace</span></span>`}
+      ${s.branch ? `<span class="ds-branch" title="On branch ${s.branch}">${ic('git-branch', 12)}${s.branch}</span>` : ''}
       ${running && s.changes ? `<div class="ds-changes-wrap"><button class="ds-changes" data-act="open-changes">${ic('git-commit-horizontal', 12)}${s.changes} changed${ic('chevron-down', 11)}</button></div>` : ''}
       ${s.remote ? `<a class="ds-remote">${ic('github', 12)}${s.remote}</a>` : ''}
     </div>
@@ -5590,16 +5936,20 @@ function renderSettings() {
         <div class="ss-row">
           <div>
             <div class="ss-lbl">Installed version</div>
-            <div class="ss-sub" style="font-family:'SF Mono','Menlo',monospace">v0.39.0${state.rtSource === 'managed' ? '<span style="font-family:inherit"> · managed by den</span>' : ''}</div>
+            <div class="ss-sub" style="font-family:'SF Mono','Menlo',monospace">v0.42.0${state.rtSource === 'managed' ? '<span style="font-family:inherit"> · managed by den</span>' : ''}</div>
           </div>
+          <!-- den 0.11 requires sbx 0.42+, full stop — this row and the pinned
+               version below are den's hard floor, not a "some features hidden"
+               soft gate. A managed install stuck below 0.42.0 now surfaces
+               "Update to 0.42.0 available" here instead of no badge at all. -->
           ${state.rtSource === 'managed'
-            ? '<span class="rt-badge rt-badge-ok">Pinned to 0.39.0</span>'
+            ? '<span class="rt-badge rt-badge-ok">Pinned to 0.42.0</span>'
             : '<span class="rt-badge rt-badge-ok">Up to date</span>'}
         </div>
         <div class="ss-row">
           <div>
             <div class="ss-lbl">Runtime source</div>
-            <div class="ss-sub">den is built for <strong>sbx 0.39.x</strong>. A managed runtime is downloaded from
+            <div class="ss-sub">den requires <strong>sbx 0.42 or newer</strong>. A managed runtime is downloaded from
               Docker's releases and kept inside den — your own install is left untouched.</div>
           </div>
           <div class="seg" role="group">
@@ -5611,7 +5961,7 @@ function renderSettings() {
           ? `<div class="ss-row" style="padding-top:0">
               <div>
                 <div class="ss-lbl">Managed runtime</div>
-                <div class="ss-sub">Running <code>sbx 0.39.0</code> from den's own folder.</div>
+                <div class="ss-sub">Running <code>sbx 0.42.0</code> from den's own folder.</div>
               </div>
               <button class="btn btn-default btn-sm">Reinstall</button>
             </div>`
@@ -5661,11 +6011,13 @@ const KIT_CAPS_DEFS = [
   { key:'mcp', label:'Remote MCPs' },
   { key:'network', label:'Network policy' },
   { key:'env', label:'Environment variables' },
-  { key:'memory', label:'Agent memory & files' }
+  { key:'memory', label:'Agent memory & files' },
+  { key:'args', label:'Arguments' }
 ];
 const AGENT_BASES = {
   claude:   { image:'docker/sandbox-templates:claude-code-docker', entrypoint:'claude --dangerously-skip-permissions' },
   codex:    { image:'docker/sandbox-templates:codex-docker', entrypoint:'codex' },
+  devin:    { image:'docker/sandbox-templates:devin-docker', entrypoint:'devin' },
   gemini:   { image:'docker/sandbox-templates:gemini-docker', entrypoint:'gemini' },
   opencode: { image:'docker/sandbox-templates:opencode-docker', entrypoint:'opencode' },
   shell:    { image:'ubuntu:24.04', entrypoint:'bash' }
@@ -5674,7 +6026,7 @@ function freshKitForm(kind) {
   const base = kind === 'sandbox' ? AGENT_BASES.claude : { image:'', entrypoint:'' };
   return { kind, name:'', displayName:'', description:'', image:base.image, entrypoint:base.entrypoint,
     baseAgent: kind === 'sandbox' ? 'claude' : null, agentOpen:false,
-    caps:[], capMenu:false, mcps:[], customMcps:[], allowed:[''], denied:[], envs:[''],
+    caps:[], capMenu:false, mcps:[], customMcps:[], allowed:[''], denied:[], envs:[''], args:[],
     memory:'', files:[], mcpQuery:'', mcpCat:'All', showInfo:false, done:false };
 }
 function buildKitSpec(f) {
@@ -5705,6 +6057,16 @@ function buildKitSpec(f) {
       L.push('    - command:', '        - "sh"', '        - "-c"',
         `        - "claude mcp add ${m.id} --transport http https://${m.host}/mcp --scope user || true"`,
         '      user: "1000"');
+    });
+  }
+  const args = f.args.filter((a) => a.name.trim());
+  if (args.length) {
+    L.push('args:');
+    args.forEach((a) => {
+      L.push(`  - name: ${a.name.trim()}`);
+      if (a.description.trim()) L.push(`    description: ${q(a.description.trim())}`);
+      if (a.default.trim()) L.push(`    default: ${q(a.default.trim())}`);
+      if (a.required) L.push('    required: true');
     });
   }
   if (f.memory.trim()) { L.push('agentContext: |'); f.memory.trim().split('\n').forEach((l) => L.push(`  ${l}`)); }
@@ -5754,6 +6116,20 @@ function renderKitModal() {
       <div class="cap-sub">Allowed domains</div>${kitListField('allowed', f.allowed, 'api.example.com', 'Add allowed')}
       <div class="cap-sub" style="margin-top:8px">Denied domains</div>${kitListField('denied', f.denied, 'telemetry.example.com', 'Add denied')}`;
     if (key === 'env') return kitListField('envs', f.envs, 'KEY=value', 'Add variable');
+    if (key === 'args') return `
+      ${f.args.map((a, i) => `<div class="kit-list-row" style="align-items:flex-start;flex-direction:column;gap:6px">
+        <div style="display:flex;gap:6px;width:100%;align-items:center">
+          <input class="finput" style="flex:1" value="${esc(a.name)}" placeholder="arg name" data-nk-arg="name" data-nk-idx="${i}" />
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--t3);white-space:nowrap">
+            <input type="checkbox"${a.required ? ' checked' : ''} data-nk-arg-required="${i}" /> Required
+          </label>
+          <button class="btn btn-ghost btn-sm kit-list-rm" data-nk-arg-rm="${i}" title="Remove">${ic('x', 13)}</button>
+        </div>
+        <input class="finput" value="${esc(a.description || '')}" placeholder="description (optional)" data-nk-arg="description" data-nk-idx="${i}" />
+        <input class="finput" value="${esc(a.default || '')}" placeholder="default value (optional)" data-nk-arg="default" data-nk-idx="${i}" />
+      </div>`).join('')}
+      <button class="kit-add-line" data-nk-arg-add>${ic('plus', 12)} Add argument</button>
+      <div class="fhint">Surfaced as inputs in New Sandbox when this kit is selected; passed as <code>--kit-arg name=value</code>.</div>`;
     return `
       <textarea class="finput" style="min-height:64px;resize:vertical;font-family:inherit" placeholder="Notes appended to the agent's memory (CLAUDE.md / AGENTS.md)…" data-nk-memory>${esc(f.memory)}</textarea>
       <div class="cap-sub" style="margin-top:10px">Reference files</div>
@@ -5772,6 +6148,8 @@ function renderKitModal() {
       <div class="ks-mcps">${selMcps.map((m) => `<span class="ks-mcp">${mcpTile(m, 16)}${m.name}</span>`).join('')}${f.customMcps.filter((c) => c.url.trim()).map((c) => `<span class="ks-mcp">${esc(c.name) || 'custom'}</span>`).join('')}</div></div>`);
     if (allowedAll.size || deniedN) rows.push(`<div class="ks-row"><span class="ks-k">Network</span><span class="ks-v">${allowedAll.size} allowed · ${deniedN} denied</span></div>`);
     if (envN) rows.push(`<div class="ks-row"><span class="ks-k">Env vars</span><span class="ks-v">${envN}</span></div>`);
+    const argN = f.args.filter((a) => a.name.trim()).length;
+    if (argN) rows.push(`<div class="ks-row"><span class="ks-k">Arguments</span><span class="ks-v">${argN}</span></div>`);
     if (f.memory.trim() || f.files.length) rows.push(`<div class="ks-row"><span class="ks-k">Memory</span><span class="ks-v">${[f.memory.trim() ? 'notes' : '', f.files.length ? `${f.files.length} file${f.files.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</span></div>`);
     if (rows.length === 1 && f.kind === 'mixin') rows.push('<div class="ks-empty">No capabilities added yet.</div>');
     return `<div class="kit-summary">${rows.join('')}</div>`;
@@ -5835,12 +6213,13 @@ function renderKitModal() {
 }
 
 /* ── New Sandbox modal ──────────────────────────────────────────────────── */
-const CREATE_LOG = (name, kits, clone, workspace) => [
-  `$ sbx create --name ${name}${clone ? ' --clone' : ''}${kits.map((k) => ` --kit ${k}`).join('')} claude ${workspace}`,
+const CREATE_LOG = (name, kits, clone, workspace, cloud, noWorkspace) => [
+  `$ sbx ${cloud ? '--cloud ' : ''}create --name ${name}${!noWorkspace && clone ? ' --clone' : ''}${kits.map((k) => ` --kit ${k}`).join('')} claude${noWorkspace ? '' : ` ${workspace}`}`,
   '',
-  'Pulling image docker/sbx-agent-claude:latest ......... done',
-  `Creating container sbx-${name} ........................ done`,
-  clone ? 'Cloning workspace into isolated sandbox clone ........ done' : 'Mounting workspace ................................... done',
+  `Pulling image docker/sbx-agent-claude:latest ......... done`,
+  cloud ? `Starting sandbox on Docker's hosted infrastructure ... done` : `Creating container sbx-${name} ........................ done`,
+  noWorkspace ? 'No workspace bind mount — nothing to mount ........... skipped'
+    : clone ? 'Cloning workspace into isolated sandbox clone ........ done' : 'Mounting workspace ................................... done',
   ...kits.flatMap((k) => [
     `Applying mixin kit "${k}" ............................. done`
   ]),
@@ -5858,8 +6237,24 @@ function renderModal() {
   if (state.modal === 'new-kit' && state.nk) return renderKitModal();
   if (state.modal !== 'new-sandbox') return '';
   const ns = state.ns;
-  const cmdTokens = ['sbx', 'create', '--name', ns.name, ...(ns.clone ? ['--clone'] : []),
-    ...ns.kits.flatMap((k) => ['--kit', k]), ns.agent, ns.workspace];
+  const effNoWorkspace = ns.noWorkspace || ns.cloud;
+  // Kits currently selected that declare `args:` — grouped by kit name so an
+  // arg's origin is unambiguous when more than one kit declares the same name.
+  const kitsWithArgs = ns.kits
+    .map((n) => KITS.mixin.find((k) => k.name === n))
+    .filter((k) => k && k.args && k.args.length);
+  const argNameCounts = kitsWithArgs.flatMap((k) => k.args).reduce((acc, a) => { acc[a.name] = (acc[a.name] || 0) + 1; return acc; }, {});
+  const kitArgFlags = () => kitsWithArgs.flatMap((k) => k.args.map((a) => {
+    const v = (ns.kitArgValues[k.name] && ns.kitArgValues[k.name][a.name]) || a.default || '';
+    if (!v) return null;
+    const key = argNameCounts[a.name] > 1 ? `${k.name}.${a.name}` : a.name;
+    return `${key}=${v}`;
+  }).filter(Boolean));
+  const cmdTokens = ['sbx', ...(ns.cloud ? ['--cloud'] : []), 'create', '--name', ns.name,
+    ...(!effNoWorkspace && ns.clone ? ['--clone'] : []),
+    ...ns.kits.flatMap((k) => ['--kit', k]),
+    ...kitArgFlags().flatMap((kv) => ['--kit-arg', kv]),
+    ns.agent, ...(effNoWorkspace ? [] : [ns.workspace])];
   const availKits = KITS.mixin.filter((k) => !ns.kits.includes(k.name));
   const body = state.creating
     ? `<div class="cmd-blk create-log create-log-full"><pre class="create-log-pre" id="createLog">Starting…</pre></div>`
@@ -5890,14 +6285,33 @@ function renderModal() {
             </div>` : ''}
           </div>
         </div>
-        <div class="fg">
+        <div class="fgroup">
+          <div class="fgroup-hdr">Location</div>
+          <div class="fg">
+            <div class="src-seg">
+              <button class="src-seg-item${!ns.cloud ? ' active' : ''}" data-act="ns-location" data-ns-location="local">Local</button>
+              <button class="src-seg-item${ns.cloud ? ' active' : ''}" data-act="ns-location" data-ns-location="cloud">Cloud</button>
+            </div>
+            <div class="fhint">${ns.cloud
+              ? `Runs on Docker's hosted infrastructure instead of this machine — needs a Docker Agentic Platform plan. No workspace bind mount; add files afterward with <code>sbx --cloud cp</code>.`
+              : 'Runs in a container on this machine.'}</div>
+          </div>
+        </div>
+        ${!ns.cloud ? `<div class="fg">
+          <div class="tog-row">
+            <button class="s-toggle${ns.noWorkspace ? ' on' : ''}" data-ns-toggle="noWorkspace"></button>
+            No workspace bind mount
+          </div>
+          <div class="fhint">Create a sandbox with no folder mounted. Requires an explicit name below.</div>
+        </div>` : ''}
+        ${!ns.cloud && !ns.noWorkspace ? `<div class="fg">
           <label class="flabel">Workspace path</label>
           <div class="frow-2">
             <input class="finput" id="nsWs" value="${ns.workspace}" placeholder="/Users/you/Code/my-project" />
             <button class="btn btn-default btn-sm">Browse…</button>
           </div>
           <div class="fhint">The directory sbx mounts as the agent's primary workspace.</div>
-        </div>
+        </div>` : ''}
         <div class="fg">
           <label class="flabel">Mixin kits <span class="flabel-hint">layered onto the agent</span></label>
           ${ns.kits.length ? `<div class="kit-sel-list">${ns.kits.map((n) => {
@@ -5917,14 +6331,21 @@ function renderModal() {
             </div>` : ''}
           </div>
         </div>
-        <div class="fg">
+        ${!ns.cloud && !ns.noWorkspace ? `<div class="fg">
           <label class="flabel">Isolation</label>
           <div class="tog-row">
             <button class="s-toggle${ns.clone ? ' on' : ''}" data-act="ns-clone"></button>
             Git clone isolation <code style="font-size:11px;background:var(--bg-subtle);padding:1px 6px;border-radius:4px">--clone</code>
           </div>
           <div class="fhint">Work in a standalone clone; your changes stay in the sandbox until you fetch them, instead of mounting your working tree directly.</div>
-        </div>
+        </div>` : ''}
+        ${kitsWithArgs.length ? `<div class="fg">
+          <label class="flabel">Kit arguments</label>
+          ${kitsWithArgs.map((k) => k.args.map((a) => `<div style="margin-bottom:8px">
+            <label class="flabel">${a.name}${a.required ? '<span title="Required" style="color:var(--destruct)"> *</span>' : ''}${a.description ? `<span class="flabel-hint"> ${a.description}</span>` : ''}</label>
+            <input class="finput" data-ns-kit-arg="${k.name}:${a.name}" value="${(ns.kitArgValues[k.name] && ns.kitArgValues[k.name][a.name]) ?? a.default ?? ''}" placeholder="${a.default || a.name}" />
+          </div>`).join('')).join('')}
+        </div>` : ''}
       </div>` : ''}
     </div>
     <div class="adv">
@@ -6022,6 +6443,7 @@ function openContextMenu(s, x, y) {
       </div>
     </div>
     <div class="ctx-item">Save Snapshot…</div>
+    <div class="ctx-item">Move to ${s.location === 'cloud' ? 'Local' : 'Cloud'}…</div>
     <div class="ctx-item">Logs <span class="ctx-kbd">⌘L</span></div>
     <div class="ctx-sep"></div>
     <div class="ctx-item ctx-has-sub">Terminal theme <span class="ctx-sub-arrow">›</span>
@@ -6194,19 +6616,21 @@ function setStatus(id, status) {
 }
 function startCreation() {
   const ns = state.ns;
+  const effNoWorkspace = ns.noWorkspace || ns.cloud;
   const name = ($('#nsName') && $('#nsName').value.trim()) || ns.name;
-  const workspace = ($('#nsWs') && $('#nsWs').value.trim()) || ns.workspace;
+  const workspace = effNoWorkspace ? '' : (($('#nsWs') && $('#nsWs').value.trim()) || ns.workspace);
   ns.name = name; ns.workspace = workspace;
   state.creating = true;
   const nsb = { id: name, name, agent: ns.agent, agentLabel: (AGENTS.find((a) => a.id === ns.agent) || {}).label || ns.agent,
     status: 'creating', activity: null, uptime: null, changes: 0,
-    workspace, branch: ns.clone ? 'main' : 'main', remote: null, group: null, color: null };
+    workspace, branch: effNoWorkspace ? null : 'main', remote: null, group: null, color: null,
+    location: ns.cloud ? 'cloud' : 'local' };
   SANDBOXES.push(nsb);
   INFO[name] = { memory: 'default', kits: ns.kits.slice(), secrets: [{ n: 'anthropic', src: 'oauth' }], ports: [], preset: 'balanced', rules: [] };
   FILES[name] = FILES['atlas-color-themes'];
   CHANGES[name] = [];
   render();
-  const lines = CREATE_LOG(name, ns.kits, ns.clone, workspace);
+  const lines = CREATE_LOG(name, ns.kits, ns.clone, workspace, ns.cloud, effNoWorkspace);
   let i = 0;
   const t = setInterval(() => {
     const pre = $('#createLog');
@@ -6400,6 +6824,7 @@ document.addEventListener('click', (e) => {
   if ((el = hit('[data-ns-kit-rm]'))) { state.ns.kits = state.ns.kits.filter((x) => x !== el.dataset.nsKitRm); render(); return; }
   if ((el = hit('[data-act="ns-clone"]'))) { state.ns.clone = !state.ns.clone; render(); return; }
   if ((el = hit('[data-ns-toggle]'))) { const k = el.dataset.nsToggle; state.ns[k] = !state.ns[k]; render(); return; }
+  if ((el = hit('[data-act="ns-location"]'))) { state.ns.cloud = el.dataset.nsLocation === 'cloud'; render(); return; }
 
   /* New Kit modal */
   if ((el = hit('[data-act="new-kit"]'))) {
@@ -6456,6 +6881,7 @@ document.addEventListener('click', (e) => {
     if (k === 'network') { state.nk.allowed = ['']; state.nk.denied = []; }
     if (k === 'env') state.nk.envs = [''];
     if (k === 'memory') { state.nk.memory = ''; state.nk.files = []; }
+    if (k === 'args') state.nk.args = [];
     render();
     return;
   }
@@ -6471,6 +6897,9 @@ document.addEventListener('click', (e) => {
   if ((el = hit('[data-nk-list-add]'))) { state.nk[el.dataset.nkListAdd].push(''); render(); return; }
   if ((el = hit('[data-nk-list-rm]'))) { state.nk[el.dataset.nkListRm].splice(+el.dataset.nkIdx, 1); render(); return; }
   if ((el = hit('[data-nk-file-rm]'))) { state.nk.files.splice(+el.dataset.nkFileRm, 1); render(); return; }
+  if ((el = hit('[data-nk-arg-add]'))) { state.nk.args.push({ name:'', description:'', default:'', required:false }); render(); return; }
+  if ((el = hit('[data-nk-arg-rm]'))) { state.nk.args.splice(+el.dataset.nkArgRm, 1); render(); return; }
+  if ((el = hit('[data-nk-arg-required]'))) { const a = state.nk.args[+el.dataset.nkArgRequired]; a.required = !a.required; render(); return; }
   if ((el = hit('[data-nk-attach]'))) {
     const pool = ['runbook.md', 'style-guide.pdf', 'schema.sql', 'api-notes.txt'];
     state.nk.files.push(pool[state.nk.files.length % pool.length]);
@@ -6512,6 +6941,11 @@ document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'nsName') state.ns.name = t.value;
   if (t.id === 'nsWs') state.ns.workspace = t.value;
+  if (t.dataset.nsKitArg) {
+    const [kitName, argName] = t.dataset.nsKitArg.split(':');
+    if (!state.ns.kitArgValues[kitName]) state.ns.kitArgValues[kitName] = {};
+    state.ns.kitArgValues[kitName][argName] = t.value;
+  }
   if (!state.nk) return;
   if (t.id === 'nkName') { state.nk.name = t.value; const b = document.querySelector('[data-act="nk-create"]'); if (b) b.disabled = !t.value.trim(); }
   if (t.id === 'nkDisplay') state.nk.displayName = t.value;
@@ -6520,6 +6954,7 @@ document.addEventListener('input', (e) => {
   if (t.id === 'nkEntry') state.nk.entrypoint = t.value;
   if (t.hasAttribute('data-nk-memory')) state.nk.memory = t.value;
   if (t.hasAttribute('data-nk-list')) state.nk[t.dataset.nkList][+t.dataset.nkIdx] = t.value;
+  if (t.hasAttribute('data-nk-arg')) state.nk.args[+t.dataset.nkIdx][t.dataset.nkArg] = t.value;
   if (t.hasAttribute('data-nk-custom')) state.nk.customMcps[+t.dataset.nkIdx][t.dataset.nkCustom] = t.value;
   if (t.hasAttribute('data-nk-mcp-search')) {
     state.nk.mcpQuery = t.value;
