@@ -16,6 +16,13 @@ function isOlder(a: number[] | null, b: number[] | null): boolean {
   for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0)
   return false
 }
+// True when both are the same major.minor — a same-minor patch is something
+// Settings → Runtime can actually install (see checkManagedPatch in
+// src/main/index.ts); a new minor needs a den release first, so this bar
+// has nothing to offer for one and shouldn't send you to a dead end.
+function sameMinor(a: number[] | null, b: number[] | null): boolean {
+  return !!a && !!b && a[0] === b[0] && a[1] === b[1]
+}
 
 
 export function HomePage() {
@@ -160,7 +167,11 @@ export function HomePage() {
   const showBreakdown = !!storage?.ok && (storage.sandboxes.bytes != null || storage.templates.bytes != null)
 
   const latest = release?.version ?? null
-  const updateAvailable = isOlder(baseSemver(version), baseSemver(latest))
+  // A newer minor isn't something this bar's "Update" button can do anything
+  // about — Settings → Runtime can only install a same-minor patch (den's own
+  // pin has to move first for anything beyond that), so restrict the bar to
+  // the case it can actually resolve.
+  const updateAvailable = isOlder(baseSemver(version), baseSemver(latest)) && sameMinor(baseSemver(version), baseSemver(latest))
   const showUpdateBar = updateAvailable && dismissed !== latest && !outdated
 
   const dismissUpdate = () => {

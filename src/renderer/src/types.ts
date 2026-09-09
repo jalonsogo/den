@@ -463,7 +463,7 @@ declare global {
       sandboxCommit(repoDir: string, message: string, paths?: string[]): Promise<{ ok: boolean; error?: string }>
       gitIgnoreAdd(name: string, repoDir: string, patterns: string[]): Promise<{ ok: boolean; error?: string }>
       writeFile(name: string, path: string, content: string): Promise<void>
-      openPath(path: string): Promise<string>
+      openPath(path: string): Promise<{ ok: boolean; error?: string }>
       openFileWindow(name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null): Promise<void>
       deletePath(name: string, path: string): Promise<void>
       copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
@@ -602,11 +602,17 @@ declare global {
         adopted: string
         installed: string[]
         path: string
+        /** A same-minor patch newer than `pinned`, discovered live (e.g. "0.42.1"
+         * while pinned is "0.42.0"). null when none exists or the check failed —
+         * never blocks or errors the rest of this call. */
+        patchAvailable: string | null
       }>
       runtimeSetSource(source: 'managed' | 'system'): Promise<{
         ok: boolean; error?: string; needsInstall?: boolean; restartNeeded?: boolean
       }>
-      runtimeInstall(): Promise<{ ok: boolean; version?: string; path?: string; error?: string; restartNeeded?: boolean }>
+      /** Installs the baked-in pin by default; pass 'patch' to install the
+       * version `runtimeStatus()` last reported as `patchAvailable`. */
+      runtimeInstall(target?: 'pinned' | 'patch'): Promise<{ ok: boolean; version?: string; path?: string; error?: string; restartNeeded?: boolean }>
       runtimeRevert(): Promise<{ ok: boolean; path?: string; restartNeeded?: boolean }>
       onRuntimeProgress(cb: (p: { phase: string; got: number; total: number }) => void): () => void
       pruneSandboxes(olderThan?: string): Promise<{
