@@ -96,6 +96,17 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
   // Right-click menu: null when closed, else where to anchor it and whether
   // there's a selection to copy. Positioned relative to the container.
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
+  // A link clicked from terminal output that didn't open — an OS-level
+  // warning declined, an unhandled protocol, whatever. Copied to the
+  // clipboard as a fallback so the click isn't a dead end; shown briefly so
+  // the exact URL is visible (auth/PR links are long and easy to mistype by
+  // hand from a screenshot).
+  const [linkFailed, setLinkFailed] = useState<{ uri: string; error: string } | null>(null)
+  useEffect(() => {
+    if (!linkFailed) return
+    const t = setTimeout(() => setLinkFailed(null), 8000)
+    return () => clearTimeout(t)
+  }, [linkFailed])
 
   const copySelection = useCallback(() => {
     const sel = termRef.current?.getSelection()
@@ -133,7 +144,30 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
 
   useEffect(() => {
     if (!ref.current) return
+    // Shared by both ways xterm can present a clickable link: WebLinksAddon's
+    // own plain-text URL regex, and OSC 8 hyperlinks (`\x1b]8;;URI\x1b\text…`,
+    // emitted by many modern CLIs) which xterm's *core* handles itself via a
+    // built-in link provider — entirely separate from WebLinksAddon, and with
+    // no route through den's openPath unless a `linkHandler` option says so
+    // (see the Terminal constructor below). Route both the same way: open via
+    // the host (scheme-checked in main), and fall back to the clipboard with
+    // a visible toast if that fails — a silent dead click otherwise.
+    const openLink = (uri: string) => {
+      window.den?.openPath(uri).then((r) => {
+        if (r?.ok) return
+        navigator.clipboard?.writeText(uri).catch(() => {})
+        setLinkFailed({ uri, error: r?.error || 'Could not open the link.' })
+      }).catch(() => {
+        navigator.clipboard?.writeText(uri).catch(() => {})
+        setLinkFailed({ uri, error: 'Could not open the link.' })
+      })
+    }
     const term = new Terminal({
+      // Without this, an OSC 8 hyperlink falls through to xterm's own default
+      // handler: a plain `confirm()` dialog, then `window.open()` — which den's
+      // main-process setWindowOpenHandler denies (every window.open() is routed
+      // to openExternalSafe instead), so the click did nothing after "OK".
+      linkHandler: { activate: (_event, uri) => openLink(uri) },
       cursorBlink: true,
       fontFamily: 'Menlo, Monaco, "SF Mono", "DejaVu Sans Mono", monospace',
       fontSize: 12,
@@ -166,11 +200,9 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     termRef.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
-    // Make URLs printed by the agent (e.g. PR/auth links) clickable. xterm
-    // doesn't linkify by default, and the agent runs inside a headless sandbox
-    // that has no browser — so route the click to the host via openPath, which
-    // opens http(s) URLs in the Mac's default browser (scheme-checked in main).
-    term.loadAddon(new WebLinksAddon((_event, uri) => { window.den?.openPath(uri) }))
+    // Make bare URLs printed by the agent (e.g. PR/auth links with no OSC 8
+    // markup) clickable too — xterm doesn't linkify plain text by default.
+    term.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
     term.open(ref.current)
     fitRef.current = fit
 
@@ -500,6 +532,13 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
       {dragging && (
         <div className="term-drop">
           <span>Drop files to attach to the agent</span>
+        </div>
+      )}
+      {linkFailed && (
+        <div className="term-link-toast">
+          <span>Couldn't open the link — copied to clipboard instead.</span>
+          <code>{linkFailed.uri}</code>
+          <button onClick={() => setLinkFailed(null)}>Dismiss</button>
         </div>
       )}
       {menu && (
