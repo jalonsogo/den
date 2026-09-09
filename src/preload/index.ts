@@ -189,7 +189,7 @@ const api = {
   pickSbxBinary: ()                         => ipcRenderer.invoke('den:pick-sbx-binary'),
   runtimeStatus:  ()                        => ipcRenderer.invoke('den:runtime-status'),
   runtimeSetSource: (source: 'managed' | 'system') => ipcRenderer.invoke('den:runtime-source', source),
-  runtimeInstall: ()                        => ipcRenderer.invoke('den:runtime-install'),
+  runtimeInstall: (target?: 'pinned' | 'patch') => ipcRenderer.invoke('den:runtime-install', target),
   runtimeRevert:  ()                        => ipcRenderer.invoke('den:runtime-revert'),
   onRuntimeProgress: (cb: (p: { phase: string; got: number; total: number }) => void) => {
     const handler = (_: Electron.IpcRendererEvent, p: { phase: string; got: number; total: number }) => cb(p)
