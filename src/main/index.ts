@@ -581,19 +581,27 @@ function ptyRun(
 // never reach shell.openExternal with a file://, custom-scheme, or other URL
 // that could trigger an unexpected OS handler.
 const SAFE_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
-function openExternalSafe(url: string): void {
+// Reports back rather than firing-and-forgetting: an OS-level link warning
+// (e.g. macOS's own "this link could potentially be dangerous" prompt, which
+// a long auth URL wrapped across several terminal rows can trigger) can end
+// with nothing opening at all, and a silent console.error leaves the user
+// looking at a link that just doesn't do anything, with no way to recover it.
+async function openExternalSafe(url: string): Promise<{ ok: boolean; error?: string }> {
   let parsed: URL
   try {
     parsed = new URL(url)
   } catch {
-    console.warn('openExternal: not a parseable URL, dropped:', url)
-    return
+    return { ok: false, error: 'Not a valid URL.' }
   }
   if (!SAFE_EXTERNAL_SCHEMES.has(parsed.protocol)) {
-    console.warn('blocked openExternal for disallowed scheme:', url)
-    return
+    return { ok: false, error: `Blocked — "${parsed.protocol}" links aren't opened automatically.` }
   }
-  shell.openExternal(url).catch((e) => console.error('openExternal failed for', url, e))
+  try {
+    await shell.openExternal(url)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // Kit artifacts live in the app's own data folder (not the user's home). On
@@ -1244,7 +1252,7 @@ function anthropicOAuth(): Promise<{ ok: true }> {
         code_challenge_method: 'S256',
         state
       }).toString()
-      openExternalSafe(authUrl)
+      void openExternalSafe(authUrl)
     })
 
     setTimeout(() => {
@@ -2603,7 +2611,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => { mainWindow = null })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    openExternalSafe(url)
+    void openExternalSafe(url)
     return { action: 'deny' }
   })
 
@@ -5111,11 +5119,15 @@ function setupIPC(): void {
   })
 
   // Open a host path (the workspace is bind-mounted) in the OS default app,
-  // or an http(s) URL in the default browser.
-  ipcMain.handle('den:open-path', (_, path: string) => {
+  // or an http(s) URL in the default browser. Reports success/failure back —
+  // a link clicked from terminal output (an agent's own auth/PR link) that
+  // silently fails to open (an OS-level warning declined, an unhandled
+  // protocol, …) needs a way for the caller to react, not just a console log.
+  ipcMain.handle('den:open-path', async (_, path: string) => {
     if (/^https?:\/\//i.test(path)) return openExternalSafe(path)
     const expanded = path.replace(/^~/, app.getPath('home'))
-    return shell.openPath(expanded)
+    const error = await shell.openPath(expanded) // '' on success, else a message
+    return error ? { ok: false as const, error } : { ok: true as const }
   })
 
   // Debug traces for agent API failures — where the file is, how much is in it,

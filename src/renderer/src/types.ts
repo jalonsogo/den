@@ -463,7 +463,7 @@ declare global {
       sandboxCommit(repoDir: string, message: string, paths?: string[]): Promise<{ ok: boolean; error?: string }>
       gitIgnoreAdd(name: string, repoDir: string, patterns: string[]): Promise<{ ok: boolean; error?: string }>
       writeFile(name: string, path: string, content: string): Promise<void>
-      openPath(path: string): Promise<string>
+      openPath(path: string): Promise<{ ok: boolean; error?: string }>
       openFileWindow(name: string, path: string, fileName: string, diff?: boolean, reviewBranch?: string | null): Promise<void>
       deletePath(name: string, path: string): Promise<void>
       copyInto(name: string, destDir: string, files: { name: string; bytes: Uint8Array }[]): Promise<{ name: string; ok: boolean; error?: string }[]>
