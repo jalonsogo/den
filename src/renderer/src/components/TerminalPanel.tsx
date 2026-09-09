@@ -341,7 +341,20 @@ function XTerm({ sandboxId, visible, theme, subscribe, onInput, onResize, onStar
     // listeners then drive the rest of the drag, so click-count gestures
     // (double = word, triple = line) keep working via `detail`. Modified clicks
     // are left alone, so Cmd+click still reaches the TUI.
-    const forceSelectKey = /Mac/i.test(navigator.userAgent) ? 'altKey' : 'shiftKey'
+    //
+    // Which key counts as "force select" is xterm's own call (SelectionService.
+    // shouldForceSelection), and it decides Mac-or-not via `navigator.platform`
+    // (xterm's internal Browser.isMac: platform is one of Macintosh/MacIntel/
+    // MacPPC/Mac68K) — NOT `navigator.userAgent`. The two can disagree (platform
+    // detection is the one being deprecated/frozen across browsers), and if they
+    // do, this dispatches the wrong modifier: shouldForceSelection then returns
+    // false, handleMouseDown returns before ever starting a selection, and a
+    // drag falls all the way through to whatever the TUI paints on its own —
+    // which is exactly "the highlight disappears the moment you let go," since
+    // that highlight was never a real xterm selection to begin with. Match
+    // xterm's own check exactly rather than assume the two agree.
+    const isMac = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'].includes(navigator.platform)
+    const forceSelectKey = isMac ? 'altKey' : 'shiftKey'
     let synthesizing = false
     const onMouseDownCapture = (e: MouseEvent) => {
       if (synthesizing || e.button !== 0) return
