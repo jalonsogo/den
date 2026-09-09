@@ -39,18 +39,36 @@ interface XTermProps {
 // re-enable (would need per-visibility clearTextureAtlas/refresh handling first).
 const ENABLE_WEBGL = false
 
-// Fit the grid to its box, then hand a row back if what got rendered still
-// overflows it.
+// Fit the grid to its box, then hand back however many rows/columns it takes
+// for what actually got rendered to stop overflowing it.
 //
-// xterm derives a row's height from devicePixelRatio — ceil(charHeight × dpr)
-// device px, divided back down — so at a fractional dpr (exactly what a UI
-// density other than 100% produces: zoom 1.1 → dpr 2.2 on a Retina display) a
-// row comes out a hair taller than the whole-pixel cell height the fit was
-// computed from. Over ~50 rows that hair adds up to several pixels, and since
-// xterm sizes .xterm-screen itself (rows × cell height) while the container
-// clips, the surplus eats the bottom of the last row — the agent's status line
-// arrives sliced in half. Measuring what was actually laid out catches that
-// (and any other rounding mismatch) instead of trusting the arithmetic.
+// Two independent sources of overflow land here, one per axis:
+//
+// Rows: xterm derives a row's height from devicePixelRatio — ceil(charHeight ×
+// dpr) device px, divided back down — so at a fractional dpr (exactly what a
+// UI density other than 100% produces: zoom 1.1 → dpr 2.2 on a Retina display)
+// a row comes out a hair taller than the whole-pixel cell height the fit was
+// computed from. Over ~50 rows that hair adds up to several pixels — usually
+// under one more row's worth.
+//
+// Columns: FitAddon reads the *container's* box size from `host` (the div
+// `ref` that `term.open()` was given — see the padding comment where it's
+// rendered) but reads *padding* from `term.element`, the child div xterm
+// itself creates inside that container — which carries none, since the
+// padding lives on `host` instead. So `host`'s padding is invisible to
+// FitAddon's own arithmetic: it fits columns to the full padded box, then
+// xterm lays out that many columns starting *inside* the padding inset,
+// overrunning the box on the trailing edge by roughly the padding width —
+// several columns' worth, not a rounding hair, so this can't be handled by
+// trimming one row/column at a time the way the DPR case can.
+//
+// Either way, xterm sizes .xterm-screen itself (rows × cell height, cols ×
+// cell width) while the container clips, so the surplus eats the bottom row
+// or the trailing edge of every row — a status line sliced in half, or its
+// tail cut off mid-word. Comparing edges (not raw width/height) is what
+// catches the column case: .xterm-screen starts inset by `host`'s left
+// padding, so its own width can read smaller than `host`'s and still end
+// past `host`'s right edge — a plain width comparison misses that entirely.
 function fitToBox(term: Terminal, fit: FitAddon, host: HTMLElement | null): void {
   // A resize reflows the buffer and can leave the viewport parked somewhere in
   // the scrollback rather than on the newest line. Only correct that when we
@@ -63,12 +81,25 @@ function fitToBox(term: Terminal, fit: FitAddon, host: HTMLElement | null): void
     if (!host || term.rows <= 1) return
     const screen = term.element?.querySelector('.xterm-screen') as HTMLElement | null
     if (!screen) return
-    // Computed height is the content box — the same measurement FitAddon makes.
-    const available = parseFloat(window.getComputedStyle(host).height)
-    const rendered = screen.getBoundingClientRect().height
-    // A pixel of slack: sub-pixel rounding is unavoidable and invisible, and
-    // trimming on it would cost a row for nothing.
-    if (isFinite(available) && rendered > available + 1) term.resize(term.cols, term.rows - 1)
+    const hostRect = host.getBoundingClientRect()
+    const rendered = screen.getBoundingClientRect()
+    // Not laid out yet (e.g. a just-mounted, still-hidden tab) — nothing to
+    // measure, and dividing by a zero dimension below would produce garbage.
+    if (rendered.width <= 0 || rendered.height <= 0) return
+    const overflowRight = rendered.right - hostRect.right
+    const overflowBottom = rendered.bottom - hostRect.bottom
+    // A pixel of slack on each axis: sub-pixel rounding is unavoidable and
+    // invisible, and trimming on it would cost a row/column for nothing.
+    // Beyond that, shave exactly enough — derived from the cell size actually
+    // rendered, not trusted from FitAddon's arithmetic (the mismatch above is
+    // exactly why that arithmetic can't be trusted on the column axis).
+    let cols = term.cols
+    let rows = term.rows
+    if (overflowBottom > 1) rows -= Math.max(1, Math.ceil(overflowBottom / (rendered.height / term.rows)))
+    if (overflowRight > 1) cols -= Math.max(1, Math.ceil(overflowRight / (rendered.width / term.cols)))
+    rows = Math.max(1, rows)
+    cols = Math.max(2, cols)
+    if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows)
   } finally {
     if (pinned) term.scrollToBottom()
   }
