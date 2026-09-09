@@ -457,10 +457,14 @@ export function SbxRuntimePanel({
 
   // Installing adopts the runtime as a side effect, so there's no separate
   // "switch" step to forget. Output streams on the existing runtime channel.
-  const installManaged = async () => {
+  // `target: 'patch'` installs the same-minor patch `rt.patchAvailable` named
+  // (e.g. 0.42.1) instead of the baked-in pin — an explicit, separate action
+  // per docs/managed-runtime-plan.md: den never drifts off the tested pin on
+  // its own.
+  const installManaged = async (target?: 'pinned' | 'patch') => {
     if (rtBusy) return
     setRtBusy(true); setRtMsg(null); setRtProg(null); setRtPending('managed')
-    const r = await window.den?.runtimeInstall()
+    const r = await window.den?.runtimeInstall(target)
       .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setRtBusy(false); setRtPending(null); setRtProg(null)
     setRtMsg(r?.ok
@@ -748,8 +752,27 @@ export function SbxRuntimePanel({
                   : <>Not downloaded yet — about 127 MB, roughly 330 MB once unpacked.</>}
               </div>
             </div>
-            <button className="btn btn-default btn-sm" disabled={rtBusy} onClick={() => void installManaged()}>
+            <button className="btn btn-default btn-sm" disabled={rtBusy} onClick={() => void installManaged('pinned')}>
               {rtBusy ? 'Working…' : rt?.adopted === rt?.pinned ? 'Reinstall' : `Install ${rt?.pinned ?? ''}`}
+            </button>
+          </div>
+        )}
+
+        {/* A same-minor patch (e.g. 0.42.1 while den pins 0.42.0) is offered but
+            never applied automatically — den is tested against the pin, and
+            crossing even a patch is the user's call. Hidden once it's the
+            version actually running. */}
+        {((rtPending ?? rt?.source) === 'managed') && rt?.patchAvailable && rt.adopted !== rt.patchAvailable && (
+          <div className="ss-row" style={{ paddingTop: 0 }}>
+            <div>
+              <div className="ss-lbl">Patch available</div>
+              <div className="ss-sub">
+                sbx {rt.patchAvailable} is out in the same {rt.minor}.x line den is tested against
+                ({rt.pinned}). Installing it is optional.
+              </div>
+            </div>
+            <button className="btn btn-ghost btn-sm" disabled={rtBusy} onClick={() => void installManaged('patch')}>
+              {rtBusy ? 'Working…' : `Install ${rt.patchAvailable}`}
             </button>
           </div>
         )}

@@ -2737,6 +2737,51 @@ export const PINNED_SBX = {
   sha256: '1780e195ef7bb3cfaad31773f35933b317c9034fd46ae2fe5442f1117e9cc842'
 }
 
+// A same-minor patch (0.42.1 while the pin is 0.42.0), discovered live —
+// never baked into the build the way PINNED_SBX is. Per
+// docs/managed-runtime-plan.md: "Pinned exact version, patch updates offered
+// but never automatic" — den always tests against PINNED_SBX, a patch is
+// surfaced as an explicit opt-in, and its digest can't be a build-time
+// constant because the patch didn't exist at build time. GitHub computes a
+// `sha256:<hex>` digest for every release asset and returns it from the same
+// API call that lists releases, over TLS — that's the verification source,
+// not a checksums file (sbx-releases doesn't publish one).
+//
+// Cached per-process by the last `den:runtime-status` call and read back by
+// `den:runtime-install`, so what the UI offered and what gets installed can
+// never disagree (and installing a patch never triggers a second lookup that
+// could race with a newer release landing in between).
+let managedPatch: { version: string; sha256: string } | null = null
+
+async function checkManagedPatch(): Promise<{ version: string; sha256: string } | null> {
+  try {
+    const res = await fetch('https://api.github.com/repos/docker/sbx-releases/releases?per_page=20', {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'den' }
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as Array<Record<string, unknown>>
+    let best: { version: string; sha256: string } | null = null
+    for (const r of data) {
+      if (r.prerelease || r.draft) continue
+      const m = /^v?(\d+\.\d+\.\d+)/.exec((r.tag_name as string) ?? '')
+      if (!m) continue
+      const version = m[1]
+      // Same minor only — crossing a minor is a den release, not a patch offer.
+      if (!version.startsWith(`${PINNED_SBX.minor}.`)) continue
+      if (!semverLt(PINNED_SBX.version, version)) continue        // not newer than the pin
+      if (best && !semverLt(best.version, version)) continue      // not newer than the best found so far
+      const asset = ((r.assets as Array<Record<string, unknown>>) ?? [])
+        .find((a) => a.name === PINNED_SBX.asset)
+      const digest = (asset?.digest as string | undefined) ?? ''
+      if (!digest.startsWith('sha256:')) continue                 // not backfilled yet — skip, don't guess
+      best = { version, sha256: digest.slice('sha256:'.length) }
+    }
+    return best
+  } catch {
+    return null
+  }
+}
+
 function runtimeRoot(): string { return join(app.getPath('userData'), 'runtime') }
 function runtimeDir(v: string): string { return join(runtimeRoot(), `sbx-${v}`) }
 // The tarball is a tree (bin/ + libexec/ with the VM kernel and rootfs) and the
@@ -3720,6 +3765,7 @@ function setupIPC(): void {
     const support = managedRuntimeSupport()
     const source = ((store.get('runtimeSource') as string | undefined) ?? 'system') as 'managed' | 'system'
     const adopted = (store.get('managedVersion') as string | undefined) ?? ''
+    managedPatch = support.ok ? await checkManagedPatch() : null
     return {
       source,
       supported: support.ok,
@@ -3728,7 +3774,8 @@ function setupIPC(): void {
       minor: PINNED_SBX.minor,
       adopted: adopted && isFile(runtimeBin(adopted)) ? adopted : '',
       installed: installedRuntimes(),
-      path: getSbxPath()
+      path: getSbxPath(),
+      patchAvailable: managedPatch?.version ?? null
     }
   })
 
@@ -3747,12 +3794,17 @@ function setupIPC(): void {
     return { ok: true as const, restartNeeded: true }
   })
 
-  ipcMain.handle('den:runtime-install', async (event) => {
+  ipcMain.handle('den:runtime-install', async (event, target?: 'pinned' | 'patch') => {
     const support = managedRuntimeSupport()
     if (!support.ok) return { ok: false as const, error: support.reason }
 
     const fs = require('fs')
-    const { version, asset, sha256 } = PINNED_SBX
+    // A patch install uses the version+digest the last `den:runtime-status`
+    // call discovered live (see checkManagedPatch) — falls back to the pin if
+    // none was found, so an install can never come back empty-handed.
+    const { version, asset, sha256 } = target === 'patch' && managedPatch
+      ? { version: managedPatch.version, asset: PINNED_SBX.asset, sha256: managedPatch.sha256 }
+      : PINNED_SBX
     // Its own channel, deliberately: den:runtime-output is the package
     // manager's log box, and a download belongs in a progress bar, not a
     // terminal dump of percentages.
